@@ -1,23 +1,22 @@
-import type { Identifier } from "typescript"
 import type { ObjectInfo } from "../types/objects"
 import type { QueryService } from "../types/QueryService"
-import type { SQL } from "../types/SQL"
+import type { Identifier, SQL } from "../types/SQL"
 import type { ExecuteResult, Executor } from "./Executor"
 
-export type Feature<T, Arg> = {
+export type Feature<T> = {
   // TODO: more stuff for mcp?
-  load(executor: Executor<Arg>): Promise<T>
+  load(executor: Executor): Promise<T>
 }
 
-export type Adapter<Config = {}, Arg = {}, F extends Record<string, Feature<unknown, Arg>> = {}> = {
+export type Adapter<Config = {}, Arg = {}, F extends Record<string, Feature<unknown>> = {}> = {
   protocol: string
-  connect(config: Config): Promise<Executor<Arg>>
+  connect(config: Config): Promise<Executor>
   describeConfig(config: Config): string
-  fetchObjects(db: QueryService<Config, Arg>): Promise<ObjectInfo[]>
-  renderSQL(sql: SQL<any, Arg>): { source: string; args: Arg[] }
+  fetchObjects(db: QueryService<Config>): Promise<ObjectInfo[]>
+  renderSQL(sql: SQL<any>): { source: string; args: Arg[] }
   sample?: {
-    canSample(ident: Identifier, db: QueryService<Config, Arg>): Promise<boolean>
-    sample<Row>(ident: Identifier, db: QueryService<Config, Arg>): Promise<ExecuteResult<Row, Arg>>
+    canSample(ident: Identifier, db: QueryService<Config>): Promise<boolean>
+    sample<Row>(ident: Identifier, db: QueryService<Config>): Promise<ExecuteResult<Row>>
   }
   features: F
 }

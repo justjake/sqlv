@@ -8,11 +8,11 @@ import { Result } from "./types/Result"
 import { RowHandle, type RowRef } from "./types/RowStore"
 import type { Paginated, SQL } from "./types/SQL"
 
-export class QueryServiceImpl<Config, Args> implements QueryService<Config, Args> {
+export class QueryServiceImpl<Config> implements QueryService<Config> {
   constructor(
     public readonly session: SessionLogEntry,
     public readonly connection: Connection<Config>,
-    private readonly executor: Executor<Args>,
+    private readonly executor: Executor,
     private readonly logger: LogStore,
   ) {}
 
@@ -24,7 +24,7 @@ export class QueryServiceImpl<Config, Args> implements QueryService<Config, Args
     return this.#abortController
   }
 
-  async query<Row>(sql: SQL<Row, Args>, flow?: RowRef<FlowEntry> & { abortSignal: AbortSignal }): Promise<Row[]> {
+  async query<Row>(sql: SQL<Row>, flow?: RowRef<FlowEntry> & { abortSignal: AbortSignal }): Promise<Row[]> {
     const abortSignal = flow?.abortSignal ?? this.abortController.signal
     abortSignal.throwIfAborted()
 
@@ -87,7 +87,7 @@ export class QueryServiceImpl<Config, Args> implements QueryService<Config, Args
   }
 
   async *iterate<Params extends { limit: number; cursor: object }, Row>(
-    paginated: Paginated<Params, Row, Args>,
+    paginated: Paginated<Params, Row>,
     params: Params,
   ): AsyncGenerator<Row[], Params> {
     const abortSignal = this.abortController.signal

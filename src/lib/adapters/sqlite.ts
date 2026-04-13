@@ -83,8 +83,7 @@ function makeTable(name: string, ctx: SqliteNamespace): TableInfo {
 
 export const IterateSqliteSchema = new Paginated<
   { schemaTable?: Identifier; limit: number; cursor: { type: SqliteObjectType | ""; name: string } },
-  SqliteSchemaRow,
-  SqliteArg
+  SqliteSchemaRow
 >(
   (params) => sql<SqliteSchemaRow, SqliteArg>`
     SELECT * FROM ${params.schemaTable ?? sql`sqlite_schema`}
@@ -140,7 +139,7 @@ export function parsePragmaDatabaseListRow(row: PragmaDatabaseListRow): Database
   }
 }
 
-export type SqliteSQL<Row> = SQL<Row, SqliteArg>
+export type SqliteSQL<Row> = SQL<Row>
 export function sqlite<Row>(strings: TemplateStringsArray, ...values: SQLValue<SqliteArg>[]): SqliteSQL<Row> {
   return sql<Row, SqliteArg>(strings, ...values)
 }

@@ -15,7 +15,7 @@ export type BaseRow = {
 export type RowRef<T extends BaseRow> = Pick<T, "id" | "type">
 
 export type RowStore<Row extends BaseRow> = {
-  query<T extends Row>(q: (table: Identifier) => SQL<T, any>): Promise<T[]>
+  query<T extends Row>(q: (table: Identifier) => SQL<T>): Promise<T[]>
   get<T extends Row>(ref: RowRef<T>): Promise<T | undefined>
   insert<T extends Row>(row: T): Promise<T>
   upsert<T extends Row>(row: T): Promise<T>
@@ -51,7 +51,7 @@ export class RowHandle<T extends BaseRow> {
 }
 
 export type RowGet<T extends BaseRow> = { type: "get"; ref: RowRef<T> }
-export type RowQuery<T extends BaseRow> = { type: "query"; q: (table: Identifier) => SQL<T, any> }
+export type RowQuery<T extends BaseRow> = { type: "query"; q: (table: Identifier) => SQL<T> }
 export type RowInsert<T extends BaseRow> = { type: "insert"; row: T }
 export type RowUpsert<T extends BaseRow> = { type: "upsert"; row: T }
 export type RowUpdate<T extends BaseRow> = { type: "update"; ref: RowRef<T>; patch: Partial<T> }

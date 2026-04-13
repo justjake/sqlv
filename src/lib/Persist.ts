@@ -1,6 +1,5 @@
 import * as os from "node:os"
 import * as path from "node:path"
-import type { SqliteArg } from "./adapters/sqlite"
 import type { TursoConfig } from "./adapters/TursoAdapter"
 import type { ProtocolConfig } from "./interface/Adapter"
 import { createRowStoreTableSql, createSqliteRowStore } from "./sqliteRowStore"
@@ -77,10 +76,10 @@ export class Persist {
     const key = await getOrCreateLocalEncryptionKey(secrets)
     const config: ProtocolConfig<"turso"> = {
       path,
-      // encryption: {
-      //   cipher: "aegis256",
-      //   hexkey: key,
-      // },
+      encryption: {
+        cipher: "aegis256",
+        hexkey: key,
+      },
     }
 
     return {
@@ -94,7 +93,7 @@ export class Persist {
     }
   }
 
-  constructor(public readonly db: QueryService<{}, SqliteArg>) {
+  constructor(public readonly db: QueryService<{}>) {
     this.connections = createSqliteRowStore(this.db, CONNECTION_TABLE)
     this.log = createSqliteRowStore(this.db, LOG_TABLE)
   }

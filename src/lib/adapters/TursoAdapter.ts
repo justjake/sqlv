@@ -38,7 +38,7 @@ export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatur
 
   features = {}
 
-  async fetchObjects(db: QueryService<TursoConfig, SqliteArg>): Promise<ObjectInfo[]> {
+  async fetchObjects(db: QueryService<TursoConfig>): Promise<ObjectInfo[]> {
     const databaseList = await db.query(PragmaDatabaseList)
     const databaseInfos = databaseList.map(parsePragmaDatabaseListRow)
     const result: ObjectInfo[] = [...databaseInfos]
@@ -63,18 +63,18 @@ export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatur
     return new TursoExecutor(this, db)
   }
 
-  renderSQL(sql: SQL<any, SqliteArg>): { source: string; args: SqliteArg[] } {
-    return { source: sql.toSource(), args: sql.getArgs() }
+  renderSQL(sql: SQL<any>): { source: string; args: SqliteArg[] } {
+    return { source: sql.toSource(), args: sql.getArgs() as SqliteArg[] }
   }
 }
 
-class TursoExecutor implements Executor<SqliteArg> {
+class TursoExecutor implements Executor {
   constructor(
     public readonly adapter: TursoAdapter,
     public readonly conn: turso.Database,
   ) {}
 
-  async execute<Row>(req: ExecuteRequest<Row, SqliteArg>): Promise<ExecuteSuccess<Row>> {
+  async execute<Row>(req: ExecuteRequest<Row>): Promise<ExecuteSuccess<Row>> {
     const { source, args } = this.adapter.renderSQL(req.sql)
     using _ = aborter(req.abortSignal, () => this.conn.interrupt())
     const rows: Row[] = await this.conn.prepare(source).bind(args).all()

@@ -1,8 +1,15 @@
-export class Argument<T> {
+export class Argument<T = unknown> {
   constructor(
     public readonly value: T,
     public readonly name?: string,
   ) {}
+
+  toString(): string {
+    if (this.name) {
+      return `Argument(${this.name} => ${this.value})`
+    }
+    return `Argument(${this.value})`
+  }
 }
 
 export class Identifier {
@@ -12,6 +19,18 @@ export class Identifier {
     public readonly database?: string,
     public readonly connection?: string,
   ) {}
+
+  toString(): string {
+    const parts = [
+      this.connection && `@${this.connection}`,
+      this.database && `db(${this.database})`,
+      this.schema && `schema(${this.schema})`,
+      this.name,
+    ]
+      .filter(Boolean)
+      .join(".")
+    return `Identifier(${parts})`
+  }
 }
 
 export type Namespace = {
@@ -20,30 +39,30 @@ export type Namespace = {
   schema?: string
 }
 
-export type SQLFragment<Arg> = string | Argument<Arg> | Identifier | SQL<unknown, Arg>
-export type SQLValue<Arg> = SQL<unknown, Arg> | Argument<Arg> | Identifier | Arg
+export type SQLFragment = string | Argument | Identifier | SQL<unknown>
+export type SQLValue<Arg = unknown> = SQL<unknown> | Argument<Arg> | Identifier | Arg
 
 type RenderState = {
   nextArgIndex: number
 }
 
-type RenderContext<Arg> = {
-  renderArgument: (argument: Argument<Arg>, index: number) => string
+type RenderContext = {
+  renderArgument: (argument: Argument, index: number) => string
   renderIdentifier: (identifier: Identifier) => string
   renderString?: (fragment: string) => string
 }
 
-export type SQLSourceOptions<Arg> = {
-  renderArg?: (index: number, arg: Arg) => string
+export type SQLSourceOptions = {
+  renderArg?: (index: number, arg: unknown) => string
   renderIdentifier?: (identifier: Identifier) => string
 }
 
-export class SQL<Row = unknown, Arg = unknown> {
+export class SQL<Row = unknown> {
   queryName?: string
   queryNamespace?: Namespace
   declare readonly __row?: Row
 
-  constructor(public readonly fragments: SQLFragment<Arg>[] = []) {}
+  constructor(public readonly fragments: SQLFragment[] = []) {}
 
   toString(): string {
     return `sql\`${fragmentsToString(this.fragments)}\``
@@ -52,32 +71,34 @@ export class SQL<Row = unknown, Arg = unknown> {
   toSource({
     renderArg = defaultRenderArg,
     renderIdentifier = defaultRenderIdentifier,
-  }: SQLSourceOptions<Arg> = {}): string {
+  }: SQLSourceOptions = {}): string {
     return renderFragments(this.fragments, {
       renderArgument: (argument, index) => renderArg(index, argument.value),
       renderIdentifier,
     })
   }
 
-  getArgs(): Arg[] {
-    const args: Arg[] = []
-
+  getBindings(): Argument[] {
+    const args: Argument[] = []
     collectArgs(this.fragments, args)
-
     return args
   }
 
-  clone(): SQL<Row, Arg> {
+  getArgs(): unknown[] {
+    return this.getBindings().map((arg) => arg.value)
+  }
+
+  clone(): SQL<Row> {
     return new SQL(this.fragments)
   }
 
-  named(queryName: string): SQL<Row, Arg> {
+  named(queryName: string): SQL<Row> {
     const clone = this.clone()
     clone.queryName = queryName
     return clone
   }
 
-  namespaced(namespace: Namespace): SQL<Row, Arg> {
+  namespaced(namespace: Namespace): SQL<Row> {
     const clone = this.clone()
     clone.queryNamespace = namespace
     return clone
@@ -95,7 +116,7 @@ export function ident(name: string, { schema, database, connection }: Namespace 
  * Arguments should be named `$name` or `$indexAmongArgs` if no name is provided.
  * (Args with a name still increment the index)
  */
-function fragmentsToString<Arg>(fragments: SQLFragment<Arg>[]): string {
+function fragmentsToString(fragments: SQLFragment[]): string {
   return renderFragments(fragments, {
     renderArgument: (argument, index) => {
       if (argument.name !== undefined) {
@@ -115,8 +136,8 @@ function fragmentsToString<Arg>(fragments: SQLFragment<Arg>[]): string {
 export function sql<Row = unknown, Arg = unknown>(
   strings: TemplateStringsArray,
   ...values: Array<SQLValue<Arg>>
-): SQL<Row, Arg> {
-  const fragments: SQLFragment<Arg>[] = []
+): SQL<Row> {
+  const fragments: SQLFragment[] = []
 
   for (const [index, stringFragment] of strings.entries()) {
     if (stringFragment.length > 0) {
@@ -128,10 +149,14 @@ export function sql<Row = unknown, Arg = unknown>(
     }
   }
 
-  return new SQL<Row, Arg>(fragments)
+  return new SQL<Row>(fragments)
 }
 
-function normalizeValue<Arg>(value: SQLValue<Arg>): SQLFragment<Arg> {
+export function namedArg<T>(name: string, value: T): Argument<T> {
+  return new Argument(value, name)
+}
+
+function normalizeValue<Arg>(value: SQLValue<Arg>): SQLFragment {
   if (value instanceof SQL || value instanceof Argument || value instanceof Identifier) {
     return value
   }
@@ -139,9 +164,9 @@ function normalizeValue<Arg>(value: SQLValue<Arg>): SQLFragment<Arg> {
   return new Argument(value)
 }
 
-function renderFragments<Arg>(
-  fragments: SQLFragment<Arg>[],
-  context: RenderContext<Arg>,
+function renderFragments(
+  fragments: SQLFragment[],
+  context: RenderContext,
   state: RenderState = { nextArgIndex: 1 },
 ): string {
   let source = ""
@@ -169,7 +194,7 @@ function renderFragments<Arg>(
   return source
 }
 
-function collectArgs<Arg>(fragments: SQLFragment<Arg>[], args: Arg[]): void {
+function collectArgs(fragments: SQLFragment[], args: Argument[]): void {
   for (const fragment of fragments) {
     if (typeof fragment === "string" || fragment instanceof Identifier) {
       continue
@@ -180,7 +205,7 @@ function collectArgs<Arg>(fragments: SQLFragment<Arg>[], args: Arg[]): void {
       continue
     }
 
-    args.push(fragment.value)
+    args.push(fragment)
   }
 }
 
@@ -204,10 +229,10 @@ function defaultRenderIdentifier(identifier: Identifier): string {
 
 export type PaginatedParams = { limit: number; cursor: object }
 
-export class Paginated<Params extends PaginatedParams, Row, Arg> {
+export class Paginated<Params extends PaginatedParams, Row> {
   constructor(
-    public readonly query: (params: Params) => SQL<Row, Arg>,
+    public readonly query: (params: Params) => SQL<Row>,
     public readonly cursor: (row: Row) => Params["cursor"],
-    public readonly count?: (params: Params) => SQL<{ count: number }, Arg>,
+    public readonly count?: (params: Params) => SQL<{ count: number }>,
   ) {}
 }
