@@ -14,7 +14,7 @@
     "@opentui/core": "^0.1.97",
     "@opentui/react": "^0.1.97",
     "@tanstack/react-query": "5.99.0",
-    "@tursodatabase/database": "0.5.3",
+    "@tursodatabase/database": "0.6.0-pre.17",
     "react": "^19.2.4"
   },
   "devDependencies": {
