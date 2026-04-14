@@ -13,6 +13,7 @@ const OWN_PROPS: Record<keyof ShortcutUniqueProps, true> = {
   onKey: true,
   detect: true,
   label: true,
+  enabled: true,
 };
 
 export type ShortcutProps = ShortcutUniqueProps & Partial<KeyEvent>;
