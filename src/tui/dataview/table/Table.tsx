@@ -63,13 +63,14 @@ export type WidthSpec = {
 export type TableColumn<T> = {
   width: WidthSpec
   /** Custom header renderer. Defaults to column name as plain text. */
-  Header?: (props: { column: string; columnIndex: number }) => ReactNode
+  Header?: (props: { column: string; columnIndex: number; columnWidth: number }) => ReactNode
   /** Cell content renderer for each data row. */
   Cell: (props: {
     row: T
     rowIndex: number
     column: string
     columnIndex: number
+    columnWidth: number
   }) => ReactNode
 }
 
@@ -116,6 +117,8 @@ export type TableProps<T> = {
   headerBg?: string
   /** Stable key extractor for each row. Falls back to row index. */
   getRowKey?: (row: T, index: number) => string
+  /** Optional wrapper for each rendered data row. */
+  wrapRow?: (props: { row: T; rowIndex: number; children: ReactNode }) => ReactNode
 }
 
 // ── Internals ──────────────────────────────────────────────────────────────
@@ -253,7 +256,7 @@ function TableRow(props: {
     if (i > 0 && border.columns)
       elements.push(<text key={`sep${i}`} fg={borderColor}>{chars.left}</text>)
     elements.push(
-      <box key={`c${i}`} width={widths[i]} flexGrow={0} flexShrink={0} overflow="hidden">
+      <box key={`c${i}`} width={widths[i]} flexGrow={0} flexShrink={0}>
         {cells[i]}
       </box>,
     )
@@ -278,6 +281,7 @@ export function Table<T>(rawProps: TableProps<T>) {
     borderColor,
     headerBg,
     getRowKey,
+    wrapRow,
   } = rawProps
 
   const border = useMemo(() => normalizeBorder(rawProps.border), [rawProps.border])
@@ -308,8 +312,8 @@ export function Table<T>(rawProps: TableProps<T>) {
     ? names.map((name, i) => {
         const col = columns[name]!
         return col.Header
-          ? col.Header({ column: name, columnIndex: i })
-          : <text key={name}>{" " + name}</text>
+          ? col.Header({ column: name, columnIndex: i, columnWidth: widths[i] ?? 0 })
+          : <text key={name} wrapMode="none" truncate>{" " + name}</text>
       })
     : null
 
@@ -318,7 +322,6 @@ export function Table<T>(rawProps: TableProps<T>) {
       ref={containerRef}
       flexDirection="column"
       width={rawProps.width ?? "100%"}
-      overflow="hidden"
       onSizeChange={handleSizeChange}
     >
       {lines.top && <text fg={borderColor}>{lines.top}</text>}
@@ -337,18 +340,27 @@ export function Table<T>(rawProps: TableProps<T>) {
 
       {rows.map((row, rowIndex) => {
         const key = getRowKey?.(row, rowIndex) ?? String(rowIndex)
+        const rowContent = (
+          <TableRow
+            widths={widths}
+            border={border}
+            chars={chars}
+            borderColor={borderColor}
+            cells={names.map((name, colIndex) =>
+              columns[name]!.Cell({
+                row,
+                rowIndex,
+                column: name,
+                columnIndex: colIndex,
+                columnWidth: widths[colIndex] ?? 0,
+              }),
+            )}
+          />
+        )
         return (
           <Fragment key={key}>
             {rowIndex > 0 && lines.rowSep && <text fg={borderColor}>{lines.rowSep}</text>}
-            <TableRow
-              widths={widths}
-              border={border}
-              chars={chars}
-              borderColor={borderColor}
-              cells={names.map((name, colIndex) =>
-                columns[name]!.Cell({ row, rowIndex, column: name, columnIndex: colIndex }),
-              )}
-            />
+            {wrapRow ? wrapRow({ row, rowIndex, children: rowContent }) : rowContent}
           </Fragment>
         )
       })}

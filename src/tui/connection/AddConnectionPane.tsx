@@ -308,7 +308,7 @@ function ProtocolPicker(
   useKeyboard((event) => {
     if (!active) return
     if (handleFieldNav(event, onPrev, onNext)) return
-    if (event.name === "right" || event.name === "enter") {
+    if (event.name === "right" || event.name === "enter" || event.name === "return") {
       event.preventDefault()
       event.stopPropagation()
       onCycle(1)
@@ -373,7 +373,7 @@ function BooleanField(
   useKeyboard((event) => {
     if (!active) return
     if (handleFieldNav(event, onPrev, onNext)) return
-    if (event.name === "space" || event.name === "enter") {
+    if (event.name === "space" || event.name === "enter" || event.name === "return") {
       event.preventDefault()
       event.stopPropagation()
       onChange(!checked)
@@ -408,7 +408,7 @@ function SelectField(
   useKeyboard((event) => {
     if (!active) return
     if (handleFieldNav(event, onPrev, onNext)) return
-    if (event.name === "right" || event.name === "enter") {
+    if (event.name === "right" || event.name === "enter" || event.name === "return") {
       event.preventDefault()
       event.stopPropagation()
       cycleOption(1)

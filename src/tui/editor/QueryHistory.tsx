@@ -1,8 +1,10 @@
+import type { InputRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { QueryExecution } from "../../index"
 import type { Connection } from "../../lib/types/Connection"
 import {
+  FocusHalo,
   FocusNavigable,
   FocusNavigableArea,
   useFocusTree,
@@ -21,78 +23,190 @@ type QueryHistoryProps = {
 }
 
 export const QUERY_HISTORY_AREA_ID = "query-history"
+const QUERY_HISTORY_RESULTS_AREA_ID = "query-history-results"
+
+type HistoryMatch = {
+  entry: QueryExecution
+  connectionName: string
+  index: number
+  score: number
+}
 
 export function QueryHistory(props: QueryHistoryProps) {
   const { connections, entries, onRestore, onBack } = props
-  const [selectedIndex, setSelectedIndex] = useState(0)
+  const [filterText, setFilterText] = useState("")
+  const [selectedEntryId, setSelectedEntryId] = useState<string | undefined>(entries[0]?.id)
   const tree = useFocusTree()
+  const theme = useTheme()
+  const filterInputRef = useRef<InputRenderable>(null)
+  const scrollRef = useRef<ScrollBoxRenderable>(null)
   const navigationActive = useIsFocusNavigationActive()
   const focusedWithin = useIsFocusWithin([QUERY_HISTORY_AREA_ID])
+  const filteredEntries = useMemo(
+    () => filterHistoryEntries(entries, connections, filterText),
+    [connections, entries, filterText],
+  )
 
   useEffect(() => {
-    setSelectedIndex((index) => clampHistoryIndex(index, entries.length))
-  }, [entries.length])
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      const entry = entries[selectedIndex]
-      if (entry) {
-        tree.setFocusedPath([QUERY_HISTORY_AREA_ID, entryFocusId(entry.id)])
-        return
+    setSelectedEntryId((current) => {
+      if (current && filteredEntries.some((match) => match.entry.id === current)) {
+        return current
       }
-      tree.setFocusedPath([QUERY_HISTORY_AREA_ID, "empty"])
+      return filteredEntries[0]?.entry.id
     })
-  }, [entries, selectedIndex, tree])
+  }, [filteredEntries])
 
-  const selectedEntry = entries[selectedIndex]
-
-  function focusRow(index: number) {
-    const entry = entries[index]
-    if (!entry) {
+  useEffect(() => {
+    if (!focusedWithin) {
       return
     }
-    setSelectedIndex(index)
-    tree.focusPath([QUERY_HISTORY_AREA_ID, entryFocusId(entry.id)])
+
+    const interval = setInterval(() => {
+      const nextText = filterInputRef.current?.value ?? ""
+      setFilterText((current) => (current === nextText ? current : nextText))
+    }, 30)
+
+    return () => clearInterval(interval)
+  }, [focusedWithin])
+
+  useEffect(() => {
+    if (filteredEntries.length > 0 || !focusedWithin) {
+      return
+    }
+
+    queueMicrotask(() => {
+      tree.setFocusedPath([QUERY_HISTORY_AREA_ID])
+    })
+  }, [filteredEntries.length, focusedWithin, tree])
+
+  const selectedIndex = filteredEntries.findIndex((match) => match.entry.id === selectedEntryId)
+  const currentIndex = selectedIndex >= 0 ? selectedIndex : 0
+  const selectedEntry = filteredEntries[currentIndex]?.entry
+  const matchLabel =
+    entries.length === 0 ? "No previous queries yet." : `${filteredEntries.length}/${entries.length} match${filteredEntries.length === 1 ? "" : "es"}`
+
+  function focusRow(index: number) {
+    const match = filteredEntries[index]
+    if (!match) {
+      return
+    }
+    setSelectedEntryId(match.entry.id)
+    tree.focusPath(historyEntryPath(match.entry.id))
   }
 
   useKeyboard((key) => {
-    if (navigationActive || !focusedWithin || entries.length === 0) {
+    if (navigationActive || !focusedWithin) {
       return
     }
 
     switch (key.name) {
       case "up":
-        focusRow(Math.max(0, selectedIndex - 1))
-        break
+        key.preventDefault()
+        key.stopPropagation()
+        focusRow(Math.max(0, currentIndex - 1))
+        return
       case "down":
-        focusRow(Math.min(entries.length - 1, selectedIndex + 1))
-        break
+        key.preventDefault()
+        key.stopPropagation()
+        focusRow(Math.min(filteredEntries.length - 1, currentIndex + 1))
+        return
       case "enter":
+      case "return":
+        key.preventDefault()
+        key.stopPropagation()
         if (selectedEntry) {
           onRestore(selectedEntry)
         }
-        break
+        return
+      case "escape":
+        key.preventDefault()
+        key.stopPropagation()
+        onBack()
+        return
+    }
+
+    if (shouldSyncFilterText(key)) {
+      setTimeout(() => {
+        setFilterText(filterInputRef.current?.value ?? "")
+      }, 0)
     }
   })
 
   return (
-    <FocusNavigableArea flexDirection="column" flexGrow={1} focusNavigableId={QUERY_HISTORY_AREA_ID}>
-      <box flexDirection="column" flexGrow={1}>
-        <box flexDirection="row" gap={1}>
+    <FocusNavigable
+      autoFocus
+      flexDirection="column"
+      flexGrow={1}
+      focus={() => filterInputRef.current?.focus()}
+      focusNavigableId={QUERY_HISTORY_AREA_ID}
+      position="relative"
+    >
+      <box flexDirection="column" flexGrow={1} position="relative">
+        <box flexDirection="row" flexShrink={0} gap={1}>
           <Shortcut keys="ctrl+r" label="Back" enabled onKey={onBack} />
         </box>
-        {entries.length === 0 && (
-          <FocusNavigable focus={() => undefined} focusNavigableId="empty">
-            <text>No query history yet.</text>
-          </FocusNavigable>
-        )}
-        {entries.map((entry, index) => (
-          <FocusNavigable key={entry.id} focus={() => setSelectedIndex(index)} focusNavigableId={entryFocusId(entry.id)}>
-            <HistoryRow active={index === selectedIndex} connectionName={connections.find((c) => c.id === entry.connectionId)?.name ?? ""} entry={entry} />
-          </FocusNavigable>
-        ))}
+        <box
+          backgroundColor={theme.inputBg}
+          flexDirection="row"
+          flexShrink={0}
+          gap={1}
+          paddingLeft={1}
+          paddingRight={1}
+        >
+          <text>Query Finder</text>
+          <text opacity={0.6}>{matchLabel}</text>
+          {entries.length > 0 && <text opacity={0.6}>type filter</text>}
+          {filteredEntries.length > 0 && <text opacity={0.6}>up/down select</text>}
+          {filteredEntries.length > 0 && <text opacity={0.6}>enter restore</text>}
+          <text opacity={0.6}>esc back</text>
+        </box>
+        <box flexDirection="row" flexShrink={0} height={1} paddingLeft={1} paddingRight={1}>
+          <text>Filter </text>
+          <box backgroundColor={theme.inputBg} flexGrow={1} height={1}>
+            <input
+              ref={filterInputRef}
+              flexGrow={1}
+              focused={focusedWithin && !navigationActive}
+              placeholder="Type SQL or connection name"
+              value={filterText}
+            />
+          </box>
+        </box>
+        <FocusNavigableArea
+          flexDirection="column"
+          flexGrow={1}
+          focusNavigableId={QUERY_HISTORY_RESULTS_AREA_ID}
+          scrollRef={scrollRef}
+        >
+          <scrollbox ref={scrollRef} flexGrow={1} contentOptions={{ flexDirection: "column" }}>
+            {entries.length === 0 && (
+              <box paddingLeft={1} paddingRight={1}>
+                <text>No previous queries yet.</text>
+              </box>
+            )}
+            {entries.length > 0 && filteredEntries.length === 0 && (
+              <box paddingLeft={1} paddingRight={1}>
+                <text>No matches for "{filterText.trim()}".</text>
+              </box>
+            )}
+            {filteredEntries.map((match, index) => (
+              <FocusNavigable
+                key={match.entry.id}
+                focus={() => setSelectedEntryId(match.entry.id)}
+                focusNavigableId={entryFocusId(match.entry.id)}
+              >
+                <HistoryRow
+                  active={index === currentIndex}
+                  connectionName={match.connectionName}
+                  entry={match.entry}
+                />
+              </FocusNavigable>
+            ))}
+          </scrollbox>
+        </FocusNavigableArea>
+        <FocusHalo />
       </box>
-    </FocusNavigableArea>
+    </FocusNavigable>
   )
 }
 
@@ -100,7 +214,6 @@ function HistoryRow(props: { entry: QueryExecution; active: boolean; connectionN
   const theme = useTheme()
   const highlighted = useIsFocusNavigableHighlighted()
   const navigationActive = useIsFocusNavigationActive()
-  const statusTag = props.entry.status !== "success" ? `[${props.entry.status}] ` : ""
 
   return (
     <box
@@ -111,8 +224,8 @@ function HistoryRow(props: { entry: QueryExecution; active: boolean; connectionN
       paddingRight={1}
     >
       <text>{formatTime(props.entry.createdAt)}</text>
+      <text fg={theme.mutedFg}>{historyStatusLabel(props.entry)}</text>
       <text flexGrow={1} flexShrink={1}>
-        {statusTag}
         {truncateSql(props.entry.sql.source, 60)}
       </text>
       <text>{formatElapsed(props.entry)}</text>
@@ -123,6 +236,149 @@ function HistoryRow(props: { entry: QueryExecution; active: boolean; connectionN
 
 function entryFocusId(id: string): string {
   return `entry-${id}`
+}
+
+function historyEntryPath(id: string): readonly [string, string, string] {
+  return [QUERY_HISTORY_AREA_ID, QUERY_HISTORY_RESULTS_AREA_ID, entryFocusId(id)]
+}
+
+function filterHistoryEntries(
+  entries: QueryExecution[],
+  connections: Connection<any>[],
+  filterText: string,
+): HistoryMatch[] {
+  const connectionNames = new Map(connections.map((connection) => [connection.id, connection.name]))
+  const tokens = tokenizeFilter(filterText)
+  const matches = entries.map((entry, index) => {
+    const connectionName = connectionNames.get(entry.connectionId) ?? ""
+
+    if (tokens.length === 0) {
+      return {
+        connectionName,
+        entry,
+        index,
+        score: 0,
+      } satisfies HistoryMatch
+    }
+
+    const haystack = normalizeSearchText(`${entry.sql.source} ${connectionName}`)
+    const words = haystack.split(" ").filter(Boolean)
+    let score = 0
+
+    for (const token of tokens) {
+      const tokenScore = scoreHistoryToken(token, haystack, words)
+      if (tokenScore === undefined) {
+        return undefined
+      }
+      score += tokenScore
+    }
+
+    return {
+      connectionName,
+      entry,
+      index,
+      score,
+    } satisfies HistoryMatch
+  })
+
+  return matches
+    .filter((match): match is HistoryMatch => match !== undefined)
+    .sort((a, b) => {
+      if (tokens.length === 0) {
+        return a.index - b.index
+      }
+      return b.score - a.score || a.index - b.index
+    })
+}
+
+function tokenizeFilter(value: string): string[] {
+  const normalized = normalizeSearchText(value)
+  return normalized ? normalized.split(" ") : []
+}
+
+function normalizeSearchText(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase()
+}
+
+function scoreHistoryToken(token: string, haystack: string, words: string[]): number | undefined {
+  const exactMatchIndex = haystack.indexOf(token)
+  if (exactMatchIndex !== -1) {
+    return 100 - exactMatchIndex
+  }
+
+  let bestScore: number | undefined
+  for (const word of words) {
+    const wordScore = fuzzyScore(token, word)
+    if (wordScore === undefined) {
+      continue
+    }
+    bestScore = bestScore === undefined ? wordScore : Math.max(bestScore, wordScore)
+  }
+
+  return bestScore
+}
+
+function fuzzyScore(needle: string, haystack: string): number | undefined {
+  if (!needle) {
+    return 0
+  }
+
+  let score = 0
+  let lastIndex = -1
+  let streak = 0
+
+  for (const char of needle) {
+    const index = haystack.indexOf(char, lastIndex + 1)
+    if (index === -1) {
+      return undefined
+    }
+
+    const gap = lastIndex === -1 ? index : index - lastIndex - 1
+    if (gap === 0) {
+      streak += 1
+      score += 8 + streak * 2
+    } else {
+      streak = 0
+      score += Math.max(1, 6 - gap)
+    }
+
+    if (index === 0 || isWordBoundary(haystack.charAt(index - 1))) {
+      score += 5
+    }
+
+    lastIndex = index
+  }
+
+  return score - Math.max(0, haystack.length - needle.length)
+}
+
+function isWordBoundary(char: string): boolean {
+  return char === " " || char === "_" || char === "-" || char === "." || char === "/"
+}
+
+function shouldSyncFilterText(key: KeyEvent): boolean {
+  return printableKeyText(key) !== undefined || key.name === "backspace" || key.name === "delete"
+}
+
+function printableKeyText(key: KeyEvent): string | undefined {
+  if (key.ctrl || key.meta || key.option) {
+    return undefined
+  }
+
+  if (key.name === "space") {
+    return " "
+  }
+
+  if (!key.sequence || key.sequence.length !== 1) {
+    return undefined
+  }
+
+  const code = key.sequence.charCodeAt(0)
+  if (code < 32 || code === 127) {
+    return undefined
+  }
+
+  return key.sequence
 }
 
 function formatTime(epochMs: number): string {
@@ -143,6 +399,19 @@ function truncateSql(sql: string, max: number): string {
   const oneLine = sql.replace(/\s+/g, " ").trim()
   if (oneLine.length <= max) return oneLine
   return oneLine.slice(0, max) + "..."
+}
+
+function historyStatusLabel(entry: QueryExecution): string {
+  switch (entry.status) {
+    case "success":
+      return "[done]"
+    case "error":
+      return "[error]"
+    case "cancelled":
+      return "[cancelled]"
+    case "pending":
+      return "[running]"
+  }
 }
 
 function clamp(index: number, length: number): number {

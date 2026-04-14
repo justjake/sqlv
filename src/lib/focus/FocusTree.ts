@@ -244,7 +244,36 @@ export class FocusTree {
   handleEscape() {
     const session = this.#session
     if (!session) {
+      const focusedPath = this.#focusedPath
+      const activeScopePath = this.#computeScopePath()
+      const parentNodePath = focusedPath
+        ? this.#findNearestAncestorNodePath(focusedPath, activeScopePath)
+        : undefined
+
+      if (parentNodePath) {
+        this.focusPath(parentNodePath)
+        return
+      }
+
+      const area = this.#getArea(activeScopePath)
+      if (area?.input.trap) {
+        area.input.onEsc?.()
+        return
+      }
+
       this.startFocusNavigation()
+      return
+    }
+
+    const highlightedPath = this.#resolveHighlightedPath()
+    const parentNodePath = highlightedPath
+      ? this.#findNearestAncestorNodePath(highlightedPath, session.activeScopePath)
+      : undefined
+
+    if (parentNodePath) {
+      this.#highlightedPath = parentNodePath
+      this.#revealDescendant(parentNodePath)
+      this.#notify()
       return
     }
 
@@ -433,6 +462,22 @@ export class FocusTree {
 
   #isPathInScope(path: FocusNavigablePath, activeScopePath: FocusNavigablePath): boolean {
     return sameFocusPath(activeScopePath, ROOT_FOCUS_PATH) || isAncestorFocusPath(activeScopePath, path)
+  }
+
+  #findNearestAncestorNodePath(
+    path: FocusNavigablePath,
+    activeScopePath: FocusNavigablePath,
+  ): FocusNavigablePath | undefined {
+    for (let length = path.length - 1; length >= activeScopePath.length; length -= 1) {
+      const ancestorPath = path.slice(0, length)
+      if (!this.#isPathInScope(ancestorPath, activeScopePath)) {
+        continue
+      }
+      if (this.#getNode(ancestorPath)) {
+        return ancestorPath
+      }
+    }
+    return undefined
   }
 
   #revealDescendant(descendantPath: FocusNavigablePath) {

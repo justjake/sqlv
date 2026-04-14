@@ -1,14 +1,15 @@
 import { testRender } from "@opentui/react/test-utils"
 import { afterEach, describe, expect, test } from "bun:test"
-import { act, type ReactNode } from "react"
-import { FocusProvider } from "../../src/tui/focus"
-import { App } from "../../src/tui/index"
+import { act, useEffect, type ReactNode } from "react"
+import { FocusProvider, focusPathSignature, useFocusNavigationState, useFocusTree } from "../../src/tui/focus"
+import { App, QUERY_INSPECTOR_FOCUS_ID, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID, recentQueryFocusId } from "../../src/tui/index"
 import { onEnterNode, Sidebar } from "../../src/tui/sidebar/Sidebar"
 import { KeybindProvider } from "../../src/tui/ui/keybind"
 import { SqlVisorProvider, useSqlVisor, useSqlVisorState } from "../../src/tui/useSqlVisor"
 import { createEngineStub, createQueryState, makeConnection, makeQueryExecution } from "../support"
 
 let rendered: Awaited<ReturnType<typeof testRender>> | undefined
+let focusedPath: string | undefined
 
 async function render(node: ReactNode, size = { height: 18, width: 100 }) {
   rendered = await testRender(
@@ -26,7 +27,28 @@ async function render(node: ReactNode, size = { height: 18, width: 100 }) {
 afterEach(() => {
   rendered?.renderer.destroy()
   rendered = undefined
+  focusedPath = undefined
 })
+
+function FocusController(props: { path: readonly string[] }) {
+  const tree = useFocusTree()
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      queueMicrotask(() => {
+        tree.focusPath(props.path)
+      })
+    })
+  }, [props.path, tree])
+
+  return null
+}
+
+function FocusProbe() {
+  const state = useFocusNavigationState()
+  focusedPath = focusPathSignature(state.focusedPath)
+  return null
+}
 
 describe("SqlVisor provider and app", () => {
   test("requires a SqlVisor provider", async () => {
@@ -205,18 +227,24 @@ describe("SqlVisor provider and app", () => {
     expect(ui.captureCharFrame()).toContain("Rows")
   })
 
-  test("renders fetching and error detail states and switches panes", async () => {
+  test("renders fetching state and restores a filtered history query into the editor and inspector", async () => {
     const connection = makeConnection({
       config: {
         path: ":memory:",
       },
       protocol: "bunsqlite",
     })
-    const historyEntry = makeQueryExecution({
+    const failedEntry = makeQueryExecution({
       connectionId: connection.id,
       error: "query failed",
       id: "history-1",
       sql: "select 1",
+    })
+    const restorableEntry = makeQueryExecution({
+      connectionId: connection.id,
+      id: "history-2",
+      rows: [{ total: 99 }],
+      sql: "select 99 as total from audit_log",
     })
     const fetchingStub = createEngineStub({
       connections: createQueryState({
@@ -247,23 +275,53 @@ describe("SqlVisor provider and app", () => {
     expect(ui.captureCharFrame()).toContain("cancel")
     ui.renderer.destroy()
 
-    const stub = createEngineStub({
-      connections: createQueryState({
-        data: [connection],
-        dataUpdateCount: 1,
-        status: "success",
-      }),
-      detailView: {
-        kind: "error",
-        message: "query failed",
-        title: "Query Error",
+    let stub!: ReturnType<typeof createEngineStub>
+    stub = createEngineStub(
+      {
+        connections: createQueryState({
+          data: [connection],
+          dataUpdateCount: 1,
+          status: "success",
+        }),
+        detailView: {
+          kind: "error",
+          message: "query failed",
+          title: "Query Error",
+        },
+        history: [restorableEntry, failedEntry],
+        queryEditor: {
+          text: "select 1",
+        },
+        selectedConnectionId: connection.id,
       },
-      history: [historyEntry],
-      queryEditor: {
-        text: "select 1",
+      {
+        restoreQueryExecution(entryId) {
+          const entry = [restorableEntry, failedEntry].find((candidate) => candidate.id === entryId)
+          if (!entry) {
+            return
+          }
+
+          stub.setState({
+            detailView:
+              entry.status === "success"
+                ? {
+                    kind: "rows",
+                    rows: entry.rows,
+                    title: `Results (${entry.rows.length})`,
+                  }
+                : {
+                    kind: "error",
+                    message: entry.error ?? "query failed",
+                    title: "Query Error",
+                  },
+            queryEditor: {
+              text: entry.sql.source,
+            },
+            selectedConnectionId: entry.connectionId,
+          })
+        },
       },
-      selectedConnectionId: connection.id,
-    })
+    )
     ui = await render(
       <SqlVisorProvider engine={stub.engine}>
         <App />
@@ -278,7 +336,153 @@ describe("SqlVisor provider and app", () => {
       ui.mockInput.pressKey("r", { ctrl: true })
       await ui.renderOnce()
     })
-    expect(ui.captureCharFrame()).toContain("select 1")
+    expect(ui.captureCharFrame()).toContain("Query Finder")
+
+    await act(async () => {
+      ui.mockInput.pressKey("a")
+      ui.mockInput.pressKey("u")
+      ui.mockInput.pressKey("d")
+      ui.mockInput.pressKey("i")
+      ui.mockInput.pressKey("t")
+      await ui.renderOnce()
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      await ui.renderOnce()
+    })
+    expect(ui.captureCharFrame()).toContain("audit_log")
+
+    await act(async () => {
+      ui.mockInput.pressEnter()
+      await ui.renderOnce()
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      await ui.renderOnce()
+    })
+
+    expect(stub.calls.restoreQueryExecution).toEqual([restorableEntry.id])
+    expect(ui.captureCharFrame()).toContain("select 99 as total from audit_log")
+    expect(ui.captureCharFrame()).toContain("Results (1)")
+    expect(ui.captureCharFrame()).toContain("99")
+  })
+
+  test("shows recent queries, caps finished rows at two, and moves focus to the inspector on enter", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      protocol: "bunsqlite",
+    })
+    const oldestFinished = makeQueryExecution({
+      connectionId: connection.id,
+      id: "history-1",
+      rows: [{ id: 1 }],
+      sql: "select 1",
+    })
+    const failedFinished = makeQueryExecution({
+      connectionId: connection.id,
+      error: "query failed",
+      id: "history-2",
+      sql: "select 2",
+    })
+    const newestFinished = makeQueryExecution({
+      connectionId: connection.id,
+      id: "history-3",
+      rows: [{ id: 3 }],
+      sql: "select 3",
+    })
+    const activeQueryId = "query-4"
+    const stub = createEngineStub(
+      {
+        connections: createQueryState({
+          data: [connection],
+          dataUpdateCount: 1,
+          status: "success",
+        }),
+        history: [newestFinished, failedFinished, oldestFinished],
+        activeQueries: [
+          {
+            queryId: activeQueryId,
+            text: "select 4",
+            connectionId: connection.id,
+            startedAt: Date.now(),
+          },
+        ],
+        selectedConnectionId: connection.id,
+      },
+      {
+        getQueryState(query) {
+          if (query.queryId === activeQueryId) {
+            return createQueryState({
+              fetchStatus: "fetching",
+              status: "pending",
+            })
+          }
+          return createQueryState({
+            data:
+              query.queryId === newestFinished.id
+                ? newestFinished
+                : query.queryId === failedFinished.id
+                  ? failedFinished
+                  : oldestFinished,
+            dataUpdateCount: 1,
+            status: query.queryId === failedFinished.id ? "error" : "success",
+          })
+        },
+      },
+    )
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <App />
+        <FocusController
+          path={[RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(activeQueryId)]}
+        />
+        <FocusProbe />
+      </SqlVisorProvider>,
+      { height: 24, width: 100 },
+    )
+
+    await act(async () => {
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(ui.captureCharFrame()).toContain("Recent Queries")
+    expect(ui.captureCharFrame()).toContain("select 4")
+    expect(ui.captureCharFrame()).toContain("select 3")
+    expect(ui.captureCharFrame()).toContain("select 2")
+    expect(ui.captureCharFrame()).not.toContain("select 1")
+    expect(focusedPath).toBe(
+      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(activeQueryId)]),
+    )
+
+    await act(async () => {
+      ui.mockInput.pressArrow("down")
+      await ui.renderOnce()
+    })
+    expect(focusedPath).toBe(
+      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(newestFinished.id)]),
+    )
+
+    await act(async () => {
+      ui.mockInput.pressArrow("down")
+      await ui.renderOnce()
+    })
+    expect(focusedPath).toBe(
+      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(failedFinished.id)]),
+    )
+
+    await act(async () => {
+      ui.mockInput.pressEnter()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(focusPathSignature([QUERY_INSPECTOR_FOCUS_ID]))
+    expect(ui.captureCharFrame()).toContain("Inspector")
+    expect(ui.captureCharFrame()).toContain("query failed")
+    expect(ui.captureCharFrame()).toContain("select 2")
   })
 
   test("renders the connection form from adapter specs", async () => {

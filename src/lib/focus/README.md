@@ -4,7 +4,7 @@ This directory contains the platform-agnostic focus navigation model.
 
 It exists because "whatever currently has keyboard focus" is not enough to build the interaction we want:
 
-- `Esc` should enter a temporary navigation mode instead of immediately mutating the focused widget.
+- `Esc` should act as a structured "step out" key instead of immediately mutating the focused widget.
 - arrow keys should move between explicit UI targets based on layout, not widget-local tab order.
 - modal and pop-up regions should be able to trap navigation and own `Esc`.
 - scrolling or other temporary UI changes caused by navigation should be reversible on cancel.
@@ -99,6 +99,28 @@ Trap semantics are intentionally simple:
 - if that area provides an `Esc` action, focus navigation surfaces that as the current escape affordance
 
 This gives modals and popovers a clean ownership boundary without teaching the rest of the tree anything special about "modals."
+
+## Escape Means "Step Out"
+
+`Esc` is treated as an outward-navigation key.
+
+Outside focus navigation:
+
+1. try to move real focus to the nearest ancestor node within the current trap scope
+2. if there is no such ancestor and the active trapped area owns `Esc`, invoke that action
+3. otherwise start focus navigation
+
+Inside focus navigation:
+
+1. try to move the highlighted path to the nearest ancestor node within the active scope
+2. if there is no such ancestor and the active trapped area owns `Esc`, invoke that action and cancel navigation
+3. otherwise cancel navigation
+
+This lets deeply nested sub-content back out step by step before the system falls back to closing a modal or entering/leaving navigation mode.
+
+It also implies an important modeling rule:
+
+- if a container is structural and should **not** become an `Esc` step-out target, it should usually be an **area**, not a **node**
 
 ## Real Focus vs Navigation Highlight
 

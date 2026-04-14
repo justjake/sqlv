@@ -42,6 +42,7 @@ export function FocusProvider(props: { children: ReactNode }) {
             tree.moveFocusNavigation(event.name)
             break
           case "enter":
+          case "return":
           case "space":
             skipRestoreOnExitRef.current = true
             tree.activateHighlightedFocusNavigable()

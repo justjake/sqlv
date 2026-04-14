@@ -116,4 +116,108 @@ describe("FocusTree", () => {
     expect(scrollPosition).toBe(0)
     expect(tree.getNavigationState().active).toBe(false)
   })
+
+  test("esc steps real focus outward through ancestor nodes before entering focus navigation", () => {
+    const tree = new FocusTree()
+
+    tree.registerNode({
+      id: "gp",
+      parentPath: ROOT_FOCUS_PATH,
+      focus: () => undefined,
+      getViewportRect: () => ({ x: 0, y: 0, width: 20, height: 3 }),
+    })
+    tree.registerNode({
+      id: "cX",
+      parentPath: ["gp"],
+      focus: () => undefined,
+      getViewportRect: () => ({ x: 0, y: 5, width: 20, height: 3 }),
+    })
+    tree.registerArea({
+      id: "list",
+      parentPath: ["gp", "cX"],
+    })
+    tree.registerNode({
+      id: "l2",
+      parentPath: ["gp", "cX", "list"],
+      focus: () => undefined,
+      getViewportRect: () => ({ x: 0, y: 10, width: 20, height: 3 }),
+    })
+
+    tree.setFocusedPath(["gp", "cX", "list", "l2"])
+
+    tree.handleEscape()
+    expect(tree.getNavigationState()).toMatchObject({
+      active: false,
+      focusedPath: ["gp", "cX"],
+      highlightedPath: ["gp", "cX"],
+    })
+
+    tree.handleEscape()
+    expect(tree.getNavigationState()).toMatchObject({
+      active: false,
+      focusedPath: ["gp"],
+      highlightedPath: ["gp"],
+    })
+
+    tree.handleEscape()
+    expect(tree.getNavigationState()).toMatchObject({
+      active: true,
+      highlightedPath: ["gp"],
+      focusedPath: ["gp"],
+    })
+  })
+
+  test("esc steps highlighted focus outward before closing a trapped area", () => {
+    const tree = new FocusTree()
+    let closeCount = 0
+
+    tree.registerArea({
+      id: "modal",
+      parentPath: ROOT_FOCUS_PATH,
+      trap: true,
+      onEsc: () => {
+        closeCount += 1
+      },
+      onEscLabel: "Close",
+    })
+    tree.registerNode({
+      id: "cX",
+      parentPath: ["modal"],
+      focus: () => undefined,
+      getViewportRect: () => ({ x: 0, y: 0, width: 12, height: 3 }),
+    })
+    tree.registerArea({
+      id: "list",
+      parentPath: ["modal", "cX"],
+    })
+    tree.registerNode({
+      id: "l2",
+      parentPath: ["modal", "cX", "list"],
+      focus: () => undefined,
+      getViewportRect: () => ({ x: 0, y: 5, width: 12, height: 3 }),
+    })
+
+    tree.setFocusedPath(["modal", "cX", "list", "l2"])
+    tree.startFocusNavigation()
+    expect(tree.getNavigationState()).toMatchObject({
+      active: true,
+      activeScopePath: ["modal"],
+      highlightedPath: ["modal", "cX", "list", "l2"],
+      escLabel: "Close",
+    })
+
+    tree.handleEscape()
+    expect(closeCount).toBe(0)
+    expect(tree.getNavigationState()).toMatchObject({
+      active: true,
+      activeScopePath: ["modal"],
+      highlightedPath: ["modal", "cX"],
+      focusedPath: ["modal", "cX", "list", "l2"],
+      escLabel: "Close",
+    })
+
+    tree.handleEscape()
+    expect(closeCount).toBe(1)
+    expect(tree.getNavigationState().active).toBe(false)
+  })
 })

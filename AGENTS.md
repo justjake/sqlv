@@ -106,6 +106,7 @@ Read these before making substantial focus changes:
 - Geometry is lazy and evaluated in global viewport coordinates.
 - Areas own trap scope, `Esc`, clipping, reveal, and snapshot/restore behavior.
 - Nodes own actual focus targets.
+- `Esc` first tries to step to the nearest ancestor node within the current scope before falling back to trap `onEsc` or navigation-mode entry/cancel.
 - Cancel should restore navigation-only side effects. Activate should commit them.
 
 ### OpenTUI-Specific Rules
@@ -114,6 +115,7 @@ Read these before making substantial focus changes:
 - While focus navigation is active, the currently focused renderable may be blurred so arrow keys and `Esc` stop mutating the active widget.
 - Widget-local arrow/enter/escape behavior must stand down when focus navigation is active.
 - Scroll-follow belongs to `FocusNavigableArea`, not `FocusNavigable`.
+- If a wrapper is structural and should not become an `Esc` step-out target, prefer `FocusNavigableArea` over `FocusNavigable`.
 
 ### Testing Notes
 

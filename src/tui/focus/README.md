@@ -36,7 +36,7 @@ So the binding installs a top-priority global handler in [`context.tsx`](./conte
 
 That makes focus navigation a renderer-level concern:
 
-- `Esc` can always start focus navigation
+- `Esc` always reaches the focus system before focused widgets see it
 - once navigation is active, arrows / `Enter` / `Space` are intercepted before focused widgets see them
 - the focus tree becomes the single authority for directional traversal
 
@@ -91,6 +91,10 @@ So the component supports both:
 - optionally target a specific inner renderable through `renderableRef` and `focus`
 
 That keeps the binding flexible without leaking OpenTUI-specific focus mechanics back into the core.
+
+One important consequence of nested `FocusNavigable`s is that they participate in `Esc` step-out ancestry.
+
+So if a wrapper is only structural and should not become the next stop when escaping outward, it should usually be a `FocusNavigableArea`, not a `FocusNavigable`.
 
 ## `FocusNavigableArea` Owns The Container Semantics
 
@@ -165,6 +169,8 @@ So the binding and surrounding widgets follow a rule:
 - widget-local keyboard behavior must stand down
 
 This is why some old direct `escape` shortcuts had to be removed from panes like add-connection and query history. They were competing with the navigation model instead of cooperating with it.
+
+Outside focus navigation, `Esc` is still owned by the focus system first. The tree may use it to step real focus outward to an ancestor node, invoke a trapped area's `onEsc`, or start focus navigation depending on the current path and scope.
 
 ## Visual Treatment Is Derived, Not Commanding
 

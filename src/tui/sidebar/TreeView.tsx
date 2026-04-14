@@ -84,7 +84,8 @@ export function TreeView(props: TreeProps) {
       case "down":
         focusRow(Math.min(rows.length - 1, index + 1))
         return
-      case "enter": {
+      case "enter":
+      case "return": {
         const node = rows[index]?.node
         if (!node) {
           return

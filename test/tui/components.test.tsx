@@ -1,17 +1,23 @@
 import { testRender } from "@opentui/react/test-utils"
 import { afterEach, describe, expect, test } from "bun:test"
-import { act, type ReactNode } from "react"
+import { act, useEffect, type ReactNode } from "react"
 import { JsonRowView } from "../../src/tui/dataview/JsonRowView"
-import { ResultsTable } from "../../src/tui/dataview/ResultsTable"
+import {
+  ResultsTable,
+  RESULTS_TABLE_FOCUS_ID,
+  RESULTS_TABLE_GRID_AREA_ID,
+  resultsTableRowFocusId,
+} from "../../src/tui/dataview/ResultsTable"
 import { clampHistoryIndex, QueryHistory } from "../../src/tui/editor/QueryHistory"
 import { EditorView } from "../../src/tui/editor/EditorView"
-import { FocusProvider } from "../../src/tui/focus"
+import { FocusProvider, useFocusNavigationState, useFocusTree } from "../../src/tui/focus"
 import { Shortcut } from "../../src/tui/Shortcut"
 import { clampTreeIndex, flattenTree, TreeView } from "../../src/tui/sidebar/TreeView"
 import { KeybindProvider } from "../../src/tui/ui/keybind"
-import { makeQueryExecution } from "../support"
+import { makeConnection, makeQueryExecution } from "../support"
 
 let rendered: Awaited<ReturnType<typeof testRender>> | undefined
+type RenderedUi = Awaited<ReturnType<typeof testRender>>
 
 async function render(node: ReactNode, size = { height: 12, width: 60 }) {
   rendered = await testRender(
@@ -26,16 +32,56 @@ async function render(node: ReactNode, size = { height: 12, width: 60 }) {
   return rendered
 }
 
+async function settleDeferredRender(ui: RenderedUi, delayMs = 0) {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, delayMs))
+    await ui.renderOnce()
+  })
+}
+
+async function dispatchInput(ui: RenderedUi, action: () => void | Promise<void>) {
+  await act(async () => {
+    await action()
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    await ui.renderOnce()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await ui.renderOnce()
+  })
+}
+
+function focusedPathLine(ui: RenderedUi): string {
+  return ui.captureCharFrame().split("\n")[0] ?? ""
+}
+
 afterEach(() => {
   rendered?.renderer.destroy()
   rendered = undefined
 })
 
-function createHistoryEntry(id: string, sql: string) {
-  return makeQueryExecution({
-    id,
-    sql,
-  })
+function ResultsTableHarness(props: {
+  rows: object[]
+  initialPath?: readonly string[]
+  width?: number
+}) {
+  const tree = useFocusTree()
+  const state = useFocusNavigationState()
+
+  useEffect(() => {
+    if (!props.initialPath) {
+      return
+    }
+
+    queueMicrotask(() => {
+      tree.focusPath(props.initialPath as readonly string[])
+    })
+  }, [props.initialPath, tree])
+
+  return (
+    <box flexDirection="column">
+      <text>{state.focusedPath?.join("/") ?? "none"}</text>
+      <ResultsTable rows={props.rows} width={props.width} />
+    </box>
+  )
 }
 
 describe("TUI components", () => {
@@ -101,26 +147,65 @@ describe("TUI components", () => {
     expect(historyCount).toBe(1)
   })
 
-  test("renders query history and clamps selection indexes", async () => {
+  test("filters query history and restores the selected entry", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      protocol: "bunsqlite",
+    })
+    const restored: string[] = []
     const ui = await render(
       <QueryHistory
-        entries={[createHistoryEntry("one", "select 1"), createHistoryEntry("two", "select 2")]}
-        connections={[]}
+        entries={[
+          makeQueryExecution({
+            connectionId: connection.id,
+            id: "one",
+            sql: "select * from users",
+          }),
+          makeQueryExecution({
+            connectionId: connection.id,
+            id: "two",
+            sql: "select * from orders where status = 'open'",
+          }),
+          makeQueryExecution({
+            connectionId: connection.id,
+            id: "three",
+            sql: "delete from users where id = 1",
+            status: "cancelled",
+          }),
+        ]}
+        connections={[connection]}
         onBack={() => undefined}
-        onRestore={() => undefined}
+        onRestore={(entry) => restored.push(entry.id)}
       />,
-      { height: 12, width: 80 },
+      { height: 14, width: 80 },
     )
 
-    expect(ui.captureCharFrame()).toContain("select 1")
-    expect(ui.captureCharFrame()).toContain("select 2")
+    await settleDeferredRender(ui)
+
+    expect(ui.captureCharFrame()).toContain("Query Finder")
     expect(clampHistoryIndex(3, 2)).toBe(1)
     expect(clampHistoryIndex(-1, 2)).toBe(0)
+
+    await dispatchInput(ui, () => {
+      ui.mockInput.pressKey("o")
+      ui.mockInput.pressKey("r")
+      ui.mockInput.pressKey("d")
+    })
+    await settleDeferredRender(ui, 120)
+
+    const frame = ui.captureCharFrame()
+    expect(frame).toContain("orders")
+    expect(frame).not.toContain("delete from users")
+
+    await dispatchInput(ui, () => ui.mockInput.pressEnter())
+    expect(restored).toEqual(["two"])
   })
 
   test("shows the empty query history state", async () => {
     const ui = await render(<QueryHistory connections={[]} entries={[]} onBack={() => undefined} onRestore={() => undefined} />)
-    expect(ui.captureCharFrame()).toContain("No query history yet.")
+    expect(ui.captureCharFrame()).toContain("No previous queries yet.")
   })
 
   test("flattens tree nodes and emits initial focus", async () => {
@@ -173,6 +258,98 @@ describe("TUI components", () => {
 
     expect(ui.captureCharFrame()).toContain('"id": 1')
     expect(ui.captureCharFrame()).toContain('"name": "Ada"')
+  })
+
+  test("focusing the table enters the first result cell", async () => {
+    const ui = await render(
+      <ResultsTableHarness
+        initialPath={[RESULTS_TABLE_FOCUS_ID]}
+        rows={[
+          { id: 1, name: "Ada" },
+          { id: 2, name: "Grace" },
+        ]}
+      />,
+      { height: 8, width: 50 },
+    )
+
+    await settleDeferredRender(ui)
+
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-0")
+  })
+
+  test("focusing a result row forwards focus into its first cell", async () => {
+    const ui = await render(
+      <ResultsTableHarness
+        initialPath={[RESULTS_TABLE_FOCUS_ID, RESULTS_TABLE_GRID_AREA_ID, resultsTableRowFocusId(1)]}
+        rows={[
+          { id: 1, name: "Ada" },
+          { id: 2, name: "Grace" },
+        ]}
+      />,
+      { height: 8, width: 50 },
+    )
+
+    await settleDeferredRender(ui)
+
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-0")
+  })
+
+  test("navigates focused result cells with arrows and hjkl", async () => {
+    const ui = await render(
+      <ResultsTableHarness
+        initialPath={[RESULTS_TABLE_FOCUS_ID]}
+        rows={[
+          { id: 1, name: "Ada" },
+          { id: 2, name: "Grace" },
+        ]}
+      />,
+      { height: 8, width: 50 },
+    )
+
+    await settleDeferredRender(ui)
+    await dispatchInput(ui, () => ui.mockInput.pressArrow("right"))
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-1")
+
+    await dispatchInput(ui, () => ui.mockInput.pressKey("j"))
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-1")
+
+    await dispatchInput(ui, () => ui.mockInput.pressKey("h"))
+
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-0")
+  })
+
+  test("supports spreadsheet-style result navigation shortcuts", async () => {
+    const ui = await render(
+      <ResultsTableHarness
+        initialPath={[RESULTS_TABLE_FOCUS_ID]}
+        rows={[
+          { id: 1, name: "Ada" },
+          { id: 2, name: "Grace" },
+        ]}
+      />,
+      { height: 8, width: 50 },
+    )
+
+    await settleDeferredRender(ui)
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-0")
+
+    await dispatchInput(ui, () => ui.mockInput.pressTab())
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-1")
+
+    await dispatchInput(ui, () => ui.mockInput.pressEnter())
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-1")
+
+    await dispatchInput(ui, () => ui.mockInput.pressKey("HOME"))
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-0")
+
+    await dispatchInput(ui, () => ui.mockInput.pressKey("END"))
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-1")
+
+    await dispatchInput(ui, () => ui.mockInput.pressKey("HOME", { ctrl: true }))
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-0")
+
+    await dispatchInput(ui, () => ui.mockInput.pressKey("END", { ctrl: true }))
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-1")
   })
 
   test("measures result tables to the parent pane and keeps rows single-line", async () => {
