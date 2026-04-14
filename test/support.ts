@@ -10,6 +10,7 @@ import { QueryRunnerImpl } from "../src/lib/QueryRunnerImpl"
 import {
   type AddConnectionInput,
   type QueryEditorState,
+  type QueryRef,
   type RunQueryInput,
   type SqlVisor,
   type SqlVisorState,
@@ -121,13 +122,17 @@ export function createSqlVisorState(patch: Partial<SqlVisorState> = {}): SqlViso
     history: patch.history ?? [],
     detailView: patch.detailView ?? emptyDetailView,
     queryExecution: patch.queryExecution ?? pendingQueryState<QueryExecution>(),
+    activeQueries: patch.activeQueries ?? [],
     objectsByConnectionId: patch.objectsByConnectionId ?? {},
   }
 }
 
 type EngineMethodOverrides = {
   addConnection?: (input: AddConnectionInput) => Promise<Connection<any>>
-  runQuery?: (input?: RunQueryInput) => Promise<QueryExecution>
+  cancelQuery?: (query: QueryRef) => void
+  cancelRunningQueries?: () => void
+  getQueryState?: (query: QueryRef) => QueryState<QueryExecution>
+  runQuery?: (input?: RunQueryInput) => QueryRef
   restoreHistoryEntry?: (entryId: string) => void
   restoreQueryExecution?: (entryId: string) => void
   selectConnection?: (connectionId: string | undefined) => void
@@ -144,9 +149,12 @@ export function createEngineStub(
   const listeners = new Set<() => void>()
   let state = createSqlVisorState(initialState)
   const registry = options.registry ?? new AdapterRegistry([new BunSqlAdapter(), new TursoAdapter()])
+  const queryStates = new Map<string, QueryState<QueryExecution>>()
 
   const calls: {
     addConnection: AddConnectionInput[]
+    cancelQuery: QueryRef[]
+    cancelRunningQueries: number
     restoreHistoryEntry: string[]
     restoreQueryExecution: string[]
     runQuery: RunQueryInput[]
@@ -154,6 +162,8 @@ export function createEngineStub(
     setQueryEditorState: Array<Partial<Pick<QueryEditorState, "text">>>
   } = {
     addConnection: [],
+    cancelQuery: [],
+    cancelRunningQueries: 0,
     restoreHistoryEntry: [],
     restoreQueryExecution: [],
     runQuery: [],
@@ -208,25 +218,37 @@ export function createEngineStub(
       notify()
       return connection
     },
-    async runQuery(input: RunQueryInput = {}) {
+    runQuery(input: RunQueryInput = {}) {
       calls.runQuery.push(input)
       if (overrides.runQuery) {
         return overrides.runQuery(input)
       }
 
+      const queryRef = {
+        queryId: `history-${calls.runQuery.length}`,
+      } satisfies QueryRef
       const entry = makeQueryExecution({
-        id: `history-${calls.runQuery.length}`,
+        id: queryRef.queryId,
         connectionId: input.connectionId ?? state.selectedConnectionId ?? "conn-1",
         sql: input.text ?? state.queryEditor.text,
         rows: [],
       })
+      const queryState = createQueryState({
+        data: entry,
+        dataUpdateCount: 1,
+        dataUpdatedAt: Date.now(),
+        fetchStatus: "idle",
+        status: "success",
+      })
+      queryStates.set(queryRef.queryId, queryState)
 
       state = {
         ...state,
         history: [entry, ...state.history],
+        queryExecution: queryState,
       }
       notify()
-      return entry
+      return queryRef
     },
     restoreHistoryEntry(entryId: string) {
       calls.restoreHistoryEntry.push(entryId)
@@ -239,6 +261,27 @@ export function createEngineStub(
       if (overrides.restoreQueryExecution) {
         overrides.restoreQueryExecution(entryId)
       }
+    },
+    getQueryState(query: QueryRef) {
+      if (overrides.getQueryState) {
+        return overrides.getQueryState(query)
+      }
+      return queryStates.get(query.queryId) ?? state.queryExecution
+    },
+    cancelQuery(query: QueryRef) {
+      calls.cancelQuery.push(query)
+      if (overrides.cancelQuery) {
+        overrides.cancelQuery(query)
+      }
+    },
+    cancelRunningQueries() {
+      calls.cancelRunningQueries += 1
+      if (overrides.cancelRunningQueries) {
+        overrides.cancelRunningQueries()
+      }
+    },
+    cancelActiveQueries() {
+      this.cancelRunningQueries()
     },
     selectConnection(connectionId: string | undefined) {
       calls.selectConnection.push(connectionId)
@@ -280,6 +323,10 @@ export function createEngineStub(
   } satisfies Pick<
     SqlVisor,
     | "addConnection"
+    | "cancelQuery"
+    | "cancelRunningQueries"
+    | "cancelActiveQueries"
+    | "getQueryState"
     | "getState"
     | "registry"
     | "restoreHistoryEntry"

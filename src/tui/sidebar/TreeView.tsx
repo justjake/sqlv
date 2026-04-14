@@ -1,5 +1,15 @@
 import { useKeyboard } from "@opentui/react"
 import { useEffect, useMemo, useState } from "react"
+import {
+  FocusNavigable,
+  FocusNavigableArea,
+  useFocusTree,
+  useIsFocusNavigableHighlighted,
+  useIsFocusNavigationActive,
+  useIsFocusWithin,
+} from "../focus"
+import { useKeybind } from "../ui/keybind"
+import { useTheme } from "../ui/theme"
 
 export type TreeNode = {
   key: string
@@ -19,13 +29,13 @@ type FlatTreeNode = {
 }
 
 type TreeProps = {
-  focused?: boolean
   nodes: TreeNode[]
   onFocus?: (idx: number, node: TreeNode) => void
   onEnter?: (idx: number, node: TreeNode) => void
 }
 
-// Box-drawing characters
+export const SIDEBAR_TREE_AREA_ID = "sidebar-tree"
+
 const GUIDE_PIPE = "│"
 const GUIDE_BRANCH = "├"
 const GUIDE_CORNER = "└"
@@ -34,7 +44,11 @@ const EXPAND_CLOSED = "▶"
 
 export function TreeView(props: TreeProps) {
   const { nodes, onFocus, onEnter } = props
+  const { inChordRef } = useKeybind()
+  const tree = useFocusTree()
   const rows = useMemo(() => flattenTree(nodes), [nodes])
+  const focusedWithin = useIsFocusWithin([SIDEBAR_TREE_AREA_ID])
+  const navigationActive = useIsFocusNavigationActive()
 
   const [index, setIndex] = useState(0)
 
@@ -49,16 +63,27 @@ export function TreeView(props: TreeProps) {
     }
   }, [index, onFocus, rows])
 
+  function focusRow(nextIndex: number) {
+    const row = rows[nextIndex]
+    if (!row) {
+      return
+    }
+    setIndex(nextIndex)
+    tree.focusPath([SIDEBAR_TREE_AREA_ID, rowFocusId(row.rowKey)])
+  }
+
   useKeyboard((key) => {
-    if (!props.focused || rows.length === 0) {
+    if (navigationActive || inChordRef.current || !focusedWithin || rows.length === 0) {
       return
     }
 
     switch (key.name) {
       case "up":
-        return setIndex((current) => Math.max(0, current - 1))
+        focusRow(Math.max(0, index - 1))
+        return
       case "down":
-        return setIndex((current) => Math.min(rows.length - 1, current + 1))
+        focusRow(Math.min(rows.length - 1, index + 1))
+        return
       case "enter": {
         const node = rows[index]?.node
         if (!node) {
@@ -70,26 +95,31 @@ export function TreeView(props: TreeProps) {
   })
 
   return (
-    <box flexDirection="column">
-      {rows.map((row, rowIndex) => (
-        <TreeNodeView key={row.rowKey} active={rowIndex === index} {...row} />
-      ))}
-    </box>
+    <FocusNavigableArea flexDirection="column" focusNavigableId={SIDEBAR_TREE_AREA_ID}>
+      <box flexDirection="column">
+        {rows.map((row, rowIndex) => (
+          <FocusNavigable key={row.rowKey} focus={() => setIndex(rowIndex)} focusNavigableId={rowFocusId(row.rowKey)}>
+            <TreeNodeView active={rowIndex === index} {...row} />
+          </FocusNavigable>
+        ))}
+      </box>
+    </FocusNavigableArea>
   )
 }
 
 function TreeNodeView(props: FlatTreeNode & { active: boolean }) {
   const { node, level, isLast, parentIsLastPath, active } = props
+  const theme = useTheme()
+  const highlighted = useIsFocusNavigableHighlighted()
+  const navigationActive = useIsFocusNavigationActive()
   const isExpanded = node.expandable && node.children !== undefined
   const isCollapsed = node.expandable && node.children === undefined
 
-  // Build indent guides for ancestor levels
   let guides = ""
-  for (let i = 0; i < level; i++) {
+  for (let i = 0; i < level; i += 1) {
     guides += parentIsLastPath[i] ? "  " : `${GUIDE_PIPE} `
   }
 
-  // Current level marker
   let marker: string
   if (isExpanded) {
     marker = EXPAND_OPEN
@@ -102,11 +132,15 @@ function TreeNodeView(props: FlatTreeNode & { active: boolean }) {
   }
 
   return (
-    <box backgroundColor={active ? "blue" : undefined} flexDirection="row">
-      <text fg="#666666">{` ${guides}${marker} `}</text>
+    <box backgroundColor={navigationActive && highlighted ? theme.focusNavBg : (active ? theme.focusBg : undefined)} flexDirection="row">
+      <text fg={theme.mutedFg}>{` ${guides}${marker} `}</text>
       <text>{node.name}</text>
     </box>
   )
+}
+
+function rowFocusId(rowKey: string): string {
+  return `row-${rowKey}`
 }
 
 export function flattenTree(
@@ -116,7 +150,7 @@ export function flattenTree(
   parentIsLastPath: boolean[] = [],
 ): FlatTreeNode[] {
   const flat: FlatTreeNode[] = []
-  for (let i = 0; i < nodes.length; i++) {
+  for (let i = 0; i < nodes.length; i += 1) {
     const node = nodes[i]!
     const isLast = i === nodes.length - 1
     const rowKey = parentPath ? `${parentPath}.${node.key}` : node.key

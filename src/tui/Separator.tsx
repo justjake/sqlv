@@ -1,5 +1,6 @@
 import type { MouseEvent } from "@opentui/core"
 import { useState } from "react"
+import { useTheme } from "./ui/theme"
 
 type SeparatorProps = {
   direction: "horizontal" | "vertical"
@@ -7,12 +8,10 @@ type SeparatorProps = {
   onDragStart: (e: MouseEvent) => void
 }
 
-const COLOR_DEFAULT = "#555555"
-const COLOR_HOVER = "#aaaaaa"
-
 export function Separator({ direction, dragging, onDragStart }: SeparatorProps) {
   const [hovered, setHovered] = useState(false)
-  const color = dragging || hovered ? COLOR_HOVER : COLOR_DEFAULT
+  const theme = useTheme()
+  const color = dragging || hovered ? theme.borderHoverColor : theme.borderColor
 
   if (direction === "vertical") {
     return (

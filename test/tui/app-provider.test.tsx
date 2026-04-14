@@ -1,15 +1,22 @@
 import { testRender } from "@opentui/react/test-utils"
 import { afterEach, describe, expect, test } from "bun:test"
 import { act, type ReactNode } from "react"
+import { FocusProvider } from "../../src/tui/focus"
 import { App } from "../../src/tui/index"
 import { onEnterNode, Sidebar } from "../../src/tui/sidebar/Sidebar"
+import { KeybindProvider } from "../../src/tui/ui/keybind"
 import { SqlVisorProvider, useSqlVisor, useSqlVisorState } from "../../src/tui/useSqlVisor"
 import { createEngineStub, createQueryState, makeConnection, makeQueryExecution } from "../support"
 
 let rendered: Awaited<ReturnType<typeof testRender>> | undefined
 
 async function render(node: ReactNode, size = { height: 18, width: 100 }) {
-  rendered = await testRender(node, size)
+  rendered = await testRender(
+    <FocusProvider>
+      <KeybindProvider>{node}</KeybindProvider>
+    </FocusProvider>,
+    size,
+  )
   await act(async () => {
     await rendered?.renderOnce()
   })
@@ -196,7 +203,6 @@ describe("SqlVisor provider and app", () => {
     )
 
     expect(ui.captureCharFrame()).toContain("Rows")
-    expect(ui.captureCharFrame()).toContain('"name": "Ada"')
   })
 
   test("renders fetching and error detail states and switches panes", async () => {
@@ -222,6 +228,12 @@ describe("SqlVisor provider and app", () => {
         fetchStatus: "fetching",
         status: "pending",
       }),
+      activeQueries: [{
+        queryId: "query-1",
+        text: "select 1",
+        connectionId: connection.id,
+        startedAt: Date.now(),
+      }],
       selectedConnectionId: connection.id,
     })
     let ui = await render(
@@ -231,8 +243,8 @@ describe("SqlVisor provider and app", () => {
       { height: 20, width: 100 },
     )
 
-    expect(ui.captureCharFrame()).toContain("Running Query")
-    expect(ui.captureCharFrame()).toContain("Executing query...")
+    expect(ui.captureCharFrame()).toContain("select 1")
+    expect(ui.captureCharFrame()).toContain("cancel")
     ui.renderer.destroy()
 
     const stub = createEngineStub({
@@ -301,6 +313,51 @@ describe("SqlVisor provider and app", () => {
     expect(ui.captureCharFrame()).toContain("Add Connection")
     expect(ui.captureCharFrame()).toContain("[bunsqlite]")
     expect(ui.captureCharFrame()).toContain(":memory:")
+  })
+
+  test("uses escape-driven focus navigation inside the add-connection modal", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      protocol: "bunsqlite",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      selectedConnectionId: connection.id,
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <App />
+      </SqlVisorProvider>,
+      { height: 24, width: 100 },
+    )
+
+    await act(async () => {
+      ui.mockInput.pressKey("n", { ctrl: true })
+      await ui.renderOnce()
+      await ui.renderOnce()
+      ui.mockInput.pressEscape()
+      await Bun.sleep(30)
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(ui.captureCharFrame()).toContain("Esc Close")
+
+    await act(async () => {
+      ui.mockInput.pressEscape()
+      await Bun.sleep(30)
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(ui.captureCharFrame()).not.toContain("Add Connection")
   })
 
   test("keeps the query editor text stable across engine state updates", async () => {

@@ -6,7 +6,7 @@ import { EpochMillis, type FlowEntry, type LogStore, type QueryExecution, type S
 import type { QueryRunner } from "./types/QueryRunner"
 import { Result } from "./types/Result"
 import { preserveErrorStack } from "./types/errors"
-import { RowHandle, type RowRef } from "./types/RowStore"
+import { RowHandle } from "./types/RowStore"
 import type { Paginated, SQL } from "./types/SQL"
 
 export class QueryExecutionError<Row = object> extends Error {
@@ -28,6 +28,12 @@ export class QueryExecutionError<Row = object> extends Error {
   }
 }
 
+type ExecuteOptions = {
+  abortSignal?: AbortSignal
+  executionId?: string
+  flowId?: string
+}
+
 export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
   constructor(
     public readonly session: Session,
@@ -36,26 +42,19 @@ export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
     private readonly logger: LogStore,
   ) {}
 
-  #abortController: AbortController | undefined
-  get abortController() {
-    this.#abortController ??= new AbortController()
-    return this.#abortController
-  }
+  #abortControllers = new Set<AbortController>()
 
-  async query<Row>(sql: SQL<Row>, flow?: RowRef<FlowEntry> & { abortSignal: AbortSignal }): Promise<Row[]> {
-    const execution = await this.execute(sql, flow)
+  async query<Row>(sql: SQL<Row>, options: ExecuteOptions = {}): Promise<Row[]> {
+    const execution = await this.execute(sql, options)
     return execution.rows
   }
 
-  async execute<Row>(
-    sql: SQL<Row>,
-    flow?: RowRef<FlowEntry> & { abortSignal: AbortSignal },
-  ): Promise<QueryExecution<Row>> {
-    const abortSignal = flow?.abortSignal ?? this.abortController.signal
+  async execute<Row>(sql: SQL<Row>, options: ExecuteOptions = {}): Promise<QueryExecution<Row>> {
+    const { abortSignal, cleanup } = this.#createAbortHandle(options.abortSignal)
     abortSignal.throwIfAborted()
 
     const executionHandle = new RowHandle<QueryExecution<Row>>(this.logger, {
-      id: createId(),
+      id: options.executionId ?? createId(),
       type: "queryExecution",
     })
     const execution = await executionHandle.set({
@@ -67,7 +66,7 @@ export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
         source: sql.toSource(),
         args: sql.getArgs() as any[],
       },
-      flowId: flow?.id,
+      flowId: options.flowId,
       rows: [],
       rowCount: 0,
       status: "pending",
@@ -117,6 +116,8 @@ export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
         },
         { cause: error },
       )
+    } finally {
+      cleanup()
     }
   }
 
@@ -124,7 +125,7 @@ export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
     paginated: Paginated<Params, Row>,
     params: Params,
   ): AsyncGenerator<Row[], Params> {
-    const abortSignal = this.abortController.signal
+    const { abortSignal, cleanup } = this.#createAbortHandle()
     abortSignal.throwIfAborted()
 
     const flowHandle = new RowHandle<FlowEntry>(this.logger, {
@@ -150,7 +151,10 @@ export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
 
     try {
       while (true) {
-        const rows = await this.query(paginated.query(params), flowRef)
+        const rows = await this.query(paginated.query(params), {
+          abortSignal: flowRef.abortSignal,
+          flowId: flowRef.id,
+        })
         yield rows
         if (rows.length < params.limit) {
           break
@@ -163,6 +167,7 @@ export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
       }
       return params
     } finally {
+      cleanup()
       await flowHandle.update({
         endedAt: EpochMillis.now(),
         cancelled,
@@ -171,7 +176,36 @@ export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
   }
 
   cancelAll() {
-    this.#abortController?.abort()
-    this.#abortController = undefined
+    const controllers = Array.from(this.#abortControllers)
+    for (const controller of controllers) {
+      controller.abort()
+    }
+  }
+
+  #createAbortHandle(externalAbortSignal?: AbortSignal) {
+    const controller = new AbortController()
+    this.#abortControllers.add(controller)
+
+    const onAbort = () => {
+      controller.abort(externalAbortSignal?.reason)
+    }
+
+    if (externalAbortSignal) {
+      if (externalAbortSignal.aborted) {
+        controller.abort(externalAbortSignal.reason)
+      } else {
+        externalAbortSignal.addEventListener("abort", onAbort, { once: true })
+      }
+    }
+
+    return {
+      abortSignal: controller.signal,
+      cleanup: () => {
+        if (externalAbortSignal) {
+          externalAbortSignal.removeEventListener("abort", onAbort)
+        }
+        this.#abortControllers.delete(controller)
+      },
+    }
   }
 }

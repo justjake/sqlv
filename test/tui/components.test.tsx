@@ -2,16 +2,24 @@ import { testRender } from "@opentui/react/test-utils"
 import { afterEach, describe, expect, test } from "bun:test"
 import { act, type ReactNode } from "react"
 import { JsonRowView } from "../../src/tui/dataview/JsonRowView"
+import { ResultsTable } from "../../src/tui/dataview/ResultsTable"
 import { clampHistoryIndex, QueryHistory } from "../../src/tui/editor/QueryHistory"
 import { EditorView } from "../../src/tui/editor/EditorView"
+import { FocusProvider } from "../../src/tui/focus"
 import { Shortcut } from "../../src/tui/Shortcut"
 import { clampTreeIndex, flattenTree, TreeView } from "../../src/tui/sidebar/TreeView"
+import { KeybindProvider } from "../../src/tui/ui/keybind"
 import { makeQueryExecution } from "../support"
 
 let rendered: Awaited<ReturnType<typeof testRender>> | undefined
 
 async function render(node: ReactNode, size = { height: 12, width: 60 }) {
-  rendered = await testRender(node, size)
+  rendered = await testRender(
+    <FocusProvider>
+      <KeybindProvider>{node}</KeybindProvider>
+    </FocusProvider>,
+    size,
+  )
   await act(async () => {
     await rendered?.renderOnce()
   })
@@ -33,7 +41,7 @@ function createHistoryEntry(id: string, sql: string) {
 describe("TUI components", () => {
   test("renders shortcuts and only fires matching key bindings", async () => {
     const hits: string[] = []
-    const ui = await render(<Shortcut ctrl enabled label="Execute" name="x" onKey={() => hits.push("run")} />)
+    const ui = await render(<Shortcut keys="ctrl+x" enabled label="Execute" onKey={() => hits.push("run")} />)
 
     expect(ui.captureCharFrame()).toContain("^x Execute")
 
@@ -49,7 +57,7 @@ describe("TUI components", () => {
 
   test("ignores disabled shortcuts", async () => {
     let count = 0
-    const ui = await render(<Shortcut ctrl enabled={false} label="Execute" name="x" onKey={() => (count += 1)} />)
+    const ui = await render(<Shortcut keys="ctrl+x" enabled={false} label="Execute" onKey={() => (count += 1)} />)
 
     await act(async () => {
       ui.mockInput.pressKey("x", { ctrl: true })
@@ -66,7 +74,7 @@ describe("TUI components", () => {
     let historyCount = 0
     const ui = await render(
       <EditorView
-        focused
+        autoFocus
         text=""
         onExecute={(sql: string) => executions.push(sql)}
         onHistory={() => (historyCount += 1)}
@@ -97,6 +105,7 @@ describe("TUI components", () => {
     const ui = await render(
       <QueryHistory
         entries={[createHistoryEntry("one", "select 1"), createHistoryEntry("two", "select 2")]}
+        connections={[]}
         onBack={() => undefined}
         onRestore={() => undefined}
       />,
@@ -110,7 +119,7 @@ describe("TUI components", () => {
   })
 
   test("shows the empty query history state", async () => {
-    const ui = await render(<QueryHistory entries={[]} onBack={() => undefined} onRestore={() => undefined} />)
+    const ui = await render(<QueryHistory connections={[]} entries={[]} onBack={() => undefined} onRestore={() => undefined} />)
     expect(ui.captureCharFrame()).toContain("No query history yet.")
   })
 
@@ -164,5 +173,29 @@ describe("TUI components", () => {
 
     expect(ui.captureCharFrame()).toContain('"id": 1')
     expect(ui.captureCharFrame()).toContain('"name": "Ada"')
+  })
+
+  test("measures result tables to the parent pane and keeps rows single-line", async () => {
+    const ui = await render(
+      <box width={24}>
+        <ResultsTable
+          rows={[
+            { id: 1, name: "Ada Lovelace with a very long value" },
+            { id: 2, name: "Grace Hopper" },
+          ]}
+        />
+      </box>,
+      { height: 8, width: 40 },
+    )
+
+    const [header, separator, firstRow, secondRow] = ui.captureCharFrame().split("\n")
+    expect(header).toContain("id")
+    expect(header).toContain("name")
+    expect(header).not.toContain("Ada")
+    expect(separator).toContain("─")
+    expect(firstRow).toContain("1")
+    expect(firstRow).toContain("Ada")
+    expect(secondRow).toContain("2")
+    expect(secondRow).toContain("Grace")
   })
 })

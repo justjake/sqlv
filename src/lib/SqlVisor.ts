@@ -1,4 +1,4 @@
-import { QueryClient, type QueryKey } from "@tanstack/query-core"
+import { CancelledError, QueryClient } from "@tanstack/query-core"
 import { BunSqlAdapter } from "./adapters/BunSqlAdapter"
 import { sqlite } from "./adapters/sqlite"
 import { TursoAdapter } from "./adapters/TursoAdapter"
@@ -39,6 +39,17 @@ export type ConnectionsState = QueryState<Connection<any>[]>
 export type ConnectionObjectsState = QueryState<ObjectInfo[]>
 export type QueryExecutionState = QueryState<QueryExecution>
 
+export type QueryRef = {
+  queryId: string
+}
+
+export type ActiveQuery = {
+  queryId: string
+  text: string
+  connectionId: string
+  startedAt: number
+}
+
 export type SqlVisorState = {
   sessionId: string
   connections: ConnectionsState
@@ -47,6 +58,7 @@ export type SqlVisorState = {
   history: QueryExecution[]
   detailView: DetailView
   queryExecution: QueryExecutionState
+  activeQueries: ActiveQuery[]
   objectsByConnectionId: Record<string, ConnectionObjectsState>
 }
 
@@ -105,7 +117,7 @@ export class SqlVisor {
 
   #listeners = new Set<Listener>()
   #queryRunners = new Map<string, QueryRunnerImpl<any>>()
-  #activeQueryExecutionKey: QueryKey | undefined
+  #currentQueryId: string | undefined
   #state: SqlVisorState
 
   private constructor(args: {
@@ -133,6 +145,7 @@ export class SqlVisor {
         message: "Run a query to inspect results.",
       },
       queryExecution: pendingQueryState<QueryExecution>(),
+      activeQueries: [],
       objectsByConnectionId: {},
     }
 
@@ -238,7 +251,9 @@ export class SqlVisor {
       return
     }
 
+    this.#currentQueryId = executionId
     this.selectConnection(execution.connectionId)
+    this.#syncQueryState()
     this.setQueryEditorState({ text: execution.sql.source })
     if (execution.status !== "success") {
       this.setDetailView({
@@ -256,7 +271,59 @@ export class SqlVisor {
     })
   }
 
-  async runQuery(input: RunQueryInput = {}): Promise<QueryExecution> {
+  getQueryState(query: QueryRef): QueryExecutionState {
+    const state = this.#queryClient.getQueryState<QueryExecution>(this.#queryExecutionQueryKey(query.queryId))
+    const historyEntry = this.#state.history.find((entry) => entry.id === query.queryId)
+
+    if (!state) {
+      return historyEntry ? queryExecutionStateFromExecution(historyEntry) : pendingQueryState<QueryExecution>()
+    }
+
+    if (state.status !== "error" || state.data) {
+      return state
+    }
+
+    const execution = state.error instanceof QueryExecutionError ? state.error.execution : historyEntry
+    if (!execution) {
+      return state
+    }
+
+    return {
+      ...state,
+      data: execution,
+      dataUpdateCount: Math.max(state.dataUpdateCount, 1),
+      dataUpdatedAt: state.dataUpdatedAt || execution.finishedAt || execution.createdAt,
+    }
+  }
+
+  cancelQuery(query: QueryRef) {
+    void this.#queryClient.cancelQueries(
+      {
+        exact: true,
+        queryKey: this.#queryExecutionQueryKey(query.queryId),
+      },
+      {
+        revert: false,
+      },
+    )
+  }
+
+  cancelRunningQueries() {
+    void this.#queryClient.cancelQueries(
+      {
+        queryKey: [this.#queryKeyPrefix[0], this.#queryKeyPrefix[1], "query-execution"],
+      },
+      {
+        revert: false,
+      },
+    )
+  }
+
+  cancelActiveQueries() {
+    this.cancelRunningQueries()
+  }
+
+  runQuery(input: RunQueryInput = {}): QueryRef {
     const text = input.text ?? this.#state.queryEditor.text
     const connectionId = input.connectionId ?? this.#state.selectedConnectionId
 
@@ -273,56 +340,85 @@ export class SqlVisor {
     }
 
     const connection = this.#requireConnection(connectionId)
-    const executionKey = this.#queryExecutionQueryKey(createId())
-    this.#activeQueryExecutionKey = executionKey
+    const queryId = createId()
+    const queryRef = {
+      queryId,
+    } satisfies QueryRef
+    const startedAt = Date.now()
+
+    this.#currentQueryId = queryId
+
+    const executionKey = this.#queryExecutionQueryKey(queryId)
+    const queryPromise = this.#queryClient.fetchQuery({
+      gcTime: Infinity,
+      queryKey: executionKey,
+      queryFn: async ({ signal }) => {
+        signal.throwIfAborted()
+        const db = await this.#getQueryRunner(connection)
+        signal.throwIfAborted()
+        return db.execute(unsafeRawSQL<object>(text), {
+          abortSignal: signal,
+          executionId: queryId,
+        })
+      },
+      meta: { queryId, text, connectionId, startedAt },
+      retry: false,
+      staleTime: Infinity,
+    })
+
     this.#syncQueryState()
 
-    try {
-      const execution = await this.#queryClient.fetchQuery({
-        gcTime: 5 * 60 * 1000,
-        queryKey: executionKey,
-        queryFn: async () => {
-          const db = await this.#getQueryRunner(connection)
-          return db.execute(unsafeRawSQL<object>(text))
-        },
-        retry: false,
-        staleTime: Infinity,
+    void queryPromise
+      .then((execution) => {
+        const patch: Partial<SqlVisorState> = {
+          history: [execution, ...this.#state.history],
+        }
+
+        if (this.#currentQueryId === queryId) {
+          patch.detailView = {
+            kind: "rows",
+            title: `Results (${execution.rowCount})`,
+            rows: execution.rows,
+          }
+        }
+
+        this.#setState(patch)
+      })
+      .catch((_error) => {
+        const error = _error instanceof Error ? _error : new Error(String(_error))
+        const cancelled = isQueryCancellationError(error)
+        const execution =
+          error instanceof QueryExecutionError
+            ? error.execution
+            : createSyntheticQueryExecution({
+                id: queryId,
+                connectionId,
+                sessionId: this.session.id,
+                sql: text,
+                error: cancelled ? "Query cancelled." : error.message,
+                errorStack: error.stack,
+                status: cancelled ? "cancelled" : "error",
+              })
+
+        const patch: Partial<SqlVisorState> = {
+          history: [execution, ...this.#state.history],
+        }
+
+        if (this.#currentQueryId === queryId) {
+          patch.detailView = {
+            kind: "error",
+            title: execution.status === "cancelled" ? "Query Cancelled" : "Query Error",
+            message: execution.error ?? error.message,
+          }
+        }
+
+        this.#setState(patch)
+      })
+      .finally(() => {
+        this.#syncQueryState()
       })
 
-      this.#setState({
-        history: [execution, ...this.#state.history],
-        detailView: {
-          kind: "rows",
-          title: `Results (${execution.rowCount})`,
-          rows: execution.rows,
-        },
-      })
-
-      return execution
-    } catch (_error) {
-      const error = _error instanceof Error ? _error : new Error(String(_error))
-      const execution =
-        error instanceof QueryExecutionError
-          ? error.execution
-          : createFailedQueryExecution({
-              connectionId,
-              sessionId: this.session.id,
-              sql: text,
-              error: error.message,
-              errorStack: error.stack,
-            })
-
-      this.#setState({
-        history: [execution, ...this.#state.history],
-        detailView: {
-          kind: "error",
-          title: execution.status === "cancelled" ? "Query Cancelled" : "Query Error",
-          message: execution.error ?? error.message,
-        },
-      })
-
-      throw error
-    }
+    return queryRef
   }
 
   async loadConnectionObjects(connectionId: string): Promise<ObjectInfo[]> {
@@ -384,13 +480,29 @@ export class SqlVisor {
       )
     }
 
-    const queryExecution = this.#activeQueryExecutionKey
-      ? queryStateOrPending(this.#queryClient.getQueryState<QueryExecution>(this.#activeQueryExecutionKey))
+    const queryExecution = this.#currentQueryId
+      ? this.getQueryState({ queryId: this.#currentQueryId })
       : pendingQueryState<QueryExecution>()
+
+    const queryExecutionKeyPrefix = [this.#queryKeyPrefix[0], this.#queryKeyPrefix[1], "query-execution"] as const
+    const fetchingQueries = this.#queryClient.getQueryCache().findAll({
+      queryKey: queryExecutionKeyPrefix,
+      fetchStatus: "fetching",
+    })
+    const activeQueries: ActiveQuery[] = fetchingQueries.map((q) => {
+      const meta = q.meta as { queryId?: string; text?: string; connectionId?: string; startedAt?: number } | undefined
+      return {
+        queryId: meta?.queryId ?? String(q.queryKey[3] ?? ""),
+        text: meta?.text ?? "",
+        connectionId: meta?.connectionId ?? "",
+        startedAt: meta?.startedAt ?? 0,
+      }
+    })
 
     this.#replaceState({
       connections,
       queryExecution,
+      activeQueries,
       objectsByConnectionId,
     })
   }
@@ -405,7 +517,7 @@ export class SqlVisor {
     }
   }
 
-  #replaceState(patch: Pick<SqlVisorState, "connections" | "queryExecution" | "objectsByConnectionId">) {
+  #replaceState(patch: Pick<SqlVisorState, "connections" | "queryExecution" | "activeQueries" | "objectsByConnectionId">) {
     this.#state = {
       ...this.#state,
       ...patch,
@@ -442,17 +554,19 @@ function createQueryClient(): QueryClient {
   })
 }
 
-function createFailedQueryExecution(args: {
+function createSyntheticQueryExecution(args: {
+  id: string
   connectionId: string
   sessionId: string
   sql: string
   error: string
   errorStack?: string
+  status: "error" | "cancelled"
 }): QueryExecution {
   const now = EpochMillis.now()
   return {
     type: "queryExecution",
-    id: createId(),
+    id: args.id,
     connectionId: args.connectionId,
     sessionId: args.sessionId,
     createdAt: now,
@@ -462,10 +576,33 @@ function createFailedQueryExecution(args: {
       args: [],
     },
     sensitive: false,
-    status: "error",
+    status: args.status,
     error: args.error,
     errorStack: args.errorStack,
     rows: [],
     rowCount: 0,
   }
+}
+
+function queryExecutionStateFromExecution(execution: QueryExecution): QueryExecutionState {
+  const error = execution.status === "success" ? null : new QueryExecutionError(execution)
+
+  return {
+    data: execution,
+    dataUpdateCount: 1,
+    dataUpdatedAt: execution.finishedAt || execution.createdAt,
+    error,
+    errorUpdateCount: error ? 1 : 0,
+    errorUpdatedAt: error ? execution.finishedAt || execution.createdAt : 0,
+    fetchFailureCount: error ? 1 : 0,
+    fetchFailureReason: error,
+    fetchMeta: null,
+    isInvalidated: false,
+    status: error ? "error" : execution.status === "pending" ? "pending" : "success",
+    fetchStatus: execution.status === "pending" ? "fetching" : "idle",
+  }
+}
+
+function isQueryCancellationError(error: Error): boolean {
+  return error instanceof CancelledError || error.name === "AbortError"
 }

@@ -1,18 +1,21 @@
 import { type TextareaRenderable } from "@opentui/core"
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef, type RefObject } from "react"
+import { FocusHalo, FocusNavigable, useIsFocusNavigableFocused } from "../focus"
 import { Shortcut } from "../Shortcut"
 
 export type EditorProps = {
-  focused?: boolean
   text: string
   onAddConnection?: () => void
   onTextChange?: (sql: string) => void
   onExecute?: (sql: string) => void
   onHistory?: () => void
+  autoFocus?: boolean
 }
 
+export const QUERY_EDITOR_FOCUS_ID = "query-editor"
+
 export function EditorView(props: EditorProps) {
-  const { focused, text, onAddConnection, onTextChange, onExecute, onHistory } = props
+  const { autoFocus, text, onAddConnection, onTextChange, onExecute, onHistory } = props
   const textareaRef = useRef<TextareaRenderable>(null)
 
   const handleExecute = useCallback(() => {
@@ -46,20 +49,57 @@ export function EditorView(props: EditorProps) {
   }, [text])
 
   return (
-    <box flexDirection="column" flexGrow={1}>
+    <FocusNavigable
+      autoFocus={autoFocus}
+      flexDirection="column"
+      flexGrow={1}
+      focus={() => textareaRef.current?.focus()}
+      focusNavigableId={QUERY_EDITOR_FOCUS_ID}
+    >
+      <EditorSurface
+        handleClear={handleClear}
+        handleContentChange={handleContentChange}
+        handleExecute={handleExecute}
+        onAddConnection={onAddConnection}
+        onHistory={onHistory}
+        text={text}
+        textareaRef={textareaRef}
+      />
+    </FocusNavigable>
+  )
+}
+
+function EditorSurface(props: {
+  text: string
+  textareaRef: RefObject<TextareaRenderable | null>
+  handleContentChange: () => void
+  handleExecute: () => void
+  handleClear: () => void
+  onHistory?: () => void
+  onAddConnection?: () => void
+}) {
+  const focused = useIsFocusNavigableFocused()
+
+  return (
+    <box
+      flexDirection="column"
+      flexGrow={1}
+      position="relative"
+    >
       <box flexDirection="row" gap={1}>
-        <Shortcut label="Execute" ctrl name="x" enabled={focused} onKey={handleExecute} />
-        <Shortcut label="Clear" ctrl name="d" enabled={focused} onKey={handleClear} />
-        <Shortcut label="History" ctrl name="r" enabled={focused} onKey={onHistory} />
-        {onAddConnection && <Shortcut label="Add Conn" ctrl name="n" enabled={focused} onKey={onAddConnection} />}
+        <Shortcut keys="ctrl+x" label="Execute" enabled={focused} onKey={props.handleExecute} />
+        <Shortcut keys="ctrl+d" label="Clear" enabled={focused} onKey={props.handleClear} />
+        <Shortcut keys="ctrl+r" label="History" enabled={focused} onKey={props.onHistory} />
+        {props.onAddConnection && <Shortcut keys="ctrl+n" label="Add Conn" enabled={focused} onKey={props.onAddConnection} />}
       </box>
       <textarea
-        ref={textareaRef}
+        ref={props.textareaRef}
         focused={focused}
-        initialValue={text}
-        onContentChange={handleContentChange}
-        onSubmit={handleExecute}
+        initialValue={props.text}
+        onContentChange={props.handleContentChange}
+        onSubmit={props.handleExecute}
       />
+      <FocusHalo />
     </box>
   )
 }

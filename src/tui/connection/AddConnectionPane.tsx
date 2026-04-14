@@ -1,6 +1,6 @@
-import type { ScrollBoxRenderable } from "@opentui/core"
+import type { KeyEvent, ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type {
   AnyAdapter,
   ConnectionField,
@@ -9,7 +9,16 @@ import type {
   ConnectionSpecDraft,
   Protocol,
 } from "../../lib/interface/Adapter"
+import {
+  FocusNavigable,
+  FocusNavigableArea,
+  focusNavigableRenderableId,
+  useFocusTree,
+  useIsFocusNavigableHighlighted,
+  useIsFocusNavigationActive,
+} from "../focus"
 import { Shortcut } from "../Shortcut"
+import { useTheme } from "../ui/theme"
 import { useSqlVisor, useSqlVisorState } from "../useSqlVisor"
 
 type AddConnectionPaneProps = {
@@ -17,32 +26,28 @@ type AddConnectionPaneProps = {
   onSaved: () => void
 }
 
-type ProtocolFocusField = {
-  kind: "protocol"
-  key: "protocol"
-}
-
-type NameFocusField = {
-  kind: "name"
-  key: "name"
-}
-
-type ConfigFocusField = {
-  kind: "field"
-  field: ConnectionField
-  key: string
-}
-
-type FocusField = ProtocolFocusField | NameFocusField | ConfigFocusField
+type FocusField =
+  | { kind: "protocol"; key: "protocol" }
+  | { kind: "name"; key: "name" }
+  | { kind: "field"; field: ConnectionField; key: string }
 
 type AdapterWithConnectionSpec = AnyAdapter & {
   getConnectionSpec: () => ConnectionSpec<any>
 }
 
+type FieldNavProps = {
+  active: boolean
+  onPrev: () => void
+  onNext: () => void
+}
+
+export const ADD_CONNECTION_AREA_ID = "add-connection"
+
 export function AddConnectionPane(props: AddConnectionPaneProps) {
   const { onBack, onSaved } = props
   const engine = useSqlVisor()
   const state = useSqlVisorState()
+  const focusTree = useFocusTree()
   const adapters = engine.registry.list().filter(hasConnectionSpec)
   const initialProtocol = pickInitialProtocol(adapters, state.selectedConnectionId, state.connections.data)
   const initialSpec = initialProtocol
@@ -55,116 +60,55 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
   const nameRef = useRef("")
   const valuesRef = useRef<ConnectionFormValues>(initialSpec ? defaultFieldValues(initialSpec) : {})
   const [errors, setErrors] = useState<Record<string, string | undefined>>({})
-  const [activeFieldIndex, setActiveFieldIndex] = useState(0)
+  const [activeFieldIndex, setActiveFieldIndex] = useState(1)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | undefined>()
   const scrollRef = useRef<ScrollBoxRenderable>(null)
 
   useEffect(() => {
-    if (protocol || !initialProtocol) {
-      return
-    }
-
+    if (protocol || !initialProtocol) return
     loadProtocol(initialProtocol)
   }, [initialProtocol, protocol])
 
   const adapter = protocol ? adapters.find((candidate) => candidate.protocol === protocol) : undefined
   const spec = adapter?.getConnectionSpec()
   const visibleFields = spec?.fields.filter((field) => field.visible?.(values) ?? true) ?? []
-  const focusFields: FocusField[] = [
-    { kind: "protocol", key: "protocol" },
-    { kind: "name", key: "name" },
-    ...visibleFields.map(
-      (field): ConfigFocusField => ({
-        field,
-        key: field.key,
-        kind: "field",
-      }),
-    ),
-  ]
+  const focusFields: FocusField[] = useMemo(
+    () => [
+      { kind: "protocol", key: "protocol" },
+      { kind: "name", key: "name" },
+      ...visibleFields.map((field): FocusField => ({ kind: "field", field, key: field.key })),
+    ],
+    [visibleFields],
+  )
 
   useEffect(() => {
-    setActiveFieldIndex((current) => clampIndex(current, focusFields.length))
+    setActiveFieldIndex((current) => clampIndex(current, focusFields.length, focusFields.length > 1 ? 1 : 0))
   }, [focusFields.length])
 
   useEffect(() => {
     const activeField = focusFields[activeFieldIndex]
-    if (activeField && scrollRef.current) {
-      scrollRef.current.scrollChildIntoView(`field-${activeField.key}`)
-    }
-  }, [activeFieldIndex])
-
-  useKeyboard((event) => {
-    if (!focusFields.length) {
-      return
-    }
-
-    if (event.ctrl && event.name === "s") {
-      event.preventDefault()
-      event.stopPropagation()
-      void saveConnection()
-      return
-    }
-
-    if ((event.ctrl && event.name === "c") || event.name === "escape") {
-      event.preventDefault()
-      event.stopPropagation()
-      onBack()
-      return
-    }
-
-    if (event.name === "tab") {
-      event.preventDefault()
-      event.stopPropagation()
-      setActiveFieldIndex((current) => stepIndex(current, focusFields.length, event.shift ? -1 : 1))
-      return
-    }
-
-    const activeField = focusFields[activeFieldIndex]
     if (!activeField) {
       return
     }
+    const path = addConnectionFieldPath(activeField.key)
+    focusTree.setFocusedPath(path)
+    scrollRef.current?.scrollChildIntoView(focusNavigableRenderableId(path))
+  }, [activeFieldIndex, focusFields, focusTree])
 
-    if (activeField.kind === "protocol") {
-      if (isNextOptionKey(event.name)) {
-        event.preventDefault()
-        event.stopPropagation()
-        cycleProtocol(1)
-      } else if (isPreviousOptionKey(event.name)) {
-        event.preventDefault()
-        event.stopPropagation()
-        cycleProtocol(-1)
-      }
-      return
-    }
+  const focusFieldByIndex = (nextIndex: number) => {
+    const clampedIndex = clampIndex(nextIndex, focusFields.length, focusFields.length > 1 ? 1 : 0)
+    setActiveFieldIndex(clampedIndex)
+  }
 
-    if (activeField.kind === "field" && activeField.field.kind === "boolean") {
-      if (isToggleKey(event.name)) {
-        event.preventDefault()
-        event.stopPropagation()
-        updateBooleanField(activeField.field.key, !booleanField(values, activeField.field.key, false))
-      }
-      return
-    }
-
-    if (activeField.kind === "field" && activeField.field.kind === "select") {
-      if (isNextOptionKey(event.name)) {
-        event.preventDefault()
-        event.stopPropagation()
-        stepSelectField(activeField.field, 1)
-      } else if (isPreviousOptionKey(event.name)) {
-        event.preventDefault()
-        event.stopPropagation()
-        stepSelectField(activeField.field, -1)
-      }
-    }
-  })
+  const navigatePrev = () => focusFieldByIndex(stepIndex(activeFieldIndex, focusFields.length, -1))
+  const navigateNext = () => focusFieldByIndex(stepIndex(activeFieldIndex, focusFields.length, 1))
 
   if (!adapters.length) {
     return (
       <box flexDirection="column" gap={1} padding={1}>
         <box flexDirection="row" gap={1}>
-          <Shortcut label="Back" enabled name="escape" onKey={onBack} />
+          <Shortcut keys="ctrl+c" label="Back" enabled onKey={onBack} />
         </box>
         <text>No connection forms are available for the registered adapters.</text>
       </box>
@@ -174,16 +118,10 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
   async function saveConnection() {
     const currentProtocol = protocolRef.current
     const currentValues = valuesRef.current
-
-    if (!currentProtocol || !spec || saving) {
-      return
-    }
+    if (!currentProtocol || !spec || saving) return
 
     const resolvedName = resolveConnectionName(nameRef.current, spec.defaultName)
-    const nextErrors = validateDraft(spec, {
-      name: resolvedName,
-      values: currentValues,
-    })
+    const nextErrors = validateDraft(spec, { name: resolvedName, values: currentValues })
     if (hasErrors(nextErrors)) {
       setErrors(nextErrors)
       setFormError(undefined)
@@ -208,9 +146,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
 
   function loadProtocol(nextProtocol: Protocol) {
     const nextAdapter = adapters.find((candidate) => candidate.protocol === nextProtocol)
-    if (!nextAdapter) {
-      return
-    }
+    if (!nextAdapter) return
 
     const nextSpec = nextAdapter.getConnectionSpec()
     protocolRef.current = nextProtocol
@@ -221,126 +157,296 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
     setValues(valuesRef.current)
     setErrors({})
     setFormError(undefined)
-    setActiveFieldIndex(0)
+    setActiveFieldIndex(1)
   }
 
   function cycleProtocol(step: number) {
     const currentProtocol = protocolRef.current
-    if (!currentProtocol || !adapters.length) {
-      return
-    }
-
+    if (!currentProtocol || !adapters.length) return
     const index = adapters.findIndex((candidate) => candidate.protocol === currentProtocol)
-    if (index < 0) {
-      return
-    }
-
+    if (index < 0) return
     const nextIndex = stepIndex(index, adapters.length, step)
     const nextProtocol = adapters[nextIndex]?.protocol
-    if (nextProtocol) {
-      loadProtocol(nextProtocol)
-    }
-  }
-
-  function stepSelectField(field: Extract<ConnectionField, { kind: "select" }>, step: number) {
-    const currentValue = stringField(values, field.key, field.defaultValue ?? field.options[0]?.value ?? "")
-    const currentIndex = field.options.findIndex((option) => option.value === currentValue)
-    const nextIndex = stepIndex(currentIndex < 0 ? 0 : currentIndex, field.options.length, step)
-    const nextValue = field.options[nextIndex]?.value
-    if (nextValue !== undefined) {
-      updateStringField(field.key, nextValue)
-    }
+    if (nextProtocol) loadProtocol(nextProtocol)
   }
 
   function updateStringField(key: string, nextValue: string) {
-    valuesRef.current = {
-      ...valuesRef.current,
-      [key]: nextValue,
-    }
-    setValues((current) => ({
-      ...current,
-      [key]: nextValue,
-    }))
+    valuesRef.current = { ...valuesRef.current, [key]: nextValue }
+    setValues((current) => ({ ...current, [key]: nextValue }))
     clearError(key)
   }
 
   function updateBooleanField(key: string, nextValue: boolean) {
-    valuesRef.current = {
-      ...valuesRef.current,
-      [key]: nextValue,
-    }
-    setValues((current) => ({
-      ...current,
-      [key]: nextValue,
-    }))
+    valuesRef.current = { ...valuesRef.current, [key]: nextValue }
+    setValues((current) => ({ ...current, [key]: nextValue }))
     clearError(key)
   }
 
   function clearError(key: string) {
-    setErrors((current) => ({
-      ...current,
-      [key]: undefined,
-    }))
+    setErrors((current) => ({ ...current, [key]: undefined }))
     setFormError(undefined)
   }
 
   return (
-    <box flexDirection="column" flexGrow={1}>
-      <box flexDirection="row" gap={1}>
-        <Shortcut ctrl enabled={!saving} label="Save" name="s" onKey={() => void saveConnection()} />
-        <Shortcut ctrl enabled={!saving} label="Cancel" name="c" onKey={onBack} />
-        <Shortcut enabled={!saving} label="Back" name="escape" onKey={onBack} />
+    <FocusNavigableArea
+      flexDirection="column"
+      flexGrow={1}
+      focusNavigableId={ADD_CONNECTION_AREA_ID}
+      onEsc={onBack}
+      onEscLabel="Close"
+      scrollRef={scrollRef}
+      trap
+    >
+      <box flexDirection="column" flexGrow={1}>
+        <box flexDirection="row" gap={1}>
+          <Shortcut keys="ctrl+s" label="Save" enabled={!saving} onKey={() => void saveConnection()} />
+          <Shortcut keys="ctrl+c" label="Cancel" enabled={!saving} onKey={onBack} />
+        </box>
+
+        <scrollbox ref={scrollRef} flexGrow={1} contentOptions={{ flexDirection: "column", gap: 1 }}>
+          <text>Add Connection</text>
+          {formError && <text>{formError}</text>}
+
+          <FocusNavigable focus={() => focusFieldByIndex(findFieldIndex(focusFields, "protocol"))} focusNavigableId="protocol">
+            <ProtocolPicker
+              active={focusFields[activeFieldIndex]?.kind === "protocol"}
+              adapters={adapters}
+              onCycle={cycleProtocol}
+              onNext={navigateNext}
+              onPrev={navigatePrev}
+              protocol={protocol}
+            />
+          </FocusNavigable>
+
+          <FocusNavigable focus={() => focusFieldByIndex(findFieldIndex(focusFields, "name"))} focusNavigableId="name">
+            <TextInputField
+              active={focusFields[activeFieldIndex]?.kind === "name"}
+              error={errors.name}
+              label="Connection Name"
+              onChange={(value) => {
+                nameRef.current = value
+                setName(value)
+                clearError("name")
+              }}
+              onNext={navigateNext}
+              onPrev={navigatePrev}
+              placeholder={spec?.defaultName}
+              value={name}
+            />
+          </FocusNavigable>
+
+          {visibleFields.map((field) => {
+            const isActive =
+              focusFields[activeFieldIndex]?.kind === "field" && focusFields[activeFieldIndex]?.key === field.key
+            const focus = () => focusFieldByIndex(findFieldIndex(focusFields, field.key))
+            switch (field.kind) {
+              case "boolean":
+                return (
+                  <FocusNavigable key={field.key} focus={focus} focusNavigableId={field.key}>
+                    <BooleanField
+                      active={isActive}
+                      checked={booleanField(values, field.key, field.defaultValue ?? false)}
+                      description={field.description}
+                      error={errors[field.key]}
+                      label={field.label}
+                      onChange={(value) => updateBooleanField(field.key, value)}
+                      onNext={navigateNext}
+                      onPrev={navigatePrev}
+                    />
+                  </FocusNavigable>
+                )
+              case "text":
+              case "path":
+              case "secret":
+                return (
+                  <FocusNavigable key={field.key} focus={focus} focusNavigableId={field.key}>
+                    <TextInputField
+                      active={isActive}
+                      description={field.description}
+                      error={errors[field.key]}
+                      label={field.label}
+                      onChange={(value) => updateStringField(field.key, value)}
+                      onNext={navigateNext}
+                      onPrev={navigatePrev}
+                      placeholder={field.placeholder}
+                      value={stringField(values, field.key, field.defaultValue ?? "")}
+                    />
+                  </FocusNavigable>
+                )
+              case "select":
+                return (
+                  <FocusNavigable key={field.key} focus={focus} focusNavigableId={field.key}>
+                    <SelectField
+                      active={isActive}
+                      description={field.description}
+                      error={errors[field.key]}
+                      field={field}
+                      onChange={(value) => updateStringField(field.key, value)}
+                      onNext={navigateNext}
+                      onPrev={navigatePrev}
+                      value={stringField(values, field.key, field.defaultValue ?? "")}
+                    />
+                  </FocusNavigable>
+                )
+            }
+          })}
+        </scrollbox>
       </box>
-
-      <scrollbox ref={scrollRef} flexGrow={1} contentOptions={{ flexDirection: "column", gap: 1 }}>
-        <text>Add Connection</text>
-        {formError && <text>{formError}</text>}
-
-        <FieldContainer active={focusFields[activeFieldIndex]?.kind === "protocol"} id="field-protocol">
-          <text>Protocol</text>
-          <text>{adapters.map((candidate) => protocolLabel(candidate, protocol)).join("  ")}</text>
-        </FieldContainer>
-
-        <FieldContainer active={focusFields[activeFieldIndex]?.kind === "name"} id="field-name">
-          <text>Connection Name</text>
-          <input
-            focused={focusFields[activeFieldIndex]?.kind === "name"}
-            onInput={setNameAndClearError}
-            placeholder={spec?.defaultName}
-            value={name}
-          />
-          {errors.name && <text>{errors.name}</text>}
-        </FieldContainer>
-
-        {visibleFields.map((field) => {
-          const isActive =
-            focusFields[activeFieldIndex]?.kind === "field" && focusFields[activeFieldIndex]?.key === field.key
-          return (
-            <FieldContainer active={isActive} id={`field-${field.key}`} key={field.key}>
-              <text>{field.label}</text>
-              {renderField(field, values, isActive, updateBooleanField, updateStringField)}
-              {field.description && <text>{field.description}</text>}
-              {errors[field.key] && <text>{errors[field.key]}</text>}
-            </FieldContainer>
-          )
-        })}
-      </scrollbox>
-    </box>
+    </FocusNavigableArea>
   )
-
-  function setNameAndClearError(nextName: string) {
-    nameRef.current = nextName
-    setName(nextName)
-    clearError("name")
-  }
 }
 
-function FieldContainer(props: { active: boolean; children: ReactNode; id?: string }) {
+function ProtocolPicker(
+  props: FieldNavProps & {
+    adapters: AdapterWithConnectionSpec[]
+    protocol: Protocol | undefined
+    onCycle: (step: number) => void
+  },
+) {
+  const { active, onPrev, onNext, adapters, protocol, onCycle } = props
+
+  useKeyboard((event) => {
+    if (!active) return
+    if (handleFieldNav(event, onPrev, onNext)) return
+    if (event.name === "right" || event.name === "enter") {
+      event.preventDefault()
+      event.stopPropagation()
+      onCycle(1)
+    } else if (event.name === "left") {
+      event.preventDefault()
+      event.stopPropagation()
+      onCycle(-1)
+    }
+  })
+
+  return (
+    <FieldContainer active={active}>
+      <text>Protocol</text>
+      <text>{adapters.map((adapter) => protocolLabel(adapter, protocol)).join("  ")}</text>
+    </FieldContainer>
+  )
+}
+
+function TextInputField(
+  props: FieldNavProps & {
+    label: string
+    value: string
+    placeholder?: string
+    description?: string
+    error?: string
+    onChange: (value: string) => void
+  },
+) {
+  const { active, onPrev, onNext, label, value, placeholder, description, error, onChange } = props
+  const theme = useTheme()
+
+  useKeyboard((event) => {
+    if (!active) return
+    handleFieldNav(event, onPrev, onNext)
+  })
+
+  return (
+    <FieldContainer active={active}>
+      <box flexDirection="row">
+        <text>{label} </text>
+        <box backgroundColor={theme.inputBg} flexGrow={1}>
+          <input focused={active} flexGrow={1} onInput={onChange} placeholder={placeholder} value={value} />
+        </box>
+      </box>
+      {description && <text opacity={0.5}>{description}</text>}
+      {error && <text>{error}</text>}
+    </FieldContainer>
+  )
+}
+
+function BooleanField(
+  props: FieldNavProps & {
+    label: string
+    checked: boolean
+    description?: string
+    error?: string
+    onChange: (value: boolean) => void
+  },
+) {
+  const { active, onPrev, onNext, label, checked, description, error, onChange } = props
+
+  useKeyboard((event) => {
+    if (!active) return
+    if (handleFieldNav(event, onPrev, onNext)) return
+    if (event.name === "space" || event.name === "enter") {
+      event.preventDefault()
+      event.stopPropagation()
+      onChange(!checked)
+    }
+  })
+
+  return (
+    <FieldContainer active={active}>
+      <box flexDirection="row" justifyContent="space-between" onMouseUp={() => onChange(!checked)}>
+        <text>
+          {checked ? "◉" : "○"} {label}
+        </text>
+        {active && <text opacity={0.5}>space toggle</text>}
+      </box>
+      {description && <text opacity={0.5}>{description}</text>}
+      {error && <text>{error}</text>}
+    </FieldContainer>
+  )
+}
+
+function SelectField(
+  props: FieldNavProps & {
+    field: Extract<ConnectionField, { kind: "select" }>
+    value: string
+    description?: string
+    error?: string
+    onChange: (value: string) => void
+  },
+) {
+  const { active, onPrev, onNext, field, value, description, error, onChange } = props
+
+  useKeyboard((event) => {
+    if (!active) return
+    if (handleFieldNav(event, onPrev, onNext)) return
+    if (event.name === "right" || event.name === "enter") {
+      event.preventDefault()
+      event.stopPropagation()
+      cycleOption(1)
+    } else if (event.name === "left") {
+      event.preventDefault()
+      event.stopPropagation()
+      cycleOption(-1)
+    }
+  })
+
+  function cycleOption(step: number) {
+    const currentIndex = field.options.findIndex((option) => option.value === value)
+    const nextIndex = stepIndex(currentIndex < 0 ? 0 : currentIndex, field.options.length, step)
+    const nextValue = field.options[nextIndex]?.value
+    if (nextValue !== undefined) onChange(nextValue)
+  }
+
+  const displayLabel = field.options.find((option) => option.value === value)?.label ?? value
+
+  return (
+    <FieldContainer active={active}>
+      <text>{field.label}</text>
+      <text>{displayLabel}</text>
+      {description && <text opacity={0.5}>{description}</text>}
+      {error && <text>{error}</text>}
+    </FieldContainer>
+  )
+}
+
+function FieldContainer(props: { active: boolean; children: ReactNode }) {
+  const theme = useTheme()
+  const highlighted = useIsFocusNavigableHighlighted()
+  const navigationActive = useIsFocusNavigationActive()
+
   return (
     <box
-      backgroundColor={props.active ? "blue" : undefined}
+      backgroundColor={navigationActive && highlighted ? theme.focusNavBg : (props.active ? theme.focusBg : undefined)}
       flexDirection="column"
-      id={props.id}
       paddingLeft={1}
       paddingRight={1}
     >
@@ -349,36 +455,26 @@ function FieldContainer(props: { active: boolean; children: ReactNode; id?: stri
   )
 }
 
-function renderField(
-  field: ConnectionField,
-  values: ConnectionFormValues,
-  focused: boolean,
-  updateBooleanField: (key: string, nextValue: boolean) => void,
-  updateStringField: (key: string, nextValue: string) => void,
-) {
-  switch (field.kind) {
-    case "text":
-    case "path":
-    case "secret":
-      return (
-        <input
-          focused={focused}
-          onInput={(nextValue) => updateStringField(field.key, nextValue)}
-          placeholder={field.placeholder}
-          value={stringField(values, field.key, field.defaultValue ?? "")}
-        />
-      )
-    case "boolean":
-      return (
-        <box
-          onMouseUp={() => updateBooleanField(field.key, !booleanField(values, field.key, field.defaultValue ?? false))}
-        >
-          <text>[{booleanField(values, field.key, field.defaultValue ?? false) ? "x" : " "}]</text>
-        </box>
-      )
-    case "select":
-      return <text>{selectLabel(field, stringField(values, field.key, field.defaultValue ?? ""))}</text>
+function handleFieldNav(event: KeyEvent, onPrev: () => void, onNext: () => void): boolean {
+  if (event.name === "tab") {
+    event.preventDefault()
+    event.stopPropagation()
+    event.shift ? onPrev() : onNext()
+    return true
   }
+  if (event.name === "up") {
+    event.preventDefault()
+    event.stopPropagation()
+    onPrev()
+    return true
+  }
+  if (event.name === "down") {
+    event.preventDefault()
+    event.stopPropagation()
+    onNext()
+    return true
+  }
+  return false
 }
 
 function hasConnectionSpec(adapter: AnyAdapter): adapter is AdapterWithConnectionSpec {
@@ -397,31 +493,31 @@ function pickInitialProtocol(
   return adapters[0]?.protocol
 }
 
+function addConnectionFieldPath(key: string) {
+  return [ADD_CONNECTION_AREA_ID, key] as const
+}
+
+function findFieldIndex(fields: FocusField[], key: string): number {
+  const index = fields.findIndex((field) => field.key === key)
+  return index < 0 ? 0 : index
+}
+
 function protocolLabel(adapter: AdapterWithConnectionSpec, activeProtocol: Protocol | undefined): string {
-  if (adapter.protocol === activeProtocol) {
-    return `[${adapter.protocol}]`
-  }
+  if (adapter.protocol === activeProtocol) return `[${adapter.protocol}]`
   return adapter.protocol
 }
 
 function defaultFieldValues(spec: ConnectionSpec<any>): ConnectionFormValues {
   const values: ConnectionFormValues = {}
-  for (const field of spec.fields) {
-    values[field.key] = field.defaultValue
-  }
+  for (const field of spec.fields) values[field.key] = field.defaultValue
   return values
 }
 
 function validateDraft(spec: ConnectionSpec<any>, draft: ConnectionSpecDraft): Record<string, string | undefined> {
   const errors: Record<string, string | undefined> = {}
-  if (!draft.name.trim()) {
-    errors.name = "Connection name is required."
-  }
-
+  if (!draft.name.trim()) errors.name = "Connection name is required."
   for (const field of spec.fields) {
-    if (!(field.visible?.(draft.values) ?? true)) {
-      continue
-    }
+    if (!(field.visible?.(draft.values) ?? true)) continue
     if (
       (field.kind === "text" || field.kind === "path" || field.kind === "secret") &&
       field.required &&
@@ -430,12 +526,9 @@ function validateDraft(spec: ConnectionSpec<any>, draft: ConnectionSpecDraft): R
       errors[field.key] = `${field.label} is required.`
     }
   }
-
   if (spec.validate) {
     const validationErrors = spec.validate(draft)
-    for (const [key, value] of Object.entries(validationErrors)) {
-      errors[key] = value
-    }
+    for (const [key, value] of Object.entries(validationErrors)) errors[key] = value
   }
   return errors
 }
@@ -446,42 +539,19 @@ function hasErrors(errors: Record<string, string | undefined>): boolean {
 
 function resolveConnectionName(name: string, defaultName: string | undefined): string {
   const trimmed = name.trim()
-  if (trimmed.length > 0) {
-    return trimmed
-  }
-  return defaultName?.trim() ?? ""
+  return trimmed.length > 0 ? trimmed : (defaultName?.trim() ?? "")
 }
 
-function clampIndex(index: number, length: number): number {
-  if (length <= 0) {
-    return 0
-  }
-  if (index < 0) {
-    return 0
-  }
-  if (index >= length) {
-    return length - 1
-  }
+function clampIndex(index: number, length: number, fallback = 0): number {
+  if (length <= 0) return 0
+  if (index < 0) return fallback
+  if (index >= length) return length - 1
   return index
 }
 
 function stepIndex(index: number, length: number, step: number): number {
-  if (length <= 0) {
-    return 0
-  }
+  if (length <= 0) return 0
   return (index + step + length) % length
-}
-
-function isNextOptionKey(name: string): boolean {
-  return name === "right" || name === "down" || name === "enter"
-}
-
-function isPreviousOptionKey(name: string): boolean {
-  return name === "left" || name === "up"
-}
-
-function isToggleKey(name: string): boolean {
-  return name === "space" || name === "enter"
 }
 
 function booleanField(values: ConnectionFormValues, key: string, defaultValue: boolean): boolean {
@@ -491,9 +561,10 @@ function booleanField(values: ConnectionFormValues, key: string, defaultValue: b
 
 function stringField(values: ConnectionFormValues, key: string, defaultValue: string): string {
   const value = values[key]
-  return typeof value === "string" ? value : defaultValue
-}
+  if (typeof value !== "string") {
+    return defaultValue
+  }
 
-function selectLabel(field: Extract<ConnectionField, { kind: "select" }>, currentValue: string): string {
-  return field.options.find((option) => option.value === currentValue)?.label ?? currentValue
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : defaultValue
 }

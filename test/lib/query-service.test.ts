@@ -280,9 +280,9 @@ describe("QueryRunnerImpl", () => {
     })
   })
 
-  test("resets its abort controller after cancellation", () => {
+  test("uses caller-provided execution ids", async () => {
     const service = new QueryRunnerImpl(
-      createSession("reset"),
+      createSession("id"),
       makeConnection({
         config: {
           path: ":memory:",
@@ -297,12 +297,52 @@ describe("QueryRunnerImpl", () => {
       createMemoryLogStore().store,
     )
 
-    const firstSignal = service.abortController.signal
-    service.cancelAll()
-    const secondSignal = service.abortController.signal
+    const execution = await service.execute(unsafeRawSQL("select 1"), {
+      executionId: "query-123",
+    })
 
-    expect(firstSignal.aborted).toBe(true)
-    expect(secondSignal.aborted).toBe(false)
-    expect(secondSignal).not.toBe(firstSignal)
+    expect(execution.id).toBe("query-123")
+  })
+
+  test("can run new queries after cancelling in-flight work", async () => {
+    const service = new QueryRunnerImpl(
+      createSession("reset"),
+      makeConnection({
+        config: {
+          path: ":memory:",
+        },
+        protocol: "bunsqlite",
+      }),
+      {
+        async execute(request) {
+          if (request.sql.toSource() === "wait") {
+            return await new Promise<{ rows: never[] }>((_resolve, reject) => {
+              const onAbort = () => {
+                const error = new Error("stopped")
+                error.name = "AbortError"
+                reject(error)
+              }
+
+              if (request.abortSignal?.aborted) {
+                onAbort()
+                return
+              }
+
+              request.abortSignal?.addEventListener("abort", onAbort, { once: true })
+            })
+          }
+
+          request.abortSignal?.throwIfAborted()
+          return { rows: [{ value: 1 }] as any[] }
+        },
+      },
+      createMemoryLogStore().store,
+    )
+
+    const pending = service.query(unsafeRawSQL("wait"))
+    service.cancelAll()
+
+    await expect(pending).rejects.toThrow("stopped")
+    await expect(service.query(unsafeRawSQL("select 1"))).resolves.toEqual([{ value: 1 }])
   })
 })

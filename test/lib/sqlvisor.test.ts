@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 import { type LocalPersistence, createSession } from "../../src/lib/createLocalPersistence"
 import { init } from "../../src/lib/init"
 import { AdapterRegistry, type Adapter } from "../../src/lib/interface/Adapter"
-import { SqlVisor } from "../../src/lib/SqlVisor"
+import { SqlVisor, type QueryRef } from "../../src/lib/SqlVisor"
 import { type LogEntry } from "../../src/lib/types/Log"
 import type { ObjectInfo } from "../../src/lib/types/objects"
 import { rowDispatcher, type BaseRow } from "../../src/lib/types/RowStore"
@@ -18,6 +18,7 @@ class FakeBunAdapter implements Adapter<{ path: string }, unknown, {}> {
   queryCalls: string[] = []
   rowsByQuery = new Map<string, object[]>()
   errorsByQuery = new Map<string, Error>()
+  blockedQueries = new Set<string>()
   objects: ObjectInfo[] = []
 
   describeConfig(config: { path: string }): string {
@@ -35,6 +36,22 @@ class FakeBunAdapter implements Adapter<{ path: string }, unknown, {}> {
         const error = this.errorsByQuery.get(source)
         if (error) {
           throw error
+        }
+        if (this.blockedQueries.has(source)) {
+          return await new Promise<{ rows: Row[] }>((_resolve, reject) => {
+            const onAbort = () => {
+              const abortError = new Error("stopped")
+              abortError.name = "AbortError"
+              reject(abortError)
+            }
+
+            if (req.abortSignal?.aborted) {
+              onAbort()
+              return
+            }
+
+            req.abortSignal?.addEventListener("abort", onAbort, { once: true })
+          })
         }
         return {
           rows: (this.rowsByQuery.get(source) ?? []) as Row[],
@@ -111,6 +128,26 @@ function createQueryClient() {
       },
     },
   })
+}
+
+async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error("Timed out waiting for condition")
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+}
+
+async function waitForQueryState(
+  engine: SqlVisor,
+  query: QueryRef,
+  predicate: (state: ReturnType<SqlVisor["getQueryState"]>) => boolean,
+  timeoutMs = 1000,
+) {
+  await waitFor(() => predicate(engine.getQueryState(query)), timeoutMs)
+  return engine.getQueryState(query)
 }
 
 describe("SqlVisor", () => {
@@ -220,20 +257,23 @@ describe("SqlVisor", () => {
       registry: new AdapterRegistry([fakeAdapter]),
     })
 
-    const entry = await engine.runQuery({
+    const first = engine.runQuery({
       text: "select 1",
     })
-    const second = await engine.runQuery({
+    const second = engine.runQuery({
       text: "select 1",
     })
+    const firstState = await waitForQueryState(engine, first, (state) => state.status === "success")
+    const secondState = await waitForQueryState(engine, second, (state) => state.status === "success")
 
-    engine.restoreHistoryEntry(entry.id)
+    engine.restoreHistoryEntry(first.queryId)
 
-    expect(entry.rows).toEqual([{ value: 1 }])
-    expect(second.rows).toEqual([{ value: 1 }])
+    expect(firstState.data?.rows).toEqual([{ value: 1 }])
+    expect(secondState.data?.rows).toEqual([{ value: 1 }])
     expect(fakeAdapter.connectCalls).toBe(1)
     expect(fakeAdapter.queryCalls).toEqual(["select 1", "select 1"])
     expect(engine.getState().history[0]?.sql.source).toBe("select 1")
+    expect(engine.getState().queryExecution.data?.id).toBe(first.queryId)
     expect(engine.getState().detailView).toEqual({
       kind: "rows",
       rows: [{ value: 1 }],
@@ -251,7 +291,7 @@ describe("SqlVisor", () => {
       registry: new AdapterRegistry([new FakeBunAdapter()]),
     })
 
-    await expect(emptyEngine.runQuery({ text: "select 1" })).rejects.toThrow("No connection selected.")
+    expect(() => emptyEngine.runQuery({ text: "select 1" })).toThrow("No connection selected.")
 
     const fakeAdapter = new FakeBunAdapter()
     fakeAdapter.errorsByQuery.set("fail", new Error("query failed"))
@@ -261,11 +301,17 @@ describe("SqlVisor", () => {
       registry: new AdapterRegistry([fakeAdapter]),
     })
 
-    await expect(engine.runQuery({ text: "   " })).rejects.toThrow("Cannot run an empty query.")
-    await expect(engine.runQuery({ text: "fail" })).rejects.toThrow("query failed")
+    expect(() => engine.runQuery({ text: "   " })).toThrow("Cannot run an empty query.")
+    const failedQuery = engine.runQuery({ text: "fail" })
+    const failedState = await waitForQueryState(engine, failedQuery, (state) => state.status === "error")
 
     const history = engine.getState().history[0]
+    expect(failedState.data).toMatchObject({
+      id: failedQuery.queryId,
+      status: "error",
+    })
     expect(history).toMatchObject({
+      id: failedQuery.queryId,
       connectionId: "conn-1",
       error: "query failed",
       rows: [],
@@ -281,6 +327,42 @@ describe("SqlVisor", () => {
       title: "Query Error",
     })
     expect(engine.getState().queryExecution.status).toBe("error")
+  })
+
+  test("cancels queries by ref and cancels all running queries", async () => {
+    const fakeAdapter = new FakeBunAdapter()
+    fakeAdapter.blockedQueries.add("wait 1")
+    fakeAdapter.blockedQueries.add("wait 2")
+
+    const engine = await SqlVisor.create({
+      persistence: createPersistence(),
+      queryClient: createQueryClient(),
+      registry: new AdapterRegistry([fakeAdapter]),
+    })
+
+    const first = engine.runQuery({ text: "wait 1" })
+    const second = engine.runQuery({ text: "wait 2" })
+
+    await waitFor(() => engine.getState().activeQueries.length === 2)
+    expect(engine.getState().activeQueries.map((query) => query.queryId)).toEqual(
+      expect.arrayContaining([first.queryId, second.queryId]),
+    )
+
+    engine.cancelQuery(first)
+    const firstState = await waitForQueryState(engine, first, (state) => state.status === "error")
+    expect(firstState.data).toMatchObject({
+      id: first.queryId,
+      status: "cancelled",
+    })
+
+    engine.cancelRunningQueries()
+    const secondState = await waitForQueryState(engine, second, (state) => state.status === "error")
+    expect(secondState.data).toMatchObject({
+      id: second.queryId,
+      status: "cancelled",
+    })
+
+    await waitFor(() => engine.getState().activeQueries.length === 0)
   })
 
   test("initializes through the public init helper", async () => {

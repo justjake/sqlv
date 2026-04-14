@@ -4,7 +4,6 @@ import { useSqlVisor, useSqlVisorState } from "../useSqlVisor"
 import { TreeView, type TreeNode } from "./TreeView"
 
 type SidebarProps = {
-  focused?: boolean
   onAddConnection: () => void
 }
 
@@ -29,7 +28,7 @@ export function Sidebar(props: SidebarProps) {
   return (
     <box flexDirection="column" flexGrow={1}>
       <box flexDirection="row" gap={1} paddingBottom={1}>
-        <Shortcut label="Add Conn" ctrl name="n" enabled onKey={onAddConnection} />
+        <Shortcut keys="ctrl+n" label="Add Conn" enabled onKey={onAddConnection} />
       </box>
       {state.connections.fetchStatus === "fetching" && connections.length === 0 && <text>Loading connections...</text>}
       {state.connections.status === "error" && connections.length === 0 && (
@@ -38,7 +37,7 @@ export function Sidebar(props: SidebarProps) {
       {state.connections.status === "success" && treeNodes.length === 0 && (
         <text>No connections yet. Use the public API or add one next.</text>
       )}
-      <TreeView focused={props.focused} nodes={treeNodes} onEnter={(_idx, node) => onEnterNode(engine, node)} />
+      <TreeView nodes={treeNodes} onEnter={(_idx, node) => onEnterNode(engine, node)} />
     </box>
   )
 }
