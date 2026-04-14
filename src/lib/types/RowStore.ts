@@ -1,7 +1,7 @@
 import { EpochMillis } from "./Log"
 import type { OrderString } from "./Order"
 import type { Identifier, SQL } from "./SQL"
-import { mustBeArray, mustBeSingle } from "./unreachable"
+import { mustBeArray, mustBeOptionalSingle, mustBeSingle } from "./unreachable"
 
 export type BaseRow = {
   id: string
@@ -71,7 +71,7 @@ export function rowDispatcher<T extends BaseRow>(
   return {
     query: async (q) => dispatch({ type: "query", q }).then(mustBeArray),
     delete: async (ref) => dispatch({ type: "delete", ref }).then(() => void 0),
-    get: async (ref) => dispatch({ type: "get", ref }).then(mustBeSingle),
+    get: async (ref) => dispatch({ type: "get", ref }).then(mustBeOptionalSingle),
     insert: async (row) => dispatch({ type: "insert", row }).then(mustBeSingle),
     upsert: async (row) => dispatch({ type: "upsert", row }).then(mustBeSingle),
     update: async (ref, patch) => dispatch({ type: "update", ref, patch }).then(() => void 0),

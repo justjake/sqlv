@@ -89,7 +89,10 @@ export class SQL<Row = unknown> {
   }
 
   clone(): SQL<Row> {
-    return new SQL(this.fragments)
+    const clone = new SQL<Row>(this.fragments)
+    clone.queryName = this.queryName
+    clone.queryNamespace = this.queryNamespace
+    return clone
   }
 
   named(queryName: string): SQL<Row> {
@@ -154,6 +157,10 @@ export function sql<Row = unknown, Arg = unknown>(
 
 export function namedArg<T>(name: string, value: T): Argument<T> {
   return new Argument(value, name)
+}
+
+export function unsafeRawSQL<Row = unknown>(source: string): SQL<Row> {
+  return new SQL<Row>([source])
 }
 
 function normalizeValue<Arg>(value: SQLValue<Arg>): SQLFragment {

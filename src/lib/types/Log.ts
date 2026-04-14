@@ -1,25 +1,23 @@
+export { EpochMillis } from "./EpochMillis"
+import type { EpochMillis } from "./EpochMillis"
 import type { Json } from "./Json"
 import type { RowStore } from "./RowStore"
 
-export type EpochMillis = number & { __epochMillis__: true }
+export type QueryExecutionStatus = "pending" | "success" | "error" | "cancelled"
 
-export function EpochMillis(number: number): EpochMillis {
-  return number as EpochMillis
-}
+export type LogEntry = Session | ConnectLogEntry | FlowEntry | QueryExecution<any>
 
-EpochMillis.now = () => EpochMillis(Date.now())
-
-export type LogEntry = SessionLogEntry | ConnectLogEntry | RequestLogEntry | ResponseLogEntry
-
-export type SessionLogEntry = {
+export type Session = {
   type: "session"
   id: string
   createdAt: EpochMillis
   app: string
 }
 
-export type RequestLogEntry = {
-  type: "req"
+export type SessionLogEntry = Session
+
+export type QueryExecution<Row = object> = {
+  type: "queryExecution"
   id: string
   connectionId: string
   sessionId: string
@@ -27,28 +25,20 @@ export type RequestLogEntry = {
   schema?: string
   table?: string
   createdAt: EpochMillis
+  updatedAt?: EpochMillis
   sql: {
     source: string
     args: Array<Json>
   }
   sensitive: boolean
   flowId?: string
-}
-
-export type ResponseLogEntry = {
-  type: "res"
-  id: string
-  connectionId: string
-  sessionId: string
-  requestId: string
-  createdAt: EpochMillis
-  success: boolean
+  status: QueryExecutionStatus
+  finishedAt?: EpochMillis
   error?: string
-  cancelled: boolean
-  rows: object[]
+  errorStack?: string
+  rows: Row[]
   rowCount: number
   insertCount?: number
-  flowId?: string
 }
 
 export type FlowEntry = {
@@ -60,6 +50,8 @@ export type FlowEntry = {
   endedAt?: EpochMillis
   cancelled?: boolean
 }
+
+export type FlowLogEntry = FlowEntry
 
 type ConnectLogEntry = {
   type: "connect"

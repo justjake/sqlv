@@ -1,3 +1,5 @@
+import { preserveErrorStack } from "./errors"
+
 export type MatchBranches<T, E, U> = {
   ok: (value: T) => U
   err: (error: E) => U
@@ -172,6 +174,7 @@ export class UnwrapError<T> extends Error {
   constructor(message: string, cause: T) {
     super(message, { cause })
     this.name = "UnwrapError"
+    preserveErrorStack(this, cause)
   }
 }
 
@@ -230,18 +233,22 @@ function fromThrowable<T, E>(fn: () => Promise<T>, mapError: (error: unknown) =>
 function fromThrowable<T, E>(
   fn: () => T | Promise<T>,
   mapError?: (error: unknown) => E,
-): Result<T, E | unknown> | Promise<Result<T, E | unknown>> {
+): Result<T, E | Error> | Promise<Result<T, E | Error>> {
   const parseError = mapError ?? defaultMapError
   try {
     const valueOrPromise = fn()
-    if (valueOrPromise && typeof valueOrPromise === "object" && "then" in valueOrPromise) {
-      return (valueOrPromise as Promise<T>).then(resultOk, (err) => resultErr(parseError(err) as E))
+    if (isPromiseLike(valueOrPromise)) {
+      return valueOrPromise.then(resultOk, (err) => resultErr(parseError(err)))
     } else {
       return resultOk(valueOrPromise)
     }
   } catch (error) {
     return resultErr(parseError(error))
   }
+}
+
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return typeof value === "object" && value !== null && "then" in value
 }
 
 function allResults<T, E>(results: Iterable<Result<T, E>>): Result<T[], E> {

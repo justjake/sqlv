@@ -64,6 +64,24 @@ export function mustBeSingle<T>(value: T | T[] | undefined): T {
   return value
 }
 
+export function mustBeOptionalSingle<T>(value: T | T[] | undefined): T | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return undefined
+    }
+    if (value.length !== 1) {
+      throw new Error(`Expected value to be zero or one item: ${debugStringify(value)}`)
+    }
+    return value[0]!
+  }
+
+  return value
+}
+
 export function mustBeArray<T>(value: T | T[] | undefined): T[] {
   if (value === undefined) {
     throw new Error(`Expected value to be defined: ${debugStringify(value)}`)

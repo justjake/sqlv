@@ -1,6 +1,6 @@
-import { sqlite as sql } from "./adapters/sqlite"
+import { jsonb_patch, sqlite as sql } from "./adapters/sqlite"
 import { EpochMillis } from "./types/Log"
-import type { QueryService } from "./types/QueryService"
+import type { QueryRunner } from "./types/QueryRunner"
 import {
   rowDispatcher,
   type BaseRow,
@@ -28,11 +28,19 @@ export function createRowStoreTableSql(table: Identifier) {
   ) strict`
 }
 
+export function selectStoredRows<Row extends BaseRow>(table: Identifier): SQL<Row> {
+  return sql`
+    SELECT id, type, createdAt, updatedAt, sort, json(json) as json
+    FROM ${table}
+  `
+}
+
 const ActionToSql = {
   query: <Row extends BaseRow>(table: Identifier, action: RowQuery<Row>): SQL<Row> => action.q(table),
   get: <Row extends BaseRow>(table: Identifier, action: RowGet<Row>): SQL<Row> => {
     return sql`
-      SELECT * FROM ${table}
+      SELECT id, type, createdAt, updatedAt, sort, json(json) as json
+      FROM ${table}
       WHERE id = ${action.ref.id} AND type = ${action.ref.type}
     `
   },
@@ -41,7 +49,7 @@ const ActionToSql = {
     return sql`
       INSERT INTO ${table} (id, type, createdAt, updatedAt, sort, json, version)
       VALUES (${id}, ${type}, ${createdAt}, ${updatedAt ?? null}, ${sort ?? null}, jsonb(${JSON.stringify(json)}), 1)
-      RETURNING *
+      RETURNING id, type, createdAt, updatedAt, sort, json(json) as json
     `
   },
   upsert: <Row extends BaseRow>(table: Identifier, action: RowUpsert<Row>): SQL<Row> => {
@@ -52,9 +60,9 @@ const ActionToSql = {
       ON CONFLICT DO UPDATE SET
         updatedAt = EXCLUDED.updatedAt,
         sort = COALESCE(EXCLUDED.sort, sort),
-        json = jsonb_patch(json, EXCLUDED.json),
+        json = ${jsonb_patch(sql`json`, sql`EXCLUDED.json`)},
         version = version + 1
-      RETURNING *
+      RETURNING id, type, createdAt, updatedAt, sort, json(json) as json
     `
   },
   update: <Row extends BaseRow>(table: Identifier, action: RowUpdate<Row>): SQL<Row> => {
@@ -64,15 +72,15 @@ const ActionToSql = {
       UPDATE ${table} SET
         updatedAt = ${updatedAt ?? EpochMillis.now()},
         sort = COALESCE(${sort ?? null}, sort),
-        json = jsonb_patch(json, ${JSON.stringify(json)}),
+        json = ${jsonb_patch(sql`json`, JSON.stringify(json))},
         version = version + 1
       WHERE id = ${id} AND type = ${type}
-      RETURNING *
+      RETURNING id, type, createdAt, updatedAt, sort, json(json) as json
     `
   },
   delete: <Row extends BaseRow>(table: Identifier, action: RowDelete<Row>): SQL<Row> => sql`
     DELETE FROM ${table} WHERE id = ${action.ref.id} AND type = ${action.ref.type}
-    RETURNING *
+    RETURNING id, type, createdAt, updatedAt, sort, json(json) as json
   `,
 }
 
@@ -95,7 +103,7 @@ function actionToSql<Row extends BaseRow>(table: Identifier, action: RowAction<R
   }
 }
 
-export function createSqliteRowStore<Row extends BaseRow>(db: QueryService, table: Identifier) {
+export function createSqliteRowStore<Row extends BaseRow>(db: QueryRunner, table: Identifier) {
   return rowDispatcher<Row>(async <T extends Row>(action: RowAction<T>): Promise<T | T[] | undefined> => {
     const sql = actionToSql(table, action)
     const unparsed: BaseRow[] = await db.query(sql)
@@ -111,12 +119,16 @@ function parseRow<Row extends BaseRow>(row: BaseRow): Row {
       ...JSON.parse(json),
       ...rest,
     }
-  } else if (typeof json === "object" && json !== null) {
+  } else if (isJsonObject(json)) {
     return {
-      ...(json as any),
+      ...json,
       ...rest,
-    }
+    } as Row
   } else {
     return row as Row
   }
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

@@ -1,10 +1,10 @@
 import { Database } from "bun:sqlite"
 import { mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
-import { registerAdapter, type Adapter } from "../interface/Adapter"
+import { type Adapter, type ConnectionFormValues, type ConnectionSpec } from "../interface/Adapter"
 import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "../interface/Executor"
 import type { ObjectInfo } from "../types/objects"
-import type { QueryService } from "../types/QueryService"
+import type { QueryRunner } from "../types/QueryRunner"
 import { ident, type SQL } from "../types/SQL"
 import type { SqliteArg } from "./sqlite"
 import { IterateSqliteSchema, parsePragmaDatabaseListRow, parseSqliteSchemaRow, PragmaDatabaseList } from "./sqlite"
@@ -22,7 +22,7 @@ export type BunSqlConfig = { path: string } & DatabaseOpts
 type BunSqlFeatures = {}
 
 export class BunSqlAdapter implements Adapter<BunSqlConfig, SqliteArg, BunSqlFeatures> {
-  protocol = "bunsqlite" as const
+  readonly protocol = "bunsqlite"
 
   describeConfig(config: BunSqlConfig): string {
     let desc = config.path || ":memory:"
@@ -43,7 +43,64 @@ export class BunSqlAdapter implements Adapter<BunSqlConfig, SqliteArg, BunSqlFea
 
   features = {}
 
-  async fetchObjects(db: QueryService<BunSqlConfig>): Promise<ObjectInfo[]> {
+  getConnectionSpec(): ConnectionSpec<BunSqlConfig> {
+    return {
+      defaultName: "In-memory SQLite",
+      fields: [
+        {
+          defaultValue: ":memory:",
+          description: "Use :memory: for an ephemeral database or provide a file path.",
+          key: "path",
+          kind: "path",
+          label: "Path",
+          placeholder: ":memory:",
+        },
+        {
+          defaultValue: false,
+          key: "readonly",
+          kind: "boolean",
+          label: "Readonly",
+        },
+        {
+          defaultValue: true,
+          key: "create",
+          kind: "boolean",
+          label: "Create File",
+        },
+        {
+          defaultValue: true,
+          key: "readwrite",
+          kind: "boolean",
+          label: "Readwrite",
+        },
+        {
+          defaultValue: false,
+          key: "safeIntegers",
+          kind: "boolean",
+          label: "Safe Integers",
+        },
+        {
+          defaultValue: false,
+          key: "strict",
+          kind: "boolean",
+          label: "Strict",
+        },
+      ],
+      label: "Bun SQLite",
+      createConfig(values) {
+        return {
+          create: booleanField(values, "create", true),
+          path: stringField(values, "path", ":memory:"),
+          readonly: booleanField(values, "readonly", false),
+          readwrite: booleanField(values, "readwrite", true),
+          safeIntegers: booleanField(values, "safeIntegers", false),
+          strict: booleanField(values, "strict", false),
+        }
+      },
+    }
+  }
+
+  async fetchObjects(db: QueryRunner<BunSqlConfig>): Promise<ObjectInfo[]> {
     const databaseList = await db.query(PragmaDatabaseList)
     const databaseInfos = databaseList.map(parsePragmaDatabaseListRow)
     const result: ObjectInfo[] = [...databaseInfos]
@@ -97,8 +154,28 @@ function isInMemoryDatabase(path: string): boolean {
   return path === "" || path === ":memory:"
 }
 
-function withoutUndefined(options: DatabaseOpts): DatabaseOpts {
-  return Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)) as DatabaseOpts
+function withoutUndefined<T extends object>(options: T): Partial<T> {
+  const result: Partial<T> = {}
+  for (const key in options) {
+    const value = options[key]
+    if (value !== undefined) {
+      result[key] = value
+    }
+  }
+  return result
 }
 
-registerAdapter(new BunSqlAdapter())
+function booleanField(values: ConnectionFormValues, key: string, defaultValue: boolean): boolean {
+  const value = values[key]
+  return typeof value === "boolean" ? value : defaultValue
+}
+
+function stringField(values: ConnectionFormValues, key: string, defaultValue: string): string {
+  const value = values[key]
+  if (typeof value !== "string") {
+    return defaultValue
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : defaultValue
+}

@@ -1,3 +1,4 @@
+import { preserveErrorStack } from "../types/errors"
 import type { Result } from "../types/Result"
 import type { SQL } from "../types/SQL"
 
@@ -26,6 +27,7 @@ export class ExecuteError<Row> extends Error {
     super(args.message, { cause: args.cause })
     this.req = args.req
     this.connectionId = args.connectionId
+    preserveErrorStack(this, args.cause)
   }
 }
 

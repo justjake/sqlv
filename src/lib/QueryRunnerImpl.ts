@@ -2,15 +2,35 @@ import type { Executor } from "./interface/Executor"
 import type { Connection } from "./types/Connection"
 import { aborter } from "./types/defer"
 import { createId } from "./types/Id"
-import { EpochMillis, type FlowEntry, type LogStore, type ResponseLogEntry, type SessionLogEntry } from "./types/Log"
-import type { QueryService } from "./types/QueryService"
+import { EpochMillis, type FlowEntry, type LogStore, type QueryExecution, type Session } from "./types/Log"
+import type { QueryRunner } from "./types/QueryRunner"
 import { Result } from "./types/Result"
+import { preserveErrorStack } from "./types/errors"
 import { RowHandle, type RowRef } from "./types/RowStore"
 import type { Paginated, SQL } from "./types/SQL"
 
-export class QueryServiceImpl<Config> implements QueryService<Config> {
+export class QueryExecutionError<Row = object> extends Error {
   constructor(
-    public readonly session: SessionLogEntry,
+    public readonly execution: QueryExecution<Row>,
+    options?: {
+      cause?: unknown
+    },
+  ) {
+    super(execution.error ?? `Query ${execution.status}`, {
+      cause: options?.cause,
+    })
+    this.name = options?.cause instanceof Error ? options.cause.name : "QueryExecutionError"
+    if (options?.cause) {
+      preserveErrorStack(this, options.cause)
+    } else if (execution.errorStack) {
+      this.stack = execution.errorStack
+    }
+  }
+}
+
+export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
+  constructor(
+    public readonly session: Session,
     public readonly connection: Connection<Config>,
     private readonly executor: Executor,
     private readonly logger: LogStore,
@@ -18,21 +38,29 @@ export class QueryServiceImpl<Config> implements QueryService<Config> {
 
   #abortController: AbortController | undefined
   get abortController() {
-    if (!this.#abortController) {
-      this.#abortController = new AbortController()
-    }
+    this.#abortController ??= new AbortController()
     return this.#abortController
   }
 
   async query<Row>(sql: SQL<Row>, flow?: RowRef<FlowEntry> & { abortSignal: AbortSignal }): Promise<Row[]> {
+    const execution = await this.execute(sql, flow)
+    return execution.rows
+  }
+
+  async execute<Row>(
+    sql: SQL<Row>,
+    flow?: RowRef<FlowEntry> & { abortSignal: AbortSignal },
+  ): Promise<QueryExecution<Row>> {
     const abortSignal = flow?.abortSignal ?? this.abortController.signal
     abortSignal.throwIfAborted()
 
-    const req = await this.logger.insert({
-      type: "req",
+    const executionHandle = new RowHandle<QueryExecution<Row>>(this.logger, {
+      id: createId(),
+      type: "queryExecution",
+    })
+    const execution = await executionHandle.set({
       connectionId: this.connection.id,
       createdAt: EpochMillis.now(),
-      id: createId(),
       sensitive: false,
       sessionId: this.session.id,
       sql: {
@@ -40,12 +68,9 @@ export class QueryServiceImpl<Config> implements QueryService<Config> {
         args: sql.getArgs() as any[],
       },
       flowId: flow?.id,
-    })
-
-    let result: Row[]
-    const resHandle = new RowHandle<ResponseLogEntry>(this.logger, {
-      id: createId(),
-      type: "res",
+      rows: [],
+      rowCount: 0,
+      status: "pending",
     })
 
     try {
@@ -53,37 +78,46 @@ export class QueryServiceImpl<Config> implements QueryService<Config> {
         sql,
         abortSignal,
       })
-      result = rows
+      await executionHandle.update({
+        finishedAt: EpochMillis.now(),
+        rowCount: rows.length,
+        rows,
+        status: "success",
+      })
+      return (
+        (await executionHandle.get()) ?? {
+          ...execution,
+          finishedAt: EpochMillis.now(),
+          rowCount: rows.length,
+          rows,
+          status: "success",
+        }
+      )
     } catch (_error) {
       const error = Result.toError(_error)
-      await resHandle.set({
-        requestId: req.id,
-        connectionId: req.connectionId,
-        sessionId: req.sessionId,
-        createdAt: EpochMillis.now(),
+      const status = error.name === "AbortError" ? "cancelled" : "error"
+      await executionHandle.update({
+        error: error.message,
+        errorStack: error.stack,
+        finishedAt: EpochMillis.now(),
         rowCount: 0,
         rows: [],
-        success: false,
-        cancelled: error.name === "AbortError",
-        error: String(error),
-        flowId: flow?.id,
+        status,
       })
-      throw error
+
+      throw new QueryExecutionError(
+        (await executionHandle.get()) ?? {
+          ...execution,
+          error: error.message,
+          errorStack: error.stack,
+          finishedAt: EpochMillis.now(),
+          rowCount: 0,
+          rows: [],
+          status,
+        },
+        { cause: error },
+      )
     }
-
-    await resHandle.set({
-      requestId: req.id,
-      connectionId: req.connectionId,
-      sessionId: req.sessionId,
-      createdAt: EpochMillis.now(),
-      rowCount: result.length,
-      rows: result as any[],
-      success: true,
-      cancelled: false,
-      flowId: flow?.id,
-    })
-
-    return result
   }
 
   async *iterate<Params extends { limit: number; cursor: object }, Row>(

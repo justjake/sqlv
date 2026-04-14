@@ -1,18 +1,11 @@
 import { useKeyboard } from "@opentui/react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import type { QueryExecution } from "../../index"
 import { Shortcut } from "../Shortcut"
 
-export type HistoryEntry = {
-  id: string
-  sql: string
-  executedAt: number
-  rows: object[]
-  error?: string
-}
-
 type QueryHistoryProps = {
-  entries: HistoryEntry[]
-  onRestore: (entry: HistoryEntry) => void
+  entries: QueryExecution[]
+  onRestore: (entry: QueryExecution) => void
   onBack: () => void
 }
 
@@ -20,7 +13,15 @@ export function QueryHistory(props: QueryHistoryProps) {
   const { entries, onRestore, onBack } = props
   const [selectedIndex, setSelectedIndex] = useState(0)
 
+  useEffect(() => {
+    setSelectedIndex((index) => clampHistoryIndex(index, entries.length))
+  }, [entries.length])
+
   useKeyboard((key) => {
+    if (entries.length === 0) {
+      return
+    }
+
     switch (key.name) {
       case "up":
         setSelectedIndex((i) => Math.max(0, i - 1))
@@ -46,18 +47,24 @@ export function QueryHistory(props: QueryHistoryProps) {
       </box>
       {entries.length === 0 && <text>No query history yet.</text>}
       {entries.map((entry, i) => (
-        <box
-          key={entry.id}
-          backgroundColor={i === selectedIndex ? "blue" : undefined}
-          paddingLeft={1}
-          paddingRight={1}
-        >
+        <box key={entry.id} backgroundColor={i === selectedIndex ? "blue" : undefined} paddingLeft={1} paddingRight={1}>
           <text>
-            {new Date(entry.executedAt).toLocaleTimeString()} {"\u2014"} {entry.sql.slice(0, 60)}
-            {entry.sql.length > 60 ? "..." : ""}
+            {new Date(entry.finishedAt ?? entry.updatedAt ?? entry.createdAt).toLocaleTimeString()} {"\u2014"}{" "}
+            {entry.status !== "success" ? `[${entry.status}] ` : ""}
+            {entry.sql.source.slice(0, 60)}
+            {entry.sql.source.length > 60 ? "..." : ""}
           </text>
         </box>
       ))}
     </box>
   )
 }
+
+function clamp(index: number, length: number): number {
+  if (length === 0) {
+    return 0
+  }
+  return Math.min(Math.max(index, 0), length - 1)
+}
+
+export const clampHistoryIndex = clamp

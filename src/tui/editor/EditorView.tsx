@@ -1,16 +1,18 @@
 import { type TextareaRenderable } from "@opentui/core"
-import { useCallback, useRef } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import { Shortcut } from "../Shortcut"
 
 export type EditorProps = {
   focused?: boolean
-  initialText?: string
+  text: string
+  onAddConnection?: () => void
+  onTextChange?: (sql: string) => void
   onExecute?: (sql: string) => void
   onHistory?: () => void
 }
 
 export function EditorView(props: EditorProps) {
-  const { focused, initialText, onExecute, onHistory } = props
+  const { focused, text, onAddConnection, onTextChange, onExecute, onHistory } = props
   const textareaRef = useRef<TextareaRenderable>(null)
 
   const handleExecute = useCallback(() => {
@@ -22,7 +24,26 @@ export function EditorView(props: EditorProps) {
 
   const handleClear = useCallback(() => {
     textareaRef.current?.clear()
-  }, [])
+    onTextChange?.("")
+  }, [onTextChange])
+
+  const handleContentChange = useCallback(() => {
+    onTextChange?.(textareaRef.current?.plainText ?? "")
+  }, [onTextChange])
+
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) {
+      return
+    }
+
+    if (textarea.plainText === text) {
+      return
+    }
+
+    textarea.setText(text)
+    textarea.cursorOffset = text.length
+  }, [text])
 
   return (
     <box flexDirection="column" flexGrow={1}>
@@ -30,8 +51,15 @@ export function EditorView(props: EditorProps) {
         <Shortcut label="Execute" ctrl name="x" enabled={focused} onKey={handleExecute} />
         <Shortcut label="Clear" ctrl name="d" enabled={focused} onKey={handleClear} />
         <Shortcut label="History" ctrl name="r" enabled={focused} onKey={onHistory} />
+        {onAddConnection && <Shortcut label="Add Conn" ctrl name="n" enabled={focused} onKey={onAddConnection} />}
       </box>
-      <textarea ref={textareaRef} focused={focused} initialValue={initialText ?? ""} />
+      <textarea
+        ref={textareaRef}
+        focused={focused}
+        initialValue={text}
+        onContentChange={handleContentChange}
+        onSubmit={handleExecute}
+      />
     </box>
   )
 }

@@ -1,17 +1,18 @@
 import * as turso from "@tursodatabase/database"
 import { mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
-import { registerAdapter, type Adapter } from "../interface/Adapter"
+import { type Adapter, type ConnectionFormValues, type ConnectionSpec } from "../interface/Adapter"
 import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "../interface/Executor"
 import { aborter } from "../types/defer"
 import type { ObjectInfo } from "../types/objects"
-import type { QueryService } from "../types/QueryService"
+import type { QueryRunner } from "../types/QueryRunner"
 import { ident, type SQL } from "../types/SQL"
 import type { SqliteArg } from "./sqlite"
 import { IterateSqliteSchema, parsePragmaDatabaseListRow, parseSqliteSchemaRow, PragmaDatabaseList } from "./sqlite"
 
 type connectArgs = Parameters<typeof turso.connect>
 type DatabaseOpts = NonNullable<connectArgs[1]>
+type NativeTursoEncryptionOpts = NonNullable<DatabaseOpts["encryption"]>
 
 declare module "../interface/Adapter" {
   interface ProtocolToAdapter {
@@ -19,11 +20,17 @@ declare module "../interface/Adapter" {
   }
 }
 
-export type TursoConfig = { path: string } & DatabaseOpts
+export type TursoCipherName = keyof typeof TURSO_ENCRYPTION_CIPHER
+export type TursoEncryptionOpts = Omit<NativeTursoEncryptionOpts, "cipher"> & {
+  cipher: NativeTursoEncryptionOpts["cipher"] | TursoCipherName
+}
+export type TursoConfig = { path: string } & Omit<DatabaseOpts, "encryption"> & {
+    encryption?: TursoEncryptionOpts
+  }
 type TursoFeatures = {}
 
 export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatures> {
-  protocol = "turso" as const
+  readonly protocol = "turso"
 
   describeConfig(config: TursoConfig): string {
     let desc = config.path
@@ -38,7 +45,91 @@ export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatur
 
   features = {}
 
-  async fetchObjects(db: QueryService<TursoConfig>): Promise<ObjectInfo[]> {
+  getConnectionSpec(): ConnectionSpec<TursoConfig> {
+    return {
+      defaultName: "Encrypted SQLite",
+      fields: [
+        {
+          description: "Local SQLite file path used by the embedded Turso engine.",
+          key: "path",
+          kind: "path",
+          label: "Path",
+          placeholder: "app.db",
+          required: true,
+        },
+        {
+          defaultValue: false,
+          key: "readonly",
+          kind: "boolean",
+          label: "Readonly",
+        },
+        {
+          defaultValue: false,
+          key: "encryptionEnabled",
+          kind: "boolean",
+          label: "Encrypted",
+        },
+        {
+          defaultValue: "aegis256",
+          key: "encryptionCipher",
+          kind: "select",
+          label: "Cipher",
+          options: [
+            { label: "AES-128-GCM", value: "aes128gcm" },
+            { label: "AES-256-GCM", value: "aes256gcm" },
+            { label: "AEGIS-256", value: "aegis256" },
+            { label: "AEGIS-256x2", value: "aegis256x2" },
+            { label: "AEGIS-128L", value: "aegis128l" },
+            { label: "AEGIS-128x2", value: "aegis128x2" },
+            { label: "AEGIS-128x4", value: "aegis128x4" },
+          ],
+          visible: (values) => booleanField(values, "encryptionEnabled", false),
+        },
+        {
+          description: "Hex-encoded encryption key.",
+          key: "encryptionKey",
+          kind: "secret",
+          label: "Hex Key",
+          placeholder: "64 hex chars",
+          required: true,
+          visible: (values) => booleanField(values, "encryptionEnabled", false),
+        },
+      ],
+      label: "Turso SQLite",
+      createConfig(values) {
+        const encryptionEnabled = booleanField(values, "encryptionEnabled", false)
+        return {
+          encryption: encryptionEnabled
+            ? {
+                cipher: cipherField(values, "encryptionCipher", "aegis256"),
+                hexkey: stringField(values, "encryptionKey", ""),
+              }
+            : undefined,
+          path: stringField(values, "path", "app.db"),
+          readonly: booleanField(values, "readonly", false),
+        }
+      },
+      validate(draft) {
+        const errors: Record<string, string | undefined> = {}
+        if (!stringField(draft.values, "path", "").length) {
+          errors.path = "Path is required."
+        }
+        if (!booleanField(draft.values, "encryptionEnabled", false)) {
+          return errors
+        }
+
+        const hexkey = stringField(draft.values, "encryptionKey", "")
+        if (!hexkey) {
+          errors.encryptionKey = "Hex key is required when encryption is enabled."
+        } else if (!/^[0-9a-f]+$/i.test(hexkey) || hexkey.length % 2 !== 0) {
+          errors.encryptionKey = "Hex key must contain an even number of hexadecimal characters."
+        }
+        return errors
+      },
+    }
+  }
+
+  async fetchObjects(db: QueryRunner<TursoConfig>): Promise<ObjectInfo[]> {
     const databaseList = await db.query(PragmaDatabaseList)
     const databaseInfos = databaseList.map(parsePragmaDatabaseListRow)
     const result: ObjectInfo[] = [...databaseInfos]
@@ -59,7 +150,7 @@ export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatur
   async connect(config: TursoConfig): Promise<TursoExecutor> {
     const { path, ...options } = config
     await mkdir(dirname(path), { recursive: true })
-    const db = await turso.connect(path, options)
+    const db = await turso.connect(path, normalizeDatabaseOptions(options))
     return new TursoExecutor(this, db)
   }
 
@@ -77,9 +168,74 @@ class TursoExecutor implements Executor {
   async execute<Row>(req: ExecuteRequest<Row>): Promise<ExecuteSuccess<Row>> {
     const { source, args } = this.adapter.renderSQL(req.sql)
     using _ = aborter(req.abortSignal, () => this.conn.interrupt())
-    const rows: Row[] = await this.conn.prepare(source).bind(args).all()
+    const stmt = this.conn.prepare(source)
+    const rows: Row[] = await stmt.all(...args)
     return { rows }
   }
 }
 
-registerAdapter(new TursoAdapter())
+const TURSO_ENCRYPTION_CIPHER = {
+  aes128gcm: 0,
+  aes256gcm: 1,
+  aegis256: 2,
+  aegis256x2: 3,
+  aegis128l: 4,
+  aegis128x2: 5,
+  aegis128x4: 6,
+} as const
+
+function normalizeDatabaseOptions(options: Omit<TursoConfig, "path">): DatabaseOpts {
+  if (!options.encryption) {
+    return options
+  }
+
+  return {
+    ...options,
+    encryption: normalizeEncryptionOptions(options.encryption),
+  }
+}
+
+function normalizeEncryptionOptions(encryption: TursoEncryptionOpts): NativeTursoEncryptionOpts {
+  if (typeof encryption.cipher !== "string") {
+    return encryption
+  }
+
+  const cipher = TURSO_ENCRYPTION_CIPHER[encryption.cipher.toLowerCase() as keyof typeof TURSO_ENCRYPTION_CIPHER]
+  if (cipher === undefined) {
+    throw new Error(`Unsupported Turso encryption cipher: ${encryption.cipher}`)
+  }
+
+  return {
+    ...encryption,
+    // The package types model a native enum that the ESM entrypoint does not expose.
+    // At runtime the local driver expects the corresponding numeric discriminant.
+    cipher: coerceEncryptionCipher(cipher),
+  }
+}
+
+function coerceEncryptionCipher(cipher: number): NativeTursoEncryptionOpts["cipher"] {
+  return cipher as unknown as NativeTursoEncryptionOpts["cipher"]
+}
+
+function booleanField(values: ConnectionFormValues, key: string, defaultValue: boolean): boolean {
+  const value = values[key]
+  return typeof value === "boolean" ? value : defaultValue
+}
+
+function stringField(values: ConnectionFormValues, key: string, defaultValue: string): string {
+  const value = values[key]
+  if (typeof value !== "string") {
+    return defaultValue
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : defaultValue
+}
+
+function cipherField(
+  values: ConnectionFormValues,
+  key: string,
+  defaultValue: TursoCipherName,
+): TursoEncryptionOpts["cipher"] {
+  return stringField(values, key, defaultValue) as TursoEncryptionOpts["cipher"]
+}

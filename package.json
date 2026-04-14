@@ -2,18 +2,20 @@
   "name": "sqlv",
   "private": true,
   "type": "module",
-  "module": "src/index.tsx",
+  "module": "src/index.ts",
   "scripts": {
     "dev": "bun run --watch src/tui/index.tsx",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint .",
-    "lint:fix": "oxlint --fix ."
+    "lint:fix": "oxlint --fix .",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage"
   },
   "dependencies": {
     "@opentui/core": "^0.1.97",
     "@opentui/react": "^0.1.97",
-    "@tanstack/react-query": "5.99.0",
+    "@tanstack/query-core": "5.99.0",
     "@tursodatabase/database": "0.6.0-pre.17",
     "react": "^19.2.4"
   },

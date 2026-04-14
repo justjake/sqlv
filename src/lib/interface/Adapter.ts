@@ -1,5 +1,5 @@
 import type { ObjectInfo } from "../types/objects"
-import type { QueryService } from "../types/QueryService"
+import type { QueryRunner } from "../types/QueryRunner"
 import type { Identifier, SQL } from "../types/SQL"
 import type { ExecuteResult, Executor } from "./Executor"
 
@@ -8,15 +8,62 @@ export type Feature<T> = {
   load(executor: Executor): Promise<T>
 }
 
+export type ConnectionFormValue = string | boolean | undefined
+export type ConnectionFormValues = Record<string, ConnectionFormValue>
+
+type ConnectionFieldBase = {
+  key: string
+  label: string
+  description?: string
+  visible?: (values: ConnectionFormValues) => boolean
+}
+
+export type ConnectionTextField = ConnectionFieldBase & {
+  kind: "text" | "path" | "secret"
+  defaultValue?: string
+  placeholder?: string
+  required?: boolean
+}
+
+export type ConnectionBooleanField = ConnectionFieldBase & {
+  kind: "boolean"
+  defaultValue?: boolean
+}
+
+export type ConnectionSelectField = ConnectionFieldBase & {
+  kind: "select"
+  defaultValue?: string
+  options: Array<{
+    label: string
+    value: string
+  }>
+}
+
+export type ConnectionField = ConnectionTextField | ConnectionBooleanField | ConnectionSelectField
+
+export type ConnectionSpecDraft = {
+  name: string
+  values: ConnectionFormValues
+}
+
+export type ConnectionSpec<Config = {}> = {
+  label: string
+  defaultName?: string
+  fields: ConnectionField[]
+  createConfig(values: ConnectionFormValues): Config
+  validate?: (draft: ConnectionSpecDraft) => Record<string, string | undefined>
+}
+
 export type Adapter<Config = {}, Arg = {}, F extends Record<string, Feature<unknown>> = {}> = {
   protocol: string
   connect(config: Config): Promise<Executor>
   describeConfig(config: Config): string
-  fetchObjects(db: QueryService<Config>): Promise<ObjectInfo[]>
+  fetchObjects(db: QueryRunner<Config>): Promise<ObjectInfo[]>
   renderSQL(sql: SQL<any>): { source: string; args: Arg[] }
+  getConnectionSpec?: () => ConnectionSpec<Config>
   sample?: {
-    canSample(ident: Identifier, db: QueryService<Config>): Promise<boolean>
-    sample<Row>(ident: Identifier, db: QueryService<Config>): Promise<ExecuteResult<Row>>
+    canSample(ident: Identifier, db: QueryRunner<Config>): Promise<boolean>
+    sample<Row>(ident: Identifier, db: QueryRunner<Config>): Promise<ExecuteResult<Row>>
   }
   features: F
 }
@@ -26,21 +73,47 @@ export type AdapterConfig<T> = T extends Adapter<infer Config, any, any> ? Confi
 export interface ProtocolToAdapter {}
 export type Protocol = keyof ProtocolToAdapter
 export type ProtocolConfig<P extends Protocol> = AdapterConfig<ProtocolToAdapter[P]>
+export type RegisteredAdapter<P extends Protocol = Protocol> = Adapter<ProtocolConfig<P>, any, any> & { protocol: P }
+export type AnyAdapter = RegisteredAdapter
 
-const adapterMap: Partial<Record<Protocol, Adapter>> = {}
+export class AdapterRegistry {
+  #adapterMap: Partial<Record<Protocol, AnyAdapter>> = {}
 
-export function registerAdapter(adapter: Adapter<any, any, any>) {
-  if (adapter.protocol in adapterMap) {
-    throw new Error(`Adapter already registered for protocol ${adapter.protocol}`)
+  constructor(adapters: AnyAdapter[] = []) {
+    for (const adapter of adapters) {
+      this.register(adapter)
+    }
   }
 
-  adapterMap[adapter.protocol as Protocol] = adapter
+  register<P extends Protocol>(adapter: RegisteredAdapter<P>): this {
+    if (adapter.protocol in this.#adapterMap) {
+      throw new Error(`Adapter already registered for protocol ${adapter.protocol}`)
+    }
+
+    this.#adapterMap[adapter.protocol] = adapter
+    return this
+  }
+
+  has(protocol: Protocol): boolean {
+    return protocol in this.#adapterMap
+  }
+
+  get<P extends Protocol>(protocol: P): RegisteredAdapter<P> {
+    const adapter = this.#adapterMap[protocol]
+    if (!adapter) {
+      throw new Error(`No adapter registered for protocol ${protocol}`)
+    }
+    if (!matchesProtocol(adapter, protocol)) {
+      throw new Error(`Adapter protocol mismatch for ${protocol}`)
+    }
+    return adapter
+  }
+
+  list(): AnyAdapter[] {
+    return Object.values(this.#adapterMap).filter((adapter): adapter is AnyAdapter => adapter !== undefined)
+  }
 }
 
-export function getAdapter<P extends Protocol>(protocol: P): Adapter<ProtocolConfig<P>, any, {}> {
-  const adapter = adapterMap[protocol]
-  if (!adapter) {
-    throw new Error(`No adapter registered for protocol ${protocol}`)
-  }
-  return adapter
+function matchesProtocol<P extends Protocol>(adapter: AnyAdapter, protocol: P): adapter is RegisteredAdapter<P> {
+  return adapter.protocol === protocol
 }

@@ -143,3 +143,7 @@ export type SqliteSQL<Row> = SQL<Row>
 export function sqlite<Row>(strings: TemplateStringsArray, ...values: SQLValue<SqliteArg>[]): SqliteSQL<Row> {
   return sql<Row, SqliteArg>(strings, ...values)
 }
+
+export function jsonb_patch<Row = unknown>(target: SQLValue<SqliteArg>, patch: SQLValue<SqliteArg>): SqliteSQL<Row> {
+  return sqlite<Row>`jsonb(json_patch(json(${target}), json(${patch})))`
+}

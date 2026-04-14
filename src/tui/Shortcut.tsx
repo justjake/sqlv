@@ -1,97 +1,96 @@
-import type { KeyEvent, MouseEvent } from "@opentui/core";
-import { useKeyboard } from "@opentui/react";
-import { useState, type ReactNode } from "react";
+import type { KeyEvent, MouseEvent } from "@opentui/core"
+import { flushSync, useKeyboard } from "@opentui/react"
+import { useState, type ReactNode } from "react"
 
 type ShortcutUniqueProps = {
-  label: ReactNode;
-  onKey: ((key: KeyEvent | MouseEvent) => void) | undefined;
-  detect?: (key: KeyEvent) => boolean;
-  enabled: boolean | undefined;
-};
+  label: ReactNode
+  onKey?: (key: KeyEvent | MouseEvent) => void
+  detect?: (key: KeyEvent) => boolean
+  enabled?: boolean
+}
 
-const OWN_PROPS: Record<keyof ShortcutUniqueProps, true> = {
-  onKey: true,
-  detect: true,
-  label: true,
-  enabled: true,
-};
+type ShortcutMatchProps = Pick<KeyEvent, "name" | "ctrl" | "shift" | "meta" | "option" | "eventType">
 
-export type ShortcutProps = ShortcutUniqueProps & Partial<KeyEvent>;
+const EVENT_KEYS: Array<keyof ShortcutMatchProps> = ["name", "ctrl", "shift", "meta", "option", "eventType"]
+
+export type ShortcutProps = ShortcutUniqueProps & Partial<ShortcutMatchProps>
 
 export function Shortcut(props: ShortcutProps) {
-  const { label, onKey, enabled } = props;
-  const [active, setActive] = useState(false);
+  const { label, onKey, enabled } = props
+  const [active, setActive] = useState(false)
+
   useKeyboard((event) => {
     if (!enabled) {
-      return;
+      return
     }
     if (isMatchingEvent(event, props)) {
-      setActive(true);
-      setTimeout(() => setActive(false), 300);
-      onKey(event);
+      event.preventDefault()
+      event.stopPropagation()
+      flushSync(() => {
+        setActive(true)
+        onKey?.(event)
+      })
+      setTimeout(() => setActive(false), 300)
     }
-  });
+  })
 
   return (
     <box
       backgroundColor={active ? "blue" : "gray"}
       onMouseDown={() => {
         if (enabled) {
-          setActive(true);
+          setActive(true)
         }
       }}
       onMouseUp={(ev) => {
-        setActive(false);
-        onKey(ev);
+        setActive(false)
+        if (!enabled) {
+          return
+        }
+        onKey?.(ev)
       }}
       paddingLeft={1}
       paddingRight={1}
       opacity={enabled ? 1 : 0.5}
     >
-      {labelize(props)} {label}
+      <text>
+        {labelize(props)} {label}
+      </text>
     </box>
-  );
+  )
 }
 
 function labelize(props: ShortcutProps) {
-  let result = "";
+  let result = ""
   if (props.ctrl) {
-    result += "^";
+    result += "^"
   }
   if (props.shift) {
-    result += "⬆";
+    result += "⬆"
   }
-  if (props.hyper) {
-    result += "cmd"; // cmd
+  if (props.meta) {
+    result += "alt"
   }
   if (props.option) {
-    result += "⌥";
+    result += "⌥"
   }
   if (props.name) {
-    result += props.name;
+    result += props.name
   }
-  return result;
+  return result
 }
 
 function isMatchingEvent(event: KeyEvent, props: ShortcutProps) {
-  for (const key in props) {
-    if (key in OWN_PROPS) {
-      continue;
-    }
-
-    const requestedValue = props[key];
-    const actualValue = event?.[key];
-    if (requestedValue && !(requestedValue === actualValue)) {
-      return false;
-    }
-    if (!requestedValue && actualValue) {
-      return false;
+  for (const key of EVENT_KEYS) {
+    const requestedValue = props[key]
+    if (requestedValue !== undefined && requestedValue !== event[key]) {
+      return false
     }
   }
 
   if (props.detect) {
-    return props.detect(event);
+    return props.detect(event)
   }
 
-  return true;
+  return true
 }
