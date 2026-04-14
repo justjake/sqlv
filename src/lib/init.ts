@@ -1,4 +1,5 @@
 import { QueryClient } from "@tanstack/react-query"
+import "./adapters/BunSqlAdapter"
 import "./adapters/TursoAdapter"
 import { getAdapter } from "./interface/Adapter"
 import { Persist } from "./Persist"

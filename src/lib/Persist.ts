@@ -76,10 +76,10 @@ export class Persist {
     const key = await getOrCreateLocalEncryptionKey(secrets)
     const config: ProtocolConfig<"turso"> = {
       path,
-      encryption: {
-        cipher: "aegis256",
-        hexkey: key,
-      },
+      // encryption: {
+      //   cipher: "aegis256",
+      //   hexkey: key,
+      // },
     }
 
     return {
