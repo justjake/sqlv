@@ -15,6 +15,8 @@ type Theme = {
   focusBg: string
   /** Background for the highlighted target while focus navigation mode is active. */
   focusNavBg: string
+  /** Transparent overlay background for the highlighted target while focus navigation mode is active. */
+  focusNavHaloBg: string
   /** Border color for focus navigation halos and hint chrome. */
   focusNavBorder: string
   /** Background for the focus navigation hint panel. */
@@ -51,8 +53,9 @@ type Theme = {
 // Dark values are taken from the user's WezTerm "Circus (base16)" palette.
 // Light values are reasonable counterparts for a light-background terminal.
 
-const FORM_FIELD_BACKGROUND_ALPHA = 0x20
-const FORM_FIELD_BACKGROUND_ACTIVE_ALPHA = 0x36
+const FORM_FIELD_BACKGROUND_ALPHA = 0x38
+const FORM_FIELD_BACKGROUND_ACTIVE_ALPHA = 0x5a
+const FOCUS_NAV_HALO_ALPHA = 0x24
 
 const DARK: Theme = {
   primaryFg: "#d0d0d0",
@@ -60,6 +63,7 @@ const DARK: Theme = {
   formFieldLabelActiveFg: "#ffffff",
   focusBg: "#639ee4", // base0D (blue)
   focusNavBg: "#8ab6ef",
+  focusNavHaloBg: withHexAlpha("#8ab6ef", FOCUS_NAV_HALO_ALPHA),
   focusNavBorder: "#d0d0d0",
   focusHintBg: "#1f1f1f",
   inputBg: "#303030", // base02
@@ -83,6 +87,7 @@ const LIGHT: Theme = {
   formFieldLabelActiveFg: "#111111",
   focusBg: "#4271ae",
   focusNavBg: "#6f95c7",
+  focusNavHaloBg: withHexAlpha("#6f95c7", FOCUS_NAV_HALO_ALPHA),
   focusNavBorder: "#303030",
   focusHintBg: "#f3f3f3",
   inputBg: "#e0e0e0",
@@ -111,6 +116,7 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
       formFieldLabelActiveFg: p[0] ?? LIGHT.formFieldLabelActiveFg,
       focusBg: p[4] ?? LIGHT.focusBg, // ANSI blue
       focusNavBg: p[12] ?? brighten(p[4] ?? LIGHT.focusBg, 0.2),
+      focusNavHaloBg: withHexAlpha(p[12] ?? brighten(p[4] ?? LIGHT.focusBg, 0.2), FOCUS_NAV_HALO_ALPHA),
       focusNavBorder: p[0] ?? LIGHT.focusNavBorder,
       focusHintBg: p[7] ?? LIGHT.focusHintBg,
       inputBg: p[7] ?? LIGHT.inputBg, // ANSI white (light bg tint)
@@ -137,6 +143,7 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
     formFieldLabelActiveFg: "#ffffff",
     focusBg: p[4] ?? DARK.focusBg, // ANSI blue
     focusNavBg: p[12] ?? brighten(p[4] ?? DARK.focusBg, 0.18),
+    focusNavHaloBg: withHexAlpha(p[12] ?? brighten(p[4] ?? DARK.focusBg, 0.18), FOCUS_NAV_HALO_ALPHA),
     focusNavBorder: p[7] ?? DARK.focusNavBorder,
     focusHintBg: p[0] ? brighten(p[0], 0.08) : DARK.focusHintBg,
     inputBg: p[0] ? brighten(p[0], 0.12) : DARK.inputBg,

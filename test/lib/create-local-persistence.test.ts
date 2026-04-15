@@ -12,7 +12,7 @@ import {
   type SecretRef,
 } from "../../src/lib/createLocalPersistence"
 import { AdapterRegistry } from "../../src/lib/interface/Adapter"
-import { createTempDir, makeConnection, removePath } from "../support"
+import { createTempDir, makeConnection, makeSettingsRow, removePath } from "../support"
 
 describe("local persistence helpers", () => {
   test("creates sessions and derives a persist path", async () => {
@@ -111,9 +111,17 @@ describe("local persistence helpers", () => {
       })
 
       await local.persist.connections.upsert(connection)
+      await local.persist.settings.upsert(makeSettingsRow("appearance", { useNerdFont: true }))
 
       expect(local.session.type).toBe("session")
       expect(await local.persist.connections.get({ id: connection.id, type: "connection" })).toMatchObject(connection)
+      expect(await local.persist.settings.get({ id: "appearance", type: "settings" })).toMatchObject({
+        id: "appearance",
+        settings: {
+          useNerdFont: true,
+        },
+        type: "settings",
+      })
     } finally {
       await removePath(dir)
     }

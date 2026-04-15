@@ -1,6 +1,6 @@
 import type { InputRenderable } from "@opentui/core"
 import { useEffect, useRef, useState } from "react"
-import { FocusHalo, Focusable, useIsFocusWithin } from "../focus"
+import { Focusable, useIsFocusWithin } from "../focus"
 import { Shortcut } from "../Shortcut"
 import { useKeybindHandler } from "../ui/keybind"
 import { Text } from "../ui/Text"
@@ -100,7 +100,6 @@ export function SaveQueryDialog(props: SaveQueryDialogProps) {
           </box>
         </box>
         {error && <Text fg={theme.errorFg}>{error}</Text>}
-        <FocusHalo />
       </box>
     </Focusable>
   )

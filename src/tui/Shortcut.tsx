@@ -1,25 +1,27 @@
 import type { KeyEvent, MouseEvent } from "@opentui/core"
 import { flushSync } from "@opentui/react"
 import { useState, type ReactNode } from "react"
-import { labelizeSequences, useShortcut } from "./ui/keybind"
+import { labelizeShortcutInput, useShortcut, type ShortcutKeyInput } from "./ui/keybind"
 import { Text } from "./ui/Text"
 import { useTheme } from "./ui/theme"
 
 export type ShortcutProps = {
-  keys: string | readonly string[]
+  keys: ShortcutKeyInput
   label: ReactNode
   onKey?: (key: KeyEvent | MouseEvent) => void
   enabled?: boolean
+  global?: boolean
 }
 
 export function Shortcut(props: ShortcutProps) {
-  const { keys, label, onKey, enabled } = props
+  const { enabled, global, keys, label, onKey } = props
   const [active, setActive] = useState(false)
   const theme = useTheme()
 
-  const { sequences } = useShortcut({
-    keys,
+  useShortcut({
     enabled,
+    global,
+    keys,
     onKey(event) {
       event.preventDefault()
       event.stopPropagation()
@@ -51,7 +53,7 @@ export function Shortcut(props: ShortcutProps) {
       opacity={enabled ? 1 : 0.5}
     >
       <Text>
-        {labelizeSequences(sequences)} {label}
+        {labelizeShortcutInput(keys)} {label}
       </Text>
     </box>
   )

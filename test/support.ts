@@ -28,6 +28,7 @@ import { EpochMillis, type QueryExecution, type QueryInitiator } from "../src/li
 import { OrderString } from "../src/lib/types/Order"
 import { pendingQueryState, type QueryState } from "../src/lib/types/QueryState"
 import type { SavedQuery } from "../src/lib/types/SavedQuery"
+import { defaultSettingsState, type SettingsId, type SettingsRow, type SettingsSchema, type SettingsState } from "../src/lib/types/Settings"
 
 export async function createTempDir(prefix = "sqlv-test-"): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix))
@@ -139,8 +140,26 @@ export function makeSavedQuery(
   }
 }
 
-type SqlVisorStatePatch = Partial<Omit<SqlVisorState, "editor">> & {
+export function makeSettingsRow<Id extends SettingsId>(
+  id: Id,
+  settings: SettingsSchema[Id],
+  args: {
+    createdAt?: number
+    updatedAt?: number
+  } = {},
+): SettingsRow<Id> {
+  return {
+    createdAt: EpochMillis(args.createdAt ?? 1),
+    id,
+    settings,
+    type: "settings",
+    updatedAt: args.updatedAt === undefined ? undefined : EpochMillis(args.updatedAt),
+  }
+}
+
+type SqlVisorStatePatch = Partial<Omit<SqlVisorState, "editor" | "settings">> & {
   editor?: Partial<EditorState>
+  settings?: Partial<SettingsState>
 }
 
 export function createSqlVisorState(patch: SqlVisorStatePatch = {}): SqlVisorState {
@@ -175,6 +194,10 @@ export function createSqlVisorState(patch: SqlVisorStatePatch = {}): SqlVisorSta
     editor,
     history: patch.history ?? [],
     savedQueries: patch.savedQueries ?? [],
+    settings: {
+      ...defaultSettingsState(),
+      ...patch.settings,
+    },
     detailView: patch.detailView ?? emptyDetailView,
     queryExecution: patch.queryExecution ?? pendingQueryState<QueryExecution>(),
     activeQueries: patch.activeQueries ?? [],
@@ -201,7 +224,9 @@ type EngineMethodOverrides = {
   selectConnection?: (connectionId: string | undefined) => void
   saveQueryAsNew?: (input: SaveQueryAsNewInput) => Promise<SavedQuery>
   saveSavedQueryChanges?: (input?: SaveSavedQueryChangesInput) => Promise<SavedQuery>
+  replaceSettings?: <Id extends SettingsId>(id: Id, settings: SettingsSchema[Id]) => Promise<SettingsSchema[Id]>
   setEditorState?: (patch: Partial<Pick<EditorState, "text" | "cursorOffset">> & { savedQueryId?: string | null }) => void
+  updateSettings?: <Id extends SettingsId>(id: Id, patch: Partial<SettingsSchema[Id]>) => Promise<SettingsSchema[Id]>
 }
 
 export function createEngineStub(
@@ -233,8 +258,10 @@ export function createEngineStub(
     runQuery: RunQueryInput[]
     saveQueryAsNew: SaveQueryAsNewInput[]
     saveSavedQueryChanges: Array<SaveSavedQueryChangesInput | undefined>
+    replaceSettings: Array<{ id: SettingsId; settings: object }>
     selectConnection: Array<string | undefined>
     setEditorState: Array<Partial<Pick<EditorState, "text" | "cursorOffset">> & { savedQueryId?: string | null }>
+    updateSettings: Array<{ id: SettingsId; patch: object }>
   } = {
     addConnection: [],
     applyEditorSuggestionMenuItem: [],
@@ -252,8 +279,10 @@ export function createEngineStub(
     runQuery: [],
     saveQueryAsNew: [],
     saveSavedQueryChanges: [],
+    replaceSettings: [],
     selectConnection: [],
     setEditorState: [],
+    updateSettings: [],
   }
 
   const notify = () => {
@@ -496,6 +525,42 @@ export function createEngineStub(
       notify()
       return savedQuery
     },
+    async updateSettings<Id extends SettingsId>(id: Id, patch: Partial<SettingsSchema[Id]>) {
+      calls.updateSettings.push({ id, patch: patch as object })
+      if (overrides.updateSettings) {
+        return overrides.updateSettings(id, patch)
+      }
+
+      const settings = {
+        ...state.settings[id],
+        ...patch,
+      } as SettingsSchema[Id]
+      state = {
+        ...state,
+        settings: {
+          ...state.settings,
+          [id]: settings,
+        },
+      }
+      notify()
+      return settings
+    },
+    async replaceSettings<Id extends SettingsId>(id: Id, settings: SettingsSchema[Id]) {
+      calls.replaceSettings.push({ id, settings: settings as object })
+      if (overrides.replaceSettings) {
+        return overrides.replaceSettings(id, settings)
+      }
+
+      state = {
+        ...state,
+        settings: {
+          ...state.settings,
+          [id]: settings,
+        },
+      }
+      notify()
+      return settings
+    },
     cancelEditorAnalysis() {
       calls.cancelEditorAnalysis += 1
       if (overrides.cancelEditorAnalysis) {
@@ -526,6 +591,13 @@ export function createEngineStub(
 
       state = {
         ...state,
+        settings: {
+          ...state.settings,
+          sidebarState: {
+            ...state.settings.sidebarState,
+            lastSelectedConnectionId: connectionId ?? "",
+          },
+        },
         selectedConnectionId: connectionId,
       }
       notify()
@@ -747,10 +819,17 @@ export function createEngineStub(
             ...patch.editor,
           }
         : state.editor
+      const nextSettings = patch.settings
+        ? {
+            ...state.settings,
+            ...patch.settings,
+          }
+        : state.settings
       state = {
         ...state,
         ...patch,
         editor: nextEditor,
+        settings: nextSettings,
       }
       notify()
     },
@@ -774,11 +853,13 @@ export function createEngineStub(
     | "restoreQueryExecution"
     | "restoreSavedQuery"
     | "runQuery"
+    | "replaceSettings"
     | "selectConnection"
     | "saveQueryAsNew"
     | "saveSavedQueryChanges"
     | "setEditorState"
     | "subscribe"
+    | "updateSettings"
   > & {
     __notify: () => void
     __setState: (patch: SqlVisorStatePatch) => void

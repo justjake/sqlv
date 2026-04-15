@@ -11,7 +11,6 @@ import { EditorView, QUERY_EDITOR_FOCUS_ID } from "./editor/EditorView"
 import { QueryHistory, type QueryFinderEntry } from "./editor/QueryHistory"
 import { SaveQueryDialog } from "./editor/SaveQueryDialog"
 import {
-  FocusHalo,
   Focusable,
   FocusNavigationHint,
   FocusProvider,
@@ -21,6 +20,7 @@ import {
   useIsFocusWithin,
 } from "./focus"
 import { Separator } from "./Separator"
+import { SettingsPane } from "./sidebar/SettingsPane"
 import { Sidebar } from "./sidebar/Sidebar"
 import { KeybindProvider, useKeybindHandler, useShortcut } from "./ui/keybind"
 import { Modal } from "./ui/Modal"
@@ -74,6 +74,7 @@ export function App() {
   const tree = useFocusTree()
   const [pane, setPane] = useState<TopRightPane>("editor")
   const [addConnectionOpen, setAddConnectionOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(30)
   const [editorHeight, setEditorHeight] = useState(12)
   const [selectedRecentQueryId, setSelectedRecentQueryId] = useState<string | null | undefined>()
@@ -83,6 +84,7 @@ export function App() {
   const dragRef = useRef<DragState | null>(null)
   const pendingEditorFocusRef = useRef(false)
   const addConnectionReturnFocusRef = useRef<readonly string[] | undefined>(undefined)
+  const settingsReturnFocusRef = useRef<readonly string[] | undefined>(undefined)
   const [dragging, setDragging] = useState<"sidebar" | "editor" | null>(null)
   const connections = state.connections.data ?? []
   const currentSavedQuery = state.editor.savedQueryId
@@ -90,14 +92,21 @@ export function App() {
     : undefined
   const detailPaneWidth = Math.max(1, termWidth - sidebarWidth - 1)
   const recentQueries = useMemo(
-    () => buildRecentQueries(engine, state.activeQueries, state.history, selectedRecentQueryId ?? undefined, showSystemQueries),
+    () =>
+      buildRecentQueries(
+        engine,
+        state.activeQueries,
+        state.history,
+        selectedRecentQueryId ?? undefined,
+        showSystemQueries,
+      ),
     [engine, selectedRecentQueryId, showSystemQueries, state.activeQueries, state.history],
   )
   const selectedRecentQuery =
     selectedRecentQueryId === null
       ? undefined
-      : recentQueries.find((query) => query.queryId === selectedRecentQueryId) ??
-        (selectedRecentQueryId === undefined ? recentQueries[0] : undefined)
+      : (recentQueries.find((query) => query.queryId === selectedRecentQueryId) ??
+        (selectedRecentQueryId === undefined ? recentQueries[0] : undefined))
 
   useEffect(() => {
     setSelectedRecentQueryId((current) => {
@@ -146,22 +155,28 @@ export function App() {
     engine.cancelEditorAnalysis()
   }, [engine])
 
-  const handleRestoreQuery = useCallback((entry: QueryExecution) => {
-    setSelectedRecentQueryId(entry.id)
-    engine.restoreQueryExecution(entry.id)
-    setPane("editor")
-  }, [engine])
+  const handleRestoreQuery = useCallback(
+    (entry: QueryExecution) => {
+      setSelectedRecentQueryId(entry.id)
+      engine.restoreQueryExecution(entry.id)
+      setPane("editor")
+    },
+    [engine],
+  )
 
-  const handleRestoreQueryFinderEntry = useCallback((entry: QueryFinderEntry) => {
-    if (entry.kind === "history") {
-      handleRestoreQuery(entry.entry)
-      return
-    }
+  const handleRestoreQueryFinderEntry = useCallback(
+    (entry: QueryFinderEntry) => {
+      if (entry.kind === "history") {
+        handleRestoreQuery(entry.entry)
+        return
+      }
 
-    const restored = engine.restoreSavedQuery(entry.savedQuery.id)
-    setSelectedRecentQueryId(restored?.queryExecutionId ?? null)
-    setPane("editor")
-  }, [engine, handleRestoreQuery])
+      const restored = engine.restoreSavedQuery(entry.savedQuery.id)
+      setSelectedRecentQueryId(restored?.queryExecutionId ?? null)
+      setPane("editor")
+    },
+    [engine, handleRestoreQuery],
+  )
 
   const handleCloseHistory = useCallback(() => {
     pendingEditorFocusRef.current = true
@@ -194,6 +209,32 @@ export function App() {
     tree.focusPath([QUERY_EDITOR_FOCUS_ID])
   }, [tree])
 
+  const handleOpenSettings = useCallback(() => {
+    const currentPath = tree.getNavigationState().focusedPath
+    settingsReturnFocusRef.current = currentPath ? [...currentPath] : undefined
+    setSettingsOpen(true)
+  }, [tree])
+
+  const handleCloseSettings = useCallback(() => {
+    const returnFocus = settingsReturnFocusRef.current
+    settingsReturnFocusRef.current = undefined
+    flushSync(() => {
+      setSettingsOpen(false)
+    })
+    if (returnFocus) {
+      tree.focusPath(returnFocus)
+    }
+  }, [tree])
+
+  const handleToggleSettings = useCallback(() => {
+    if (settingsOpen) {
+      handleCloseSettings()
+      return
+    }
+
+    handleOpenSettings()
+  }, [handleCloseSettings, handleOpenSettings, settingsOpen])
+
   const handleOpenSaveDialog = useCallback(() => {
     setSaveDialog({
       error: undefined,
@@ -210,20 +251,23 @@ export function App() {
     })
   }, [tree])
 
-  const handleSubmitSaveDialog = useCallback(async (name: string) => {
-    setSaveDialog((current) => current ? { ...current, error: undefined, saving: true } : current)
+  const handleSubmitSaveDialog = useCallback(
+    async (name: string) => {
+      setSaveDialog((current) => (current ? { ...current, error: undefined, saving: true } : current))
 
-    try {
-      await engine.saveQueryAsNew({ name })
-      setSaveDialog(undefined)
-      queueMicrotask(() => {
-        tree.focusPath([QUERY_EDITOR_FOCUS_ID])
-      })
-    } catch (_error) {
-      const error = _error instanceof Error ? _error : new Error(String(_error))
-      setSaveDialog((current) => current ? { ...current, error: error.message, saving: false } : current)
-    }
-  }, [engine, tree])
+      try {
+        await engine.saveQueryAsNew({ name })
+        setSaveDialog(undefined)
+        queueMicrotask(() => {
+          tree.focusPath([QUERY_EDITOR_FOCUS_ID])
+        })
+      } catch (_error) {
+        const error = _error instanceof Error ? _error : new Error(String(_error))
+        setSaveDialog((current) => (current ? { ...current, error: error.message, saving: false } : current))
+      }
+    },
+    [engine, tree],
+  )
 
   const handleSaveChanges = useCallback(() => {
     void engine.saveSavedQueryChanges().catch((_error) => {
@@ -276,6 +320,8 @@ export function App() {
     setDragging(null)
   }, [])
 
+  const modalStackOpen = addConnectionOpen || !!saveDialog || settingsOpen
+
   return (
     <box
       flexDirection="row"
@@ -286,7 +332,12 @@ export function App() {
       position="relative"
     >
       <box flexDirection="column" flexBasis={sidebarWidth}>
-        <Sidebar onAddConnection={handleOpenAddConnection} />
+        <Sidebar
+          addConnectionEnabled={!modalStackOpen}
+          onAddConnection={handleOpenAddConnection}
+          onToggleSettings={handleToggleSettings}
+          settingsEnabled={settingsOpen || (!addConnectionOpen && !saveDialog)}
+        />
       </box>
 
       <Separator
@@ -305,7 +356,6 @@ export function App() {
               analysisConnectionId={state.selectedConnectionId}
               autoFocus
               editor={state.editor}
-              onAddConnection={handleOpenAddConnection}
               onApplySuggestionMenuItem={() => engine.applyEditorSuggestionMenuItem()}
               onCancelAnalysis={handleCancelEditorAnalysis}
               onCloseSuggestionMenu={() => engine.closeEditorSuggestionMenu()}
@@ -353,11 +403,7 @@ export function App() {
             selectedQueryId={selectedRecentQuery?.queryId}
             width={detailPaneWidth}
           />
-          <QueryDetailPanel
-            detailView={state.detailView}
-            selectedQuery={selectedRecentQuery}
-            width={detailPaneWidth}
-          />
+          <QueryDetailPanel detailView={state.detailView} selectedQuery={selectedRecentQuery} width={detailPaneWidth} />
         </box>
       </box>
       {saveDialog && (
@@ -380,6 +426,7 @@ export function App() {
           termWidth={termWidth}
         />
       )}
+      {settingsOpen && <SettingsModal onClose={handleCloseSettings} termHeight={termHeight} termWidth={termWidth} />}
       <FocusNavigationHint />
     </box>
   )
@@ -391,22 +438,23 @@ function AddConnectionModal(props: {
   termHeight: number
   termWidth: number
 }) {
-  const topPadding = Math.max(1, Math.floor(props.termHeight / 4))
-  const dialogHeight = Math.max(12, Math.min(24, props.termHeight - topPadding - 1))
+  const dialogHeight = Math.max(12, Math.min(24, props.termHeight - 4))
 
   return (
-    <Modal height={dialogHeight} onClose={props.onClose} size="medium">
-      <AddConnectionPane onBack={props.onClose} onSaved={props.onSaved} />
+    <Modal focusNavigable={false} height={dialogHeight} onClose={props.onClose} size="medium" title="Add Connection">
+      <AddConnectionPane onSaved={props.onSaved} />
     </Modal>
   )
 }
 
-function SaveQueryDialogOverlay(props: SaveQueryDialogState & {
-  onCancel: () => void
-  onSave: (name: string) => void | Promise<void>
-  termHeight: number
-  termWidth: number
-}) {
+function SaveQueryDialogOverlay(
+  props: SaveQueryDialogState & {
+    onCancel: () => void
+    onSave: (name: string) => void | Promise<void>
+    termHeight: number
+    termWidth: number
+  },
+) {
   const dialogWidth = Math.max(32, Math.min(56, props.termWidth - 8))
 
   return (
@@ -432,6 +480,21 @@ function SaveQueryDialogOverlay(props: SaveQueryDialogState & {
         />
       </box>
     </box>
+  )
+}
+
+function SettingsModal(props: {
+  onClose: () => void
+  termHeight: number
+  termWidth: number
+}) {
+  const dialogWidth = Math.max(36, Math.min(56, props.termWidth - 8))
+  const dialogHeight = Math.max(10, Math.min(16, props.termHeight - 6))
+
+  return (
+    <Modal focusNavigable={false} height={dialogHeight} onClose={props.onClose} title="Settings" width={dialogWidth}>
+      <SettingsPane />
+    </Modal>
   )
 }
 
@@ -507,7 +570,9 @@ function RecentQueryViewBody(props: {
         width: { absolute: 2 },
         Cell: ({ row }) => (
           <Text
-            fg={row.kind === "query" ? (row.dimmed ? theme.mutedFg : recentQueryStatusColor(row.query, theme)) : undefined}
+            fg={
+              row.kind === "query" ? (row.dimmed ? theme.mutedFg : recentQueryStatusColor(row.query, theme)) : undefined
+            }
             wrapMode="none"
             truncate
           >
@@ -556,7 +621,8 @@ function RecentQueryViewBody(props: {
       return
     }
 
-    const query = queries.find((candidate) => candidate.queryId === (selectedQueryId ?? currentQuery?.queryId)) ?? currentQuery
+    const query =
+      queries.find((candidate) => candidate.queryId === (selectedQueryId ?? currentQuery?.queryId)) ?? currentQuery
     if (!query) {
       return
     }
@@ -617,30 +683,22 @@ function RecentQueryViewBody(props: {
           width={width}
           getRowKey={(row) => (row.kind === "query" ? row.query.queryId : row.id)}
           getRowFocusableId={(row) => (row.kind === "query" ? recentQueryFocusId(row.query.queryId) : undefined)}
-          isRowDimmed={(row) => row.kind === "query" ? row.dimmed : false}
+          isRowDimmed={(row) => (row.kind === "query" ? row.dimmed : false)}
           isRowFocused={(row) =>
-            row.kind === "query" ? sameFocusPath(recentQueryRowPath(row.query.queryId), focusedDescendantPath) : false}
-          isRowSelected={(row) => row.kind === "query" ? row.query.queryId === selectedQueryId : false}
+            row.kind === "query" ? sameFocusPath(recentQueryRowPath(row.query.queryId), focusedDescendantPath) : false
+          }
+          isRowSelected={(row) => (row.kind === "query" ? row.query.queryId === selectedQueryId : false)}
         />
       </Focusable>
-      <FocusHalo />
     </box>
   )
 }
 
-function QueryDetailPanel(props: {
-  detailView: DetailView
-  selectedQuery: RecentQuery | undefined
-  width?: number
-}) {
+function QueryDetailPanel(props: { detailView: DetailView; selectedQuery: RecentQuery | undefined; width?: number }) {
   return <QueryDetailSurface detailView={props.detailView} selectedQuery={props.selectedQuery} width={props.width} />
 }
 
-function QueryDetailSurface(props: {
-  detailView: DetailView
-  selectedQuery: RecentQuery | undefined
-  width?: number
-}) {
+function QueryDetailSurface(props: { detailView: DetailView; selectedQuery: RecentQuery | undefined; width?: number }) {
   const { detailView, selectedQuery, width } = props
   const theme = useTheme()
 
@@ -659,9 +717,7 @@ function renderSelectedQueryDetail(query: RecentQuery, theme: ReturnType<typeof 
       }
       return (
         <box flexDirection="column" flexGrow={1}>
-          <QueryDetailLabelRow
-            label={formatResultDividerLabel(query.execution?.rows.length ?? 0)}
-          />
+          <QueryDetailLabelRow label={formatResultDividerLabel(query.execution?.rows.length ?? 0)} />
           <ResultsTable rows={query.execution?.rows ?? []} width={width} />
         </box>
       )
@@ -695,21 +751,32 @@ function renderFallbackDetailView(detailView: DetailView, theme: ReturnType<type
 
 function renderCenteredState(theme: ReturnType<typeof useTheme>, title: string, message?: string) {
   return (
-    <box alignItems="center" flexDirection="column" flexGrow={1} justifyContent="center" paddingLeft={1} paddingRight={1}>
+    <box
+      alignItems="center"
+      flexDirection="column"
+      flexGrow={1}
+      justifyContent="center"
+      paddingLeft={1}
+      paddingRight={1}
+    >
       <Text fg={theme.mutedFg}>{title}</Text>
-      {message && <Text fg={theme.mutedFg} wrapMode="word">{message}</Text>}
+      {message && (
+        <Text fg={theme.mutedFg} wrapMode="word">
+          {message}
+        </Text>
+      )}
     </box>
   )
 }
 
-function QueryDetailLabelRow(props: {
-  label: string
-}) {
+function QueryDetailLabelRow(props: { label: string }) {
   const theme = useTheme()
   return (
     <box alignItems="center" flexDirection="row" flexShrink={0}>
       <box flexGrow={1} />
-      <Text fg={theme.mutedFg} wrapMode="none">{props.label}</Text>
+      <Text fg={theme.mutedFg} wrapMode="none">
+        {props.label}
+      </Text>
     </box>
   )
 }
@@ -742,19 +809,26 @@ function buildRecentQueries(
   const finishedQueries = history
     .filter((execution) => showSystemQueries || execution.initiator === "user")
     .filter((execution) => !activeIds.has(execution.id))
-    .map((execution) => ({
-      queryId: execution.id,
-      text: execution.sql.source,
-      connectionId: execution.connectionId,
-      initiator: execution.initiator,
-      startedAt: execution.createdAt,
-      status: execution.status,
-      isActive: false,
-      execution,
-    }) satisfies RecentQuery)
+    .map(
+      (execution) =>
+        ({
+          queryId: execution.id,
+          text: execution.sql.source,
+          connectionId: execution.connectionId,
+          initiator: execution.initiator,
+          startedAt: execution.createdAt,
+          status: execution.status,
+          isActive: false,
+          execution,
+        }) satisfies RecentQuery,
+    )
   const visibleFinishedQueries = finishedQueries.slice(0, 2)
   const selectedFinishedQuery = selectedQueryId
-    ? finishedQueries.find((query) => query.queryId === selectedQueryId && !visibleFinishedQueries.some((candidate) => candidate.queryId === selectedQueryId))
+    ? finishedQueries.find(
+        (query) =>
+          query.queryId === selectedQueryId &&
+          !visibleFinishedQueries.some((candidate) => candidate.queryId === selectedQueryId),
+      )
     : undefined
   if (selectedFinishedQuery) {
     if (visibleFinishedQueries.length < 2) {

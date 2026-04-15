@@ -86,6 +86,16 @@ export {
   type SavedQuery,
 } from "./lib/types/SavedQuery"
 export {
+  createSettingsRow,
+  defaultSettingsState,
+  type AnySettingsRow,
+  type SettingsId,
+  type SettingsRow,
+  type SettingsSchema,
+  type SettingsState,
+  type SettingsStore,
+} from "./lib/types/Settings"
+export {
   type QueryExecution,
   type QueryExecutionStatus,
   type QueryFlow,

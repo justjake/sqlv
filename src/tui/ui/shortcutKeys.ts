@@ -4,9 +4,12 @@
  * - packages/core/src/lib/parse.keypress-kitty.ts
  * - packages/core/src/lib/keymapping.ts
  *
- * `ShortcutKeys` models the keys we can represent in sqlv's shortcut/chord
- * syntax today. Delimiter characters like bare `+` use a spelled alias in
- * the input grammar, for example `plus`.
+ * `ShortcutKeys` models a single shortcut sequence in sqlv's structured
+ * shortcut syntax. Arrays are chains, not alternatives. Alternatives are
+ * represented at the keybind layer as `{ or: [...] }`.
+ *
+ * Delimiter characters like bare `+` use a spelled alias in the input
+ * grammar, for example `plus`.
  *
  * Public canonical spellings:
  * - `esc` over `escape`
@@ -274,10 +277,13 @@ export type Shift = "shift+"
 export type Command = "command+" | "super+"
 
 type Maybe<T extends string> = "" | T
-type ShortcutModifiers = `${Maybe<Ctrl>}${Maybe<Option>}${Maybe<Shift>}${Maybe<Command>}`
+export type ShortcutModifiers = `${Maybe<Ctrl>}${Maybe<Option>}${Maybe<Shift>}${Maybe<Command>}`
 export type ShortcutModifiedKey = `${ShortcutModifiers}${ShortcutBareKeyName}`
 export type ShortcutChain = readonly ShortcutModifiedKey[]
 export type ShortcutKeys = ShortcutModifiedKey | ShortcutChain
+export type ShortcutKeyUnion<TKey = ShortcutKeys> = {
+  or: readonly TKey[]
+}
 
 // export type ShortcutKeys<TKey extends string = string> = string extends TKey ? string : ShortcutChainLiteral<TKey>
 

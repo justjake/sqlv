@@ -10,7 +10,7 @@ import type {
 import type { EditorRange, SuggestionItem } from "../../lib/suggestions"
 import { decideEditorSuggestionMenu } from "../../lib/suggestions/editorCompletion"
 import type { SavedQuery } from "../../lib/types/SavedQuery"
-import { FocusHalo, Focusable, useIsFocused } from "../focus"
+import { Focusable, useIsFocused } from "../focus"
 import { Shortcut } from "../Shortcut"
 import { ensureTreeSitterGrammarLoaded, highlightTreeSitterOnce } from "../tree-sitter/client"
 import { Text } from "../ui/Text"
@@ -37,7 +37,6 @@ export type EditorProps = {
   onCloseSuggestionMenu?: () => void
   onFocusSuggestionMenuItem?: (input: EditorSuggestionMenuItemFocusInput) => void
   onApplySuggestionMenuItem?: () => void
-  onAddConnection?: () => void
   onExecute?: (sql: string) => void
   onFormatQuery?: () => void
   onHistory?: () => void
@@ -53,6 +52,20 @@ const MENU_MAX_VISIBLE_ITEMS = 8
 const MENU_MAX_WIDTH = 60
 const MENU_MIN_WIDTH = 18
 const EDITOR_DIAGNOSTIC_HIGHLIGHT_REF = 4_201
+const EDITOR_EXECUTE_SHORTCUT = { or: ["command+return", "ctrl+return"] } as const
+const EDITOR_TEXTAREA_KEY_BINDINGS: Array<{
+  action: "newline" | "submit"
+  ctrl?: boolean
+  meta?: boolean
+  name: "linefeed" | "return"
+  super?: boolean
+}> = [
+  { action: "newline", meta: true, name: "return" },
+  { action: "submit", ctrl: true, name: "return" },
+  { action: "submit", ctrl: true, name: "linefeed" },
+  { action: "submit", name: "return", super: true },
+  { action: "submit", name: "linefeed", super: true },
+]
 
 type EditorAnalysisOverlay = {
   backgroundColor: string
@@ -63,7 +76,24 @@ type EditorAnalysisOverlay = {
 }
 
 export function EditorView(props: EditorProps) {
-  const { analysisConnectionId, autoFocus, editor, onAddConnection, onApplySuggestionMenuItem, onCancelAnalysis, onCloseSuggestionMenu, onEditorChange, onExecute, onFocusSuggestionMenuItem, onFormatQuery, onHistory, onOpenSuggestionMenu, onRequestAnalysis, onSaveAsNew, onSaveChanges, savedQuery } = props
+  const {
+    analysisConnectionId,
+    autoFocus,
+    editor,
+    onApplySuggestionMenuItem,
+    onCancelAnalysis,
+    onCloseSuggestionMenu,
+    onEditorChange,
+    onExecute,
+    onFocusSuggestionMenuItem,
+    onFormatQuery,
+    onHistory,
+    onOpenSuggestionMenu,
+    onRequestAnalysis,
+    onSaveAsNew,
+    onSaveChanges,
+    savedQuery,
+  } = props
   const textareaRef = useRef<TextareaRenderable>(null)
 
   const handleExecute = useCallback(() => {
@@ -120,7 +150,6 @@ export function EditorView(props: EditorProps) {
       <EditorSurface
         editor={editor}
         handleExecute={handleExecute}
-        onAddConnection={onAddConnection}
         onApplySuggestionMenuItem={onApplySuggestionMenuItem}
         onCloseSuggestionMenu={onCloseSuggestionMenu}
         onEditorChange={onEditorChange}
@@ -149,7 +178,6 @@ function EditorSurface(props: {
   onApplySuggestionMenuItem?: () => void
   onHistory?: () => void
   onFormatQuery?: () => void
-  onAddConnection?: () => void
   onSaveAsNew?: () => void
   onSaveChanges?: () => void
   savedQuery?: SavedQuery
@@ -170,71 +198,77 @@ function EditorSurface(props: {
   const pendingSyncRef = useRef(false)
   const pendingSyncReasonRef = useRef<"content" | "cursor">("cursor")
 
-  const syncEditorState = useCallback((reason: "content" | "cursor") => {
-    const textarea = props.textareaRef.current
-    if (!textarea) {
-      return
-    }
+  const syncEditorState = useCallback(
+    (reason: "content" | "cursor") => {
+      const textarea = props.textareaRef.current
+      if (!textarea) {
+        return
+      }
 
-    const text = textarea.plainText
-    const cursorOffset = textarea.cursorOffset
-    const previousState = lastObservedEditorStateRef.current
-    lastObservedEditorStateRef.current = {
-      cursorOffset,
-      text,
-    }
-    props.onEditorChange?.({
-      cursorOffset,
-      text,
-    })
+      const text = textarea.plainText
+      const cursorOffset = textarea.cursorOffset
+      const previousState = lastObservedEditorStateRef.current
+      lastObservedEditorStateRef.current = {
+        cursorOffset,
+        text,
+      }
+      props.onEditorChange?.({
+        cursorOffset,
+        text,
+      })
 
-    const suggestionDecision = decideEditorSuggestionMenu({
-      cursorOffset,
-      menu: props.editor.suggestionMenu,
-      previousText: previousState.text,
-      reason,
-      selectedConnectionId: props.selectedConnectionId,
-      text,
-    })
+      const suggestionDecision = decideEditorSuggestionMenu({
+        cursorOffset,
+        menu: props.editor.suggestionMenu,
+        previousText: previousState.text,
+        reason,
+        selectedConnectionId: props.selectedConnectionId,
+        text,
+      })
 
-    if (suggestionDecision.kind === "open") {
-      props.onOpenSuggestionMenu?.(suggestionDecision.input)
-      return
-    }
+      if (suggestionDecision.kind === "open") {
+        props.onOpenSuggestionMenu?.(suggestionDecision.input)
+        return
+      }
 
-    if (suggestionDecision.kind === "close") {
-      props.onCloseSuggestionMenu?.()
-    }
-  }, [
-    props.editor.suggestionMenu.open,
-    props.editor.suggestionMenu.query,
-    props.editor.suggestionMenu.replacementRange,
-    props.editor.suggestionMenu.scope,
-    props.editor.suggestionMenu.trigger,
-    props.onCloseSuggestionMenu,
-    props.onEditorChange,
-    props.onOpenSuggestionMenu,
-    props.selectedConnectionId,
-    props.textareaRef,
-  ])
+      if (suggestionDecision.kind === "close") {
+        props.onCloseSuggestionMenu?.()
+      }
+    },
+    [
+      props.editor.suggestionMenu.open,
+      props.editor.suggestionMenu.query,
+      props.editor.suggestionMenu.replacementRange,
+      props.editor.suggestionMenu.scope,
+      props.editor.suggestionMenu.trigger,
+      props.onCloseSuggestionMenu,
+      props.onEditorChange,
+      props.onOpenSuggestionMenu,
+      props.selectedConnectionId,
+      props.textareaRef,
+    ],
+  )
 
-  const scheduleSyncEditorState = useCallback((reason: "content" | "cursor") => {
-    if (reason === "content" || pendingSyncReasonRef.current !== "content") {
-      pendingSyncReasonRef.current = reason
-    }
+  const scheduleSyncEditorState = useCallback(
+    (reason: "content" | "cursor") => {
+      if (reason === "content" || pendingSyncReasonRef.current !== "content") {
+        pendingSyncReasonRef.current = reason
+      }
 
-    if (pendingSyncRef.current) {
-      return
-    }
+      if (pendingSyncRef.current) {
+        return
+      }
 
-    pendingSyncRef.current = true
-    queueMicrotask(() => {
-      pendingSyncRef.current = false
-      const pendingReason = pendingSyncReasonRef.current
-      pendingSyncReasonRef.current = "cursor"
-      syncEditorState(pendingReason)
-    })
-  }, [syncEditorState])
+      pendingSyncRef.current = true
+      queueMicrotask(() => {
+        pendingSyncRef.current = false
+        const pendingReason = pendingSyncReasonRef.current
+        pendingSyncReasonRef.current = "cursor"
+        syncEditorState(pendingReason)
+      })
+    },
+    [syncEditorState],
+  )
 
   const handleClear = useCallback(() => {
     const textarea = props.textareaRef.current
@@ -432,23 +466,29 @@ function EditorSurface(props: {
     })
   }, [focused, props.editor.cursorOffset, props.editor.text, props.textareaRef])
 
-  const flyoutLayout = computeSuggestionMenuLayout(props.editor.suggestionMenu, containerRef.current, props.textareaRef.current)
-  const analysisOverlay = getEditorAnalysisOverlay(visibleAnalysis, props.editor.text, props.textareaRef.current, focused)
+  const flyoutLayout = computeSuggestionMenuLayout(
+    props.editor.suggestionMenu,
+    containerRef.current,
+    props.textareaRef.current,
+  )
+  const analysisOverlay = getEditorAnalysisOverlay(
+    visibleAnalysis,
+    props.editor.text,
+    props.textareaRef.current,
+    focused,
+  )
   const canFormat = !!props.editor.text.trim()
   const canSave = canFormat
 
   return (
-    <box
-      ref={containerRef}
-      flexDirection="column"
-      flexGrow={1}
-      position="relative"
-    >
+    <box ref={containerRef} flexDirection="column" flexGrow={1} position="relative">
       <box flexDirection="row" gap={1}>
-        <Shortcut keys="ctrl+x" label="Execute" enabled={focused} onKey={props.handleExecute} />
+        <Shortcut keys={EDITOR_EXECUTE_SHORTCUT} label="Execute" enabled={focused} onKey={props.handleExecute} />
         <Shortcut keys="ctrl+d" label="Clear" enabled={focused} onKey={handleClear} />
         <Shortcut keys="ctrl+r" label="History" enabled={focused} onKey={props.onHistory} />
-        {props.onFormatQuery && <Shortcut keys="option+f" label="Format" enabled={focused && canFormat} onKey={props.onFormatQuery} />}
+        {props.onFormatQuery && (
+          <Shortcut keys="option+f" label="Format" enabled={focused && canFormat} onKey={props.onFormatQuery} />
+        )}
         {props.onSaveChanges && props.savedQuery && (
           <Shortcut keys="ctrl+s" label="Save Changes" enabled={focused && canSave} onKey={props.onSaveChanges} />
         )}
@@ -460,7 +500,6 @@ function EditorSurface(props: {
             onKey={props.onSaveAsNew}
           />
         )}
-        {props.onAddConnection && <Shortcut keys="ctrl+n" label="Add Conn" enabled={focused} onKey={props.onAddConnection} />}
       </box>
       <box backgroundColor={editorTextareaColors.backgroundColor} flexGrow={1} position="relative">
         <line-number
@@ -482,6 +521,7 @@ function EditorSurface(props: {
             focused={focused}
             focusedTextColor={editorTextareaColors.focusedTextColor}
             initialValue={props.editor.text}
+            keyBindings={EDITOR_TEXTAREA_KEY_BINDINGS}
             onContentChange={() => scheduleSyncEditorState("content")}
             onCursorChange={() => scheduleSyncEditorState("cursor")}
             onSubmit={props.handleExecute}
@@ -520,7 +560,6 @@ function EditorSurface(props: {
           theme={theme}
         />
       )}
-      <FocusHalo />
     </box>
   )
 }
@@ -658,7 +697,9 @@ function filterDisplayableEditorAnalysis(analysis: EditorState["analysis"]): Edi
     return analysis
   }
 
-  const diagnostics = analysis.result.diagnostics.filter((diagnostic) => !isIncompleteInputDiagnostic(diagnostic.message, diagnostic.code))
+  const diagnostics = analysis.result.diagnostics.filter(
+    (diagnostic) => !isIncompleteInputDiagnostic(diagnostic.message, diagnostic.code),
+  )
   if (diagnostics.length === analysis.result.diagnostics.length) {
     return analysis
   }
@@ -739,7 +780,10 @@ function normalizeHighlightRange(rangeText: string, range: EditorRange | undefin
   return undefined
 }
 
-function offsetToLineColumn(text: string, offset: number): {
+function offsetToLineColumn(
+  text: string,
+  offset: number,
+): {
   column: number
   line: number
 } {
@@ -800,16 +844,8 @@ function SuggestionMenuFlyout(props: {
             paddingRight={1}
           >
             <Text flexShrink={1}>{item.label}</Text>
-            {item.kind && (
-              <Text fg={props.theme.mutedFg}>
-                {` ${item.kind}`}
-              </Text>
-            )}
-            {item.detail && (
-              <Text fg={props.theme.mutedFg}>
-                {` | ${item.detail}`}
-              </Text>
-            )}
+            {item.kind && <Text fg={props.theme.mutedFg}>{` ${item.kind}`}</Text>}
+            {item.detail && <Text fg={props.theme.mutedFg}>{` | ${item.detail}`}</Text>}
           </box>
         ))}
     </box>
@@ -845,7 +881,11 @@ function computeSuggestionMenuLayout(
   }
 }
 
-function selectVisibleSuggestionItems(items: SuggestionItem[], focusedItemId: string | undefined, maxVisibleItems: number): SuggestionItem[] {
+function selectVisibleSuggestionItems(
+  items: SuggestionItem[],
+  focusedItemId: string | undefined,
+  maxVisibleItems: number,
+): SuggestionItem[] {
   if (items.length <= maxVisibleItems) {
     return items
   }
@@ -856,7 +896,11 @@ function selectVisibleSuggestionItems(items: SuggestionItem[], focusedItemId: st
   return items.slice(start, start + maxVisibleItems)
 }
 
-function measureSuggestionMenuWidth(items: SuggestionItem[], statusMessage: string | undefined, containerWidth: number): number {
+function measureSuggestionMenuWidth(
+  items: SuggestionItem[],
+  statusMessage: string | undefined,
+  containerWidth: number,
+): number {
   const itemWidth = items.reduce((current, item) => {
     const detail = item.detail ? ` | ${item.detail}` : ""
     const kind = item.kind ? ` ${item.kind}` : ""

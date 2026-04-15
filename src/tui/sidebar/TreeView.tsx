@@ -3,13 +3,16 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { sameFocusPath } from "../../lib/focus"
 import {
   Focusable,
+  type FocusableProps,
   useFocusedDescendantPath,
+  useFocusPath,
   useIsFocusNavigationActive,
   useIsFocusWithin,
   useRememberedDescendantPath,
   useFocusTree,
 } from "../focus"
-import { useKeybind, useShortcut } from "../ui/keybind"
+import { useIconGlyph, type IconName } from "../ui/icons"
+import { useKeybind, useNavKeys } from "../ui/keybind"
 import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 
@@ -38,11 +41,12 @@ type VisibleTreeNode = FlatTreeNode & {
   isExpanded: boolean
 }
 
-type TreeProps = {
+export type TreeViewProps = {
   nodes: TreeNode[]
   onFocus?: (idx: number, node: TreeNode) => void
   onExpand?: (idx: number, node: TreeNode) => void
   onSelect?: (idx: number, node: TreeNode) => void
+  focusableProps?: Omit<Partial<FocusableProps>, "children" | "focusable" | "focusableId">
 }
 
 export const SIDEBAR_TREE_AREA_ID = "sidebar-tree"
@@ -50,14 +54,10 @@ export const SIDEBAR_TREE_AREA_ID = "sidebar-tree"
 const GUIDE_PIPE = "│"
 const LEAF_LAST = "└"
 const LEAF_MIDDLE = "│"
-const EXPAND_OPEN = ""
-const EXPAND_CLOSED = ""
-const FOLDER_OPEN = ""
-const FOLDER_OPEN_EMPTY = "󰉖"
-const FOLDER_CLOSED = ""
-const DEFAULT_FILE_ICON = "*"
 
-export function TreeView(props: TreeProps) {
+export function TreeView(props: TreeViewProps) {
+  const { focusableProps, ...treeProps } = props
+
   return (
     <Focusable
       childrenNavigable={false}
@@ -66,27 +66,33 @@ export function TreeView(props: TreeProps) {
       focusable
       flexDirection="column"
       focusableId={SIDEBAR_TREE_AREA_ID}
+      {...focusableProps}
     >
-      <TreeViewBody {...props} />
+      <TreeViewBody {...treeProps} />
     </Focusable>
   )
 }
 
-function TreeViewBody(props: TreeProps) {
+function TreeViewBody(props: Omit<TreeViewProps, "focusableProps">) {
   const { nodes, onExpand, onFocus, onSelect } = props
   const { inChordRef } = useKeybind()
   const tree = useFocusTree()
+  const treePath = useFocusPath() ?? [SIDEBAR_TREE_AREA_ID]
   const [expansionOverrides, setExpansionOverrides] = useState<Record<string, boolean>>({})
   const expansionState = useMemo(() => resolveExpansionState(nodes, expansionOverrides), [nodes, expansionOverrides])
-  const rows = useMemo(() => flattenVisibleTree(nodes, expansionState.expandedRowKeys), [expansionState.expandedRowKeys, nodes])
-  const focusedWithin = useIsFocusWithin([SIDEBAR_TREE_AREA_ID])
+  const rows = useMemo(
+    () => flattenVisibleTree(nodes, expansionState.expandedRowKeys),
+    [expansionState.expandedRowKeys, nodes],
+  )
+  const focusedWithin = useIsFocusWithin(treePath)
   const navigationActive = useIsFocusNavigationActive()
   const focusedRowPath = useFocusedDescendantPath()
   const rememberedRowPath = useRememberedDescendantPath()
   const theme = useTheme()
 
-  const focusedIndex = rows.findIndex((row) => sameFocusPath(focusedRowPath, treeRowPath(row.rowKey)))
-  const currentIndex = focusedIndex >= 0 ? focusedIndex : 0
+  const focusedIndex = rows.findIndex((row) => sameFocusPath(focusedRowPath, treeRowPath(treePath, row.rowKey)))
+  const rememberedIndex = rows.findIndex((row) => sameFocusPath(rememberedRowPath, treeRowPath(treePath, row.rowKey)))
+  const currentIndex = focusedIndex >= 0 ? focusedIndex : rememberedIndex >= 0 ? rememberedIndex : 0
   const currentRow = rows[currentIndex]
 
   useEffect(() => {
@@ -105,7 +111,30 @@ function TreeViewBody(props: TreeProps) {
     if (!row) {
       return
     }
-    tree.focusPath(treeRowPath(row.rowKey))
+    tree.focusPath(treeRowPath(treePath, row.rowKey))
+  }
+
+  function focusCurrentRow() {
+    if (currentIndex < 0) {
+      return
+    }
+    focusRow(currentIndex)
+  }
+
+  function focusPrevRow() {
+    if (focusedIndex < 0) {
+      focusCurrentRow()
+      return
+    }
+    focusRow(Math.max(0, currentIndex - 1))
+  }
+
+  function focusNextRow() {
+    if (focusedIndex < 0) {
+      focusCurrentRow()
+      return
+    }
+    focusRow(Math.min(rows.length - 1, currentIndex + 1))
   }
 
   function setRowExpanded(row: VisibleTreeNode, expanded: boolean) {
@@ -149,36 +178,25 @@ function TreeViewBody(props: TreeProps) {
 
   function toggleDisclosure(row: VisibleTreeNode) {
     const rowIndex = rows.findIndex((candidate) => candidate.rowKey === row.rowKey)
-    tree.focusPath(treeRowPath(row.rowKey), "mouse")
+    tree.focusPath(treeRowPath(treePath, row.rowKey), "mouse")
     toggleRow(row, rowIndex >= 0 ? rowIndex : currentIndex)
   }
 
   const shortcutsEnabled = !navigationActive && !inChordRef.current && focusedWithin && rows.length > 0
 
-  useShortcut({
-    keys: ["up", "k"],
+  useNavKeys({
     enabled: shortcutsEnabled,
-    onKey(key) {
+    up(key) {
       key.preventDefault()
       key.stopPropagation()
-      focusRow(Math.max(0, currentIndex - 1))
+      focusPrevRow()
     },
-  })
-
-  useShortcut({
-    keys: ["down", "j"],
-    enabled: shortcutsEnabled,
-    onKey(key) {
+    down(key) {
       key.preventDefault()
       key.stopPropagation()
-      focusRow(Math.min(rows.length - 1, currentIndex + 1))
+      focusNextRow()
     },
-  })
-
-  useShortcut({
-    keys: ["left", "h"],
-    enabled: shortcutsEnabled,
-    onKey(key) {
+    left(key) {
       if (currentRow?.isExpandable && currentRow.isExpanded) {
         key.preventDefault()
         key.stopPropagation()
@@ -188,37 +206,17 @@ function TreeViewBody(props: TreeProps) {
       if (currentRow?.parentRowKey) {
         key.preventDefault()
         key.stopPropagation()
-        tree.focusPath(treeRowPath(currentRow.parentRowKey))
+        tree.focusPath(treeRowPath(treePath, currentRow.parentRowKey))
       }
     },
-  })
-
-  useShortcut({
-    keys: ["right", "l"],
-    enabled: shortcutsEnabled,
-    onKey(key) {
+    right(key) {
       if (currentRow?.isExpandable && !currentRow.isExpanded) {
         key.preventDefault()
         key.stopPropagation()
         setRowExpanded(currentRow, true)
       }
     },
-  })
-
-  useShortcut({
-    keys: "enter",
-    enabled: shortcutsEnabled,
-    onKey(key) {
-      key.preventDefault()
-      key.stopPropagation()
-      toggleCurrentRow()
-    },
-  })
-
-  useShortcut({
-    keys: "space",
-    enabled: shortcutsEnabled,
-    onKey(key) {
+    activate(key) {
       key.preventDefault()
       key.stopPropagation()
       toggleCurrentRow()
@@ -235,7 +233,7 @@ function TreeViewBody(props: TreeProps) {
         </Focusable>
       )}
       {rows.map((row) => {
-        const path = treeRowPath(row.rowKey)
+        const path = treeRowPath(treePath, row.rowKey)
         const focused = sameFocusPath(path, focusedRowPath)
         const remembered = !focusedWithin && sameFocusPath(path, rememberedRowPath)
         return (
@@ -252,11 +250,7 @@ function TreeViewBody(props: TreeProps) {
   )
 }
 
-function TreeRow(props: {
-  row: VisibleTreeNode
-  onToggleDisclosure?: () => void
-  children: ReactNode
-}) {
+function TreeRow(props: { row: VisibleTreeNode; onToggleDisclosure?: () => void; children: ReactNode }) {
   const { children, onToggleDisclosure, row } = props
   const rowRef = useRef<BoxRenderable>(null)
   const disclosureOffset = treeDisclosureOffset(row)
@@ -280,27 +274,25 @@ function TreeRow(props: {
       }}
       width="100%"
     >
-      <Focusable
-        focusable
-        focusableId={rowFocusId(row.rowKey)}
-        navigable={false}
-      >
-        <box width="100%">
-          {children}
-        </box>
+      <Focusable focusable focusableId={rowFocusId(row.rowKey)} navigable={false}>
+        <box width="100%">{children}</box>
       </Focusable>
     </box>
   )
 }
 
-function TreeNodeView(props: VisibleTreeNode & {
-  focused: boolean
-  remembered: boolean
-}) {
+function TreeNodeView(
+  props: VisibleTreeNode & {
+    focused: boolean
+    remembered: boolean
+  },
+) {
   const { focused, node, remembered } = props
   const theme = useTheme()
-  const prefix = treePrefix(props)
-  const icon = treeIcon(props)
+  const expandOpen = useIconGlyph("expandOpen")
+  const expandClosed = useIconGlyph("expandClosed")
+  const prefix = treePrefix(props, props.isExpanded ? expandOpen : expandClosed)
+  const icon = useIconGlyph(treeIconName(props))
   const labelFg = focused ? theme.formFieldLabelActiveFg : theme.primaryFg
   const prefixFg = focused ? theme.formFieldLabelActiveFg : theme.mutedFg
   const iconFg = focused ? theme.formFieldLabelActiveFg : theme.focusBg
@@ -308,26 +300,36 @@ function TreeNodeView(props: VisibleTreeNode & {
 
   return (
     <box
-      backgroundColor={focused ? theme.focusBg : (remembered ? theme.inputBg : undefined)}
+      backgroundColor={focused ? theme.focusBg : remembered ? theme.inputBg : undefined}
       flexDirection="row"
       width="100%"
     >
       <box flexGrow={0} flexShrink={0} width={textCells(prefix)}>
-        <Text fg={prefixFg} wrapMode="none">{prefix}</Text>
+        <Text fg={prefixFg} wrapMode="none">
+          {prefix}
+        </Text>
       </box>
       <box flexGrow={0} flexShrink={0} width={textCells(icon)}>
-        <Text fg={iconFg} wrapMode="none">{icon}</Text>
+        <Text fg={iconFg} wrapMode="none">
+          {icon}
+        </Text>
       </box>
       <box flexGrow={0} flexShrink={0} width={1}>
-        <Text fg={prefixFg} wrapMode="none">{" "}</Text>
+        <Text fg={prefixFg} wrapMode="none">
+          {" "}
+        </Text>
       </box>
       <box flexGrow={1} flexShrink={1}>
-        <Text fg={labelFg} truncate wrapMode="none">{node.name}</Text>
+        <Text fg={labelFg} truncate wrapMode="none">
+          {node.name}
+        </Text>
       </box>
       {node.accessory && (
         <>
           <box flexGrow={0} flexShrink={0} width={1}>
-            <Text fg={prefixFg} wrapMode="none">{" "}</Text>
+            <Text fg={prefixFg} wrapMode="none">
+              {" "}
+            </Text>
           </box>
           <box flexGrow={0} flexShrink={0}>
             <Text fg={accessoryFg} wrapMode="none">
@@ -340,24 +342,28 @@ function TreeNodeView(props: VisibleTreeNode & {
   )
 }
 
-function treeRowPath(rowKey: string): readonly [string, string] {
-  return [SIDEBAR_TREE_AREA_ID, rowFocusId(rowKey)]
+function treeRowPath(path: readonly string[], rowKey: string): readonly string[] {
+  return [...path, rowFocusId(rowKey)]
 }
 
 function rowFocusId(rowKey: string): string {
   return `row-${rowKey}`
 }
 
-function treePrefix(row: VisibleTreeNode): string {
+function treePrefix(row: VisibleTreeNode, disclosure: string): string {
   if (row.isExpandable) {
-    return `${treeBaseIndent(row.level, row.parentIsLastPath)}${treeDisclosure(row)} `
+    return `${treeBaseIndent(row.level, row.parentIsLastPath)}${disclosure} `
+  }
+
+  if (row.level === 0) {
+    return ""
   }
 
   return `${treeLeafIndent(row.level, row.parentIsLastPath)}${treeLeafLead(row)} `
 }
 
 function treeBaseIndent(level: number, parentIsLastPath: readonly boolean[]): string {
-  let indent = "  "
+  let indent = ""
   for (let i = 1; i <= level; i += 1) {
     if (i === 1) {
       indent += "  "
@@ -369,13 +375,6 @@ function treeBaseIndent(level: number, parentIsLastPath: readonly boolean[]): st
   return indent
 }
 
-function treeDisclosure(row: Pick<VisibleTreeNode, "isExpandable" | "isExpanded">): string {
-  if (!row.isExpandable) {
-    return " "
-  }
-  return row.isExpanded ? EXPAND_OPEN : EXPAND_CLOSED
-}
-
 function treeLeafIndent(level: number, parentIsLastPath: readonly boolean[]): string {
   const base = treeBaseIndent(level + 1, parentIsLastPath)
   return base.slice(0, Math.max(0, base.length - 2))
@@ -383,37 +382,47 @@ function treeLeafIndent(level: number, parentIsLastPath: readonly boolean[]): st
 
 function treeLeafLead(row: Pick<VisibleTreeNode, "level" | "isLast">): string {
   if (row.level === 0) {
-    return "  "
+    return ""
   }
   return row.isLast ? LEAF_LAST : LEAF_MIDDLE
 }
 
-function treeIcon(row: Pick<VisibleTreeNode, "isExpandable" | "isExpanded" | "node">): string {
-  if (row.isExpandable) {
-    if (row.isExpanded && hasExplicitEmptyChildren(row.node)) {
-      return FOLDER_OPEN_EMPTY
-    }
-    return row.isExpanded ? FOLDER_OPEN : FOLDER_CLOSED
+function treeIconName(row: Pick<VisibleTreeNode, "isExpandable" | "isExpanded" | "node">): IconName {
+  const semanticIcon = treeSemanticIconName(row.node.kind)
+  if (semanticIcon) {
+    return semanticIcon
   }
 
-  switch (row.node.kind) {
+  if (row.isExpandable) {
+    if (row.isExpanded && hasExplicitEmptyChildren(row.node)) {
+      return "folderOpenEmpty"
+    }
+    return row.isExpanded ? "folderOpen" : "folder"
+  }
+
+  return "placeholder"
+}
+
+function treeSemanticIconName(kind: TreeNode["kind"]): IconName | undefined {
+  switch (kind) {
     case "database":
-      return "󰆼"
+      return "database"
     case "schema":
-      return "󰙅"
+      return "schema"
     case "table":
-      return "󰓫"
+      return "table"
     case "view":
+      return "view"
     case "matview":
-      return "󰈈"
+      return "matview"
     case "index":
-      return "󰛦"
+      return "index"
     case "trigger":
-      return "󰐕"
+      return "trigger"
     case "placeholder":
-      return DEFAULT_FILE_ICON
+      return "placeholder"
     default:
-      return DEFAULT_FILE_ICON
+      return undefined
   }
 }
 
@@ -515,7 +524,9 @@ function flattenVisibleTree(
     })
 
     if (isExpanded && node.children?.length) {
-      flat.push(...flattenVisibleTree(node.children, expandedRowKeys, rowKey, level + 1, [...parentIsLastPath, isLast], rowKey))
+      flat.push(
+        ...flattenVisibleTree(node.children, expandedRowKeys, rowKey, level + 1, [...parentIsLastPath, isLast], rowKey),
+      )
     }
   }
 

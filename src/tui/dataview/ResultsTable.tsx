@@ -2,7 +2,6 @@ import type { BoxRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core
 import { useTerminalDimensions } from "@opentui/react"
 import { useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  FocusHalo,
   Focusable,
   useFocusedDescendantPath,
   useIsFocusNavigationActive,
@@ -11,7 +10,7 @@ import {
   useRememberedDescendantPath,
   useFocusTree,
 } from "../focus"
-import { useKeybindHandler } from "../ui/keybind"
+import { useNavKeys, useShortcut } from "../ui/keybind"
 import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 import { Table, type TableColumn } from "./table"
@@ -91,7 +90,10 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
     if (preferredColumnWidths.length === 0) {
       return viewportWidth
     }
-    return preferredColumnWidths.reduce((sum, columnWidth) => sum + columnWidth, 0) + Math.max(0, preferredColumnWidths.length - 1)
+    return (
+      preferredColumnWidths.reduce((sum, columnWidth) => sum + columnWidth, 0) +
+      Math.max(0, preferredColumnWidths.length - 1)
+    )
   }, [preferredColumnWidths, viewportWidth])
   const shouldScroll = preferredTableWidth > viewportWidth
   const tableWidth = shouldScroll ? preferredTableWidth : viewportWidth
@@ -132,18 +134,141 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
   const focusCellRef = useRef(focusCell)
   focusCellRef.current = focusCell
 
-  useKeybindHandler({
-    enabled: !navigationActive && focusedWithin && rows.length > 0 && columnKeys.length > 0,
-    onKey(key: KeyEvent) {
-      const current = activeCell ?? { rowIndex: 0, columnIndex: 0 }
-      const next = navigateResultsGrid(key, current, rows.length, columnKeys.length)
-      if (!next) {
-        return
-      }
+  const shortcutsEnabled = !navigationActive && focusedWithin && rows.length > 0 && columnKeys.length > 0
 
-      key.preventDefault()
-      key.stopPropagation()
-      void focusCellRef.current(next)
+  function currentCell(): CellCoordinates {
+    return activeCell ?? { rowIndex: 0, columnIndex: 0 }
+  }
+
+  function focusNextCell(key: KeyEvent, coords: CellCoordinates) {
+    key.preventDefault()
+    key.stopPropagation()
+    void focusCellRef.current(coords)
+  }
+
+  function moveBy(key: KeyEvent, rowOffset: number, columnOffset: number) {
+    const current = currentCell()
+    focusNextCell(key, {
+      rowIndex: current.rowIndex + rowOffset,
+      columnIndex: current.columnIndex + columnOffset,
+    })
+  }
+
+  function moveTo(key: KeyEvent, coords: CellCoordinates) {
+    focusNextCell(key, coords)
+  }
+
+  useNavKeys({
+    "command+down"(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: rows.length - 1, columnIndex: current.columnIndex })
+    },
+    "command+left"(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: current.rowIndex, columnIndex: 0 })
+    },
+    "command+right"(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: current.rowIndex, columnIndex: columnKeys.length - 1 })
+    },
+    "command+up"(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: 0, columnIndex: current.columnIndex })
+    },
+    "ctrl+down"(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: rows.length - 1, columnIndex: current.columnIndex })
+    },
+    "ctrl+left"(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: current.rowIndex, columnIndex: 0 })
+    },
+    "ctrl+right"(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: current.rowIndex, columnIndex: columnKeys.length - 1 })
+    },
+    "ctrl+up"(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: 0, columnIndex: current.columnIndex })
+    },
+    enabled: shortcutsEnabled,
+    left(key) {
+      moveBy(key, 0, -1)
+    },
+    "option+down"(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: rows.length - 1, columnIndex: current.columnIndex })
+    },
+    "option+left"(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: current.rowIndex, columnIndex: 0 })
+    },
+    "option+right"(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: current.rowIndex, columnIndex: columnKeys.length - 1 })
+    },
+    "option+up"(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: 0, columnIndex: current.columnIndex })
+    },
+    right(key) {
+      moveBy(key, 0, 1)
+    },
+    up(key) {
+      moveBy(key, -1, 0)
+    },
+    down(key) {
+      moveBy(key, 1, 0)
+    },
+  })
+
+  useShortcut({
+    enabled: shortcutsEnabled,
+    keys: { or: ["tab", "shift+tab"] },
+    onKey(key) {
+      moveBy(key, 0, key.shift ? -1 : 1)
+    },
+  })
+
+  useShortcut({
+    enabled: shortcutsEnabled,
+    keys: { or: ["return", "shift+return"] },
+    onKey(key) {
+      moveBy(key, key.shift ? -1 : 1, 0)
+    },
+  })
+
+  useShortcut({
+    enabled: shortcutsEnabled,
+    keys: "home",
+    onKey(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: current.rowIndex, columnIndex: 0 })
+    },
+  })
+
+  useShortcut({
+    enabled: shortcutsEnabled,
+    keys: "end",
+    onKey(key) {
+      const current = currentCell()
+      moveTo(key, { rowIndex: current.rowIndex, columnIndex: columnKeys.length - 1 })
+    },
+  })
+
+  useShortcut({
+    enabled: shortcutsEnabled,
+    keys: { or: ["ctrl+home", "option+home", "command+home"] },
+    onKey(key) {
+      moveTo(key, { rowIndex: 0, columnIndex: 0 })
+    },
+  })
+
+  useShortcut({
+    enabled: shortcutsEnabled,
+    keys: { or: ["ctrl+end", "option+end", "command+end"] },
+    onKey(key) {
+      moveTo(key, { rowIndex: rows.length - 1, columnIndex: columnKeys.length - 1 })
     },
   })
 
@@ -152,8 +277,14 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
     for (const [columnIndex, key] of columnKeys.entries()) {
       const maxContentWidth = Math.max(key.length, ...displayRows.map((row) => row[key]!.length))
       cols[key] = {
-        width: shouldScroll ? { absolute: preferredColumnWidths[columnIndex] ?? 1 } : { grow: growWidthForColumn(maxContentWidth) },
-        Header: () => <Text wrapMode="none" truncate>{" " + key}</Text>,
+        width: shouldScroll
+          ? { absolute: preferredColumnWidths[columnIndex] ?? 1 }
+          : { grow: growWidthForColumn(maxContentWidth) },
+        Header: () => (
+          <Text wrapMode="none" truncate>
+            {" " + key}
+          </Text>
+        ),
         Cell: ({ rowIndex, columnWidth }) => (
           <ResultsCell
             columnIndex={columnIndex}
@@ -194,23 +325,15 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
             width={tableWidth}
             headerBg={theme.inputBg}
             borderColor={theme.borderColor}
-            wrapRow={({ rowIndex, children }) => (
-              <ResultsRow rowIndex={rowIndex}>
-                {children}
-              </ResultsRow>
-            )}
+            wrapRow={({ rowIndex, children }) => <ResultsRow rowIndex={rowIndex}>{children}</ResultsRow>}
           />
         </scrollbox>
       </Focusable>
-      <FocusHalo />
     </box>
   )
 }
 
-function ResultsRow(props: {
-  rowIndex: number
-  children: ReactNode
-}) {
+function ResultsRow(props: { rowIndex: number; children: ReactNode }) {
   return (
     <Focusable
       focusableId={resultsTableRowFocusId(props.rowIndex)}
@@ -227,12 +350,7 @@ function ResultsRow(props: {
   )
 }
 
-function ResultsCell(props: {
-  columnIndex: number
-  columnWidth: number
-  remembered: boolean
-  value: string
-}) {
+function ResultsCell(props: { columnIndex: number; columnWidth: number; remembered: boolean; value: string }) {
   const { columnIndex, columnWidth, remembered, value } = props
   const theme = useTheme()
   const focused = useIsFocused()
@@ -252,11 +370,13 @@ function ResultsCell(props: {
       width="100%"
     >
       <box
-        backgroundColor={focused ? theme.focusBg : (remembered ? theme.inputBg : undefined)}
+        backgroundColor={focused ? theme.focusBg : remembered ? theme.inputBg : undefined}
         position="relative"
         width="100%"
       >
-        <Text wrapMode="none" truncate>{" " + value}</Text>
+        <Text wrapMode="none" truncate>
+          {" " + value}
+        </Text>
         {showPopout && (
           <box
             backgroundColor={theme.focusHintBg}
@@ -276,86 +396,7 @@ function ResultsCell(props: {
   )
 }
 
-function navigateResultsGrid(
-  key: KeyEvent,
-  current: CellCoordinates,
-  rowCount: number,
-  columnCount: number,
-): CellCoordinates | undefined {
-  if (rowCount === 0 || columnCount === 0) {
-    return undefined
-  }
-
-  const edgeJump = key.ctrl || key.meta || key.super
-
-  switch (key.name) {
-    case "left":
-      return {
-        rowIndex: current.rowIndex,
-        columnIndex: edgeJump ? 0 : current.columnIndex - 1,
-      }
-    case "right":
-      return {
-        rowIndex: current.rowIndex,
-        columnIndex: edgeJump ? columnCount - 1 : current.columnIndex + 1,
-      }
-    case "up":
-      return {
-        rowIndex: edgeJump ? 0 : current.rowIndex - 1,
-        columnIndex: current.columnIndex,
-      }
-    case "down":
-      return {
-        rowIndex: edgeJump ? rowCount - 1 : current.rowIndex + 1,
-        columnIndex: current.columnIndex,
-      }
-    case "h":
-      if (!hasPlainLetterModifiers(key)) return undefined
-      return { rowIndex: current.rowIndex, columnIndex: current.columnIndex - 1 }
-    case "j":
-      if (!hasPlainLetterModifiers(key)) return undefined
-      return { rowIndex: current.rowIndex + 1, columnIndex: current.columnIndex }
-    case "k":
-      if (!hasPlainLetterModifiers(key)) return undefined
-      return { rowIndex: current.rowIndex - 1, columnIndex: current.columnIndex }
-    case "l":
-      if (!hasPlainLetterModifiers(key)) return undefined
-      return { rowIndex: current.rowIndex, columnIndex: current.columnIndex + 1 }
-    case "tab":
-      if (key.ctrl || key.meta || key.option || key.super) return undefined
-      return {
-        rowIndex: current.rowIndex,
-        columnIndex: current.columnIndex + (key.shift ? -1 : 1),
-      }
-    case "enter":
-    case "return":
-      if (key.ctrl || key.meta || key.option || key.super) return undefined
-      return {
-        rowIndex: current.rowIndex + (key.shift ? -1 : 1),
-        columnIndex: current.columnIndex,
-      }
-    case "home":
-      return edgeJump
-        ? { rowIndex: 0, columnIndex: 0 }
-        : { rowIndex: current.rowIndex, columnIndex: 0 }
-    case "end":
-      return edgeJump
-        ? { rowIndex: rowCount - 1, columnIndex: columnCount - 1 }
-        : { rowIndex: current.rowIndex, columnIndex: columnCount - 1 }
-    default:
-      return undefined
-  }
-}
-
-function hasPlainLetterModifiers(key: KeyEvent): boolean {
-  return !key.ctrl && !key.meta && !key.option && !key.super
-}
-
-function clampCellCoordinates(
-  coords: CellCoordinates,
-  rowCount: number,
-  columnCount: number,
-): CellCoordinates {
+function clampCellCoordinates(coords: CellCoordinates, rowCount: number, columnCount: number): CellCoordinates {
   return {
     rowIndex: clamp(coords.rowIndex, rowCount),
     columnIndex: clamp(coords.columnIndex, columnCount),
@@ -402,11 +443,7 @@ function resolveFocusedCellCoordinates(
   return { rowIndex, columnIndex }
 }
 
-function sameCellCoordinates(
-  coords: CellCoordinates | undefined,
-  rowIndex: number,
-  columnIndex: number,
-): boolean {
+function sameCellCoordinates(coords: CellCoordinates | undefined, rowIndex: number, columnIndex: number): boolean {
   return coords !== undefined && coords.rowIndex === rowIndex && coords.columnIndex === columnIndex
 }
 

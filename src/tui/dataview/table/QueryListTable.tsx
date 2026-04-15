@@ -55,12 +55,19 @@ function QueryListTableRow(props: {
   const highlighted = useIsHighlighted()
   const navigationActive = useIsFocusNavigationActive()
   const backgroundColor =
-    navigationActive && highlighted ? theme.focusNavBg : (props.focused ? theme.focusBg : (props.selected ? theme.inputBg : undefined))
+    navigationActive && highlighted
+      ? theme.focusNavBg
+      : props.focused
+        ? theme.focusBg
+        : props.selected
+          ? theme.inputBg
+          : undefined
 
   return (
     <Focusable
       focusable
       focusableId={props.focusableId}
+      hideNavigationHalo
       navigable={false}
       onMouseDown={(event) => {
         event.stopPropagation()

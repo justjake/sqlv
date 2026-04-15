@@ -1,7 +1,7 @@
+import { RGBA } from "@opentui/core"
 import { testRender } from "@opentui/react/test-utils"
 import { afterEach, describe, expect, test } from "bun:test"
 import { act, useEffect, type ReactNode } from "react"
-import type { FocusTree } from "../../src/lib/focus"
 import {
   RESULTS_TABLE_FOCUS_ID,
   RESULTS_TABLE_GRID_AREA_ID,
@@ -11,7 +11,8 @@ import {
 import { FocusProvider, focusPathSignature, useFocusNavigationState, useFocusTree } from "../../src/tui/focus"
 import { App, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID, recentQueryFocusId } from "../../src/tui/index"
 import { ADD_CONNECTION_AREA_ID } from "../../src/tui/connection/AddConnectionPane"
-import { onOpenNode, onSelectNode, Sidebar } from "../../src/tui/sidebar/Sidebar"
+import { objectNodes, onOpenNode, onSelectNode, SIDEBAR_AREA_ID, Sidebar } from "../../src/tui/sidebar/Sidebar"
+import { SIDEBAR_TREE_AREA_ID, type TreeNode } from "../../src/tui/sidebar/TreeView"
 import { KeybindProvider } from "../../src/tui/ui/keybind"
 import { Text } from "../../src/tui/ui/Text"
 import { SqlVisorProvider, useSqlVisor, useSqlVisorState } from "../../src/tui/useSqlVisor"
@@ -21,7 +22,6 @@ let rendered: Awaited<ReturnType<typeof testRender>> | undefined
 let focusedPath = ""
 let highlightedPath = ""
 let focusNavigationActive = false
-let focusTree: FocusTree | undefined
 
 async function render(node: ReactNode, size = { height: 18, width: 100 }) {
   rendered = await testRender(
@@ -42,7 +42,6 @@ afterEach(() => {
   focusedPath = ""
   highlightedPath = ""
   focusNavigationActive = false
-  focusTree = undefined
 })
 
 function FocusController(props: { path: readonly string[] }) {
@@ -67,9 +66,13 @@ function FocusProbe() {
   return null
 }
 
-function FocusTreeProbe() {
-  focusTree = useFocusTree()
-  return null
+function treeShape(nodes: readonly TreeNode[]): unknown[] {
+  return nodes.map(({ children, expanded, kind, name }) => ({
+    kind,
+    name,
+    ...(expanded === undefined ? {} : { expanded }),
+    ...(children?.length ? { children: treeShape(children) } : {}),
+  }))
 }
 
 describe("SqlVisor provider and app", () => {
@@ -202,8 +205,8 @@ describe("SqlVisor provider and app", () => {
     expect(ui.captureCharFrame()).toContain("table users")
     expect(ui.captureCharFrame()).toContain("view active_users")
     expect(ui.captureCharFrame()).toContain("matview latest_users")
-    expect(ui.captureCharFrame()).toContain("index on users")
-    expect(ui.captureCharFrame()).toContain("trigger on users")
+    expect(ui.captureCharFrame()).not.toContain("index on users")
+    expect(ui.captureCharFrame()).not.toContain("trigger on users")
 
     await act(async () => {
       ui.mockInput.pressKey("n", { ctrl: true })
@@ -228,7 +231,69 @@ describe("SqlVisor provider and app", () => {
     expect(addConnectionCount).toBe(1)
   })
 
-  test("keeps loaded connection branches expanded when another connection is selected", async () => {
+  test("nests sidebar objects under databases, schemas, and tables", () => {
+    const nodes = objectNodes(
+      "conn-1",
+      createQueryState({
+        data: [
+          { name: "main", type: "database" },
+          { database: "main", name: "public", type: "schema" },
+          { database: "main", name: "users", schema: "public", type: "table" },
+          {
+            on: { database: "main", name: "users", schema: "public", type: "table" },
+            type: "index",
+          },
+          {
+            on: { database: "main", name: "users", schema: "public", type: "table" },
+            type: "trigger",
+          },
+          { database: "main", name: "audit_log", schema: undefined, type: "table" },
+          {
+            on: { database: "main", name: "audit_log", schema: undefined, type: "table" },
+            type: "index",
+          },
+          { database: "main", name: "active_users", schema: undefined, type: "view" },
+        ],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+    )
+
+    expect(treeShape(nodes)).toEqual([
+      {
+        kind: "database",
+        name: "db main",
+        expanded: true,
+        children: [
+          {
+            kind: "schema",
+            name: "schema public",
+            expanded: true,
+            children: [
+              {
+                kind: "table",
+                name: "table users",
+                expanded: false,
+                children: [
+                  { kind: "index", name: "index on users" },
+                  { kind: "trigger", name: "trigger on users" },
+                ],
+              },
+            ],
+          },
+          {
+            kind: "table",
+            name: "table audit_log",
+            expanded: false,
+            children: [{ kind: "index", name: "index on audit_log" }],
+          },
+          { kind: "view", name: "view active_users" },
+        ],
+      },
+    ])
+  })
+
+  test("keeps loaded connection branches attached to their own sections", async () => {
     const first = makeConnection({
       config: {
         path: ":memory:",
@@ -253,12 +318,12 @@ describe("SqlVisor provider and app", () => {
       }),
       objectsByConnectionId: {
         [first.id]: createQueryState({
-          data: [{ database: "main", name: "users", schema: undefined, type: "table" }],
+          data: [{ name: "main", type: "database" }],
           dataUpdateCount: 1,
           status: "success",
         }),
         [second.id]: createQueryState({
-          data: [{ database: "main", name: "orders", schema: undefined, type: "table" }],
+          data: [{ name: "main", type: "database" }],
           dataUpdateCount: 1,
           status: "success",
         }),
@@ -273,8 +338,96 @@ describe("SqlVisor provider and app", () => {
       { height: 20, width: 100 },
     )
 
-    expect(ui.captureCharFrame()).toContain("table users")
-    expect(ui.captureCharFrame()).toContain("table orders")
+    const frame = ui.captureCharFrame()
+    expect(frame).toContain(first.name)
+    expect(frame).toContain(second.name)
+    expect(frame.match(/db main/g)?.length).toBe(2)
+  })
+
+  test("renders empty object branches as empty folders instead of placeholder rows", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      name: "Mem",
+      protocol: "bunsqlite",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      objectsByConnectionId: {
+        [connection.id]: createQueryState({
+          data: [],
+          dataUpdateCount: 1,
+          status: "success",
+        }),
+      },
+      selectedConnectionId: connection.id,
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <Sidebar onAddConnection={() => undefined} />
+      </SqlVisorProvider>,
+      { height: 12, width: 80 },
+    )
+
+    const frame = ui.captureCharFrame()
+    expect(frame).toContain("󰉖")
+    expect(frame).toContain(connection.name)
+    expect(frame).not.toContain("(no objects found)")
+  })
+
+  test("wraps sidebar focus around the whole sidebar and delegates into the tree", async () => {
+    const first = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      id: "conn-first",
+      name: "First Memory",
+      protocol: "bunsqlite",
+    })
+    const second = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      id: "conn-second",
+      name: "Second Memory",
+      protocol: "bunsqlite",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [first, second],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <Sidebar onAddConnection={() => undefined} />
+        <FocusController path={[SIDEBAR_AREA_ID]} />
+        <FocusProbe />
+      </SqlVisorProvider>,
+      { height: 16, width: 80 },
+    )
+
+    await act(async () => {
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, `row-${first.id}`]) ?? "")
+
+    await act(async () => {
+      ui.mockInput.pressArrow("down")
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, `row-${second.id}`]) ?? "")
   })
 
   test("renders row detail views in the app", async () => {
@@ -337,12 +490,14 @@ describe("SqlVisor provider and app", () => {
         fetchStatus: "fetching",
         status: "pending",
       }),
-      activeQueries: [{
-        queryId: "query-1",
-        text: "select 1",
-        connectionId: connection.id,
-        startedAt: Date.now(),
-      }],
+      activeQueries: [
+        {
+          queryId: "query-1",
+          text: "select 1",
+          connectionId: connection.id,
+          startedAt: Date.now(),
+        },
+      ],
       selectedConnectionId: connection.id,
     })
     let ui = await render(
@@ -695,9 +850,7 @@ describe("SqlVisor provider and app", () => {
     const ui = await render(
       <SqlVisorProvider engine={stub.engine}>
         <App />
-        <FocusController
-          path={[RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(activeQueryId)]}
-        />
+        <FocusController path={[RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(activeQueryId)]} />
         <FocusProbe />
       </SqlVisorProvider>,
       { height: 24, width: 100 },
@@ -784,9 +937,7 @@ describe("SqlVisor provider and app", () => {
     const ui = await render(
       <SqlVisorProvider engine={stub.engine}>
         <App />
-        <FocusController
-          path={[RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(finishedQuery.id)]}
-        />
+        <FocusController path={[RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(finishedQuery.id)]} />
         <FocusProbe />
       </SqlVisorProvider>,
       { height: 18, width: 60 },
@@ -803,7 +954,12 @@ describe("SqlVisor provider and app", () => {
     })
 
     expect(focusedPath).toBe(
-      focusPathSignature([RESULTS_TABLE_FOCUS_ID, RESULTS_TABLE_GRID_AREA_ID, resultsTableRowFocusId(0), resultsTableCellFocusId(0)]) ?? "",
+      focusPathSignature([
+        RESULTS_TABLE_FOCUS_ID,
+        RESULTS_TABLE_GRID_AREA_ID,
+        resultsTableRowFocusId(0),
+        resultsTableCellFocusId(0),
+      ]) ?? "",
     )
     expect(ui.captureCharFrame()).toContain("1")
   })
@@ -882,11 +1038,23 @@ describe("SqlVisor provider and app", () => {
     })
 
     expect(ui.captureCharFrame()).toContain("Add Connection")
-    expect(ui.captureCharFrame()).toContain("esc esc")
+    expect(ui.captureCharFrame()).toContain("esc")
+    expect(ui.captureCharFrame()).not.toContain("esc esc")
     expect(ui.captureCharFrame()).toContain("Protocol")
     expect(ui.captureCharFrame()).toContain("Connection Name")
     expect(ui.captureCharFrame()).toContain("◉ bunsqlite")
     expect(ui.captureCharFrame()).toContain("○ turso")
+
+    const protocolLine = ui.captureSpans().lines.find((line) =>
+      line.spans
+        .map((span) => span.text)
+        .join("")
+        .includes("◉ bunsqlite"),
+    )
+    const protocolBackgroundWidth =
+      protocolLine?.spans.filter((span) => span.bg.a > 0).reduce((width, span) => width + span.width, 0) ?? 0
+
+    expect(protocolBackgroundWidth).toBeGreaterThan("◉ bunsqlite  ○ turso".length)
   })
 
   test("allows clearing a seeded default field value in the add-connection modal", async () => {
@@ -945,7 +1113,7 @@ describe("SqlVisor provider and app", () => {
     expect(ui.captureCharFrame()).toContain("tmp.db")
   })
 
-  test("uses escape-driven focus navigation inside the add-connection modal", async () => {
+  test("closes the add-connection modal on a single escape", async () => {
     const connection = makeConnection({
       config: {
         path: ":memory:",
@@ -965,7 +1133,6 @@ describe("SqlVisor provider and app", () => {
       <SqlVisorProvider engine={stub.engine}>
         <App />
         <FocusProbe />
-        <FocusTreeProbe />
       </SqlVisorProvider>,
       { height: 24, width: 100 },
     )
@@ -982,28 +1149,8 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
       await ui.renderOnce()
     })
-
-    expect(focusNavigationActive).toBe(true)
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
-    expect(highlightedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
-    expect(ui.captureCharFrame()).toContain("Add Connection")
-    expect(ui.captureCharFrame()).toContain("esc esc")
-
-    await act(async () => {
-      ui.mockInput.pressArrow("down")
-      await ui.renderOnce()
-      await ui.renderOnce()
-    })
-
-    expect(highlightedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "path"]) ?? "")
-
-    await act(async () => {
-      ui.mockInput.pressEscape()
-      await Bun.sleep(30)
-      await ui.renderOnce()
-      await ui.renderOnce()
-    })
-
+    await Bun.sleep(0)
+    expect(focusNavigationActive).toBe(false)
     expect(ui.captureCharFrame()).not.toContain("Add Connection")
   })
 
@@ -1054,13 +1201,18 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
       await ui.renderOnce()
     })
+    await Bun.sleep(0)
+    await act(async () => {
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
 
     expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "protocol"]) ?? "")
     expect(ui.captureCharFrame()).toContain("◉ turso")
     expect(ui.captureCharFrame()).toContain("○ bunsqlite")
   })
 
-  test("keeps add-connection field keybinds working after activating a checkbox from focus navigation", async () => {
+  test("keeps add-connection field keybinds working after toggling a checkbox directly", async () => {
     const connection = makeConnection({
       config: {
         path: ":memory:",
@@ -1080,7 +1232,6 @@ describe("SqlVisor provider and app", () => {
       <SqlVisorProvider engine={stub.engine}>
         <App />
         <FocusProbe />
-        <FocusTreeProbe />
       </SqlVisorProvider>,
       { height: 24, width: 100 },
     )
@@ -1092,34 +1243,43 @@ describe("SqlVisor provider and app", () => {
     })
 
     await act(async () => {
-      ui.mockInput.pressEscape()
-      await Bun.sleep(30)
-      await ui.renderOnce()
-      await ui.renderOnce()
-    })
-
-    expect(highlightedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
-
-    await act(async () => {
-      ui.mockInput.pressArrow("down")
-      await ui.renderOnce()
-      await ui.renderOnce()
       ui.mockInput.pressArrow("down")
       await ui.renderOnce()
       await ui.renderOnce()
     })
 
-    expect(highlightedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "readonly"]) ?? "")
-    expect(focusTree).toBeDefined()
-
     await act(async () => {
-      focusTree?.activateHighlightedFocusable()
+      ui.mockInput.pressArrow("down")
       await ui.renderOnce()
       await ui.renderOnce()
     })
 
-    expect(focusTree?.getNavigationState().active).toBe(false)
     expect(focusNavigationActive).toBe(false)
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "readonly"]) ?? "")
+
+    const readonlyLine = ui.captureSpans().lines.find((line) => {
+      const text = line.spans.map((span) => span.text).join("")
+      const backgroundWidth = line.spans.filter((span) => span.bg.a > 0).reduce((width, span) => width + span.width, 0)
+      return backgroundWidth > 0 && text.includes("Disabled")
+    })
+    const readonlyBackgroundWidth =
+      readonlyLine?.spans.filter((span) => span.bg.a > 0).reduce((width, span) => width + span.width, 0) ?? 0
+
+    expect(readonlyLine).toBeDefined()
+    expect(readonlyBackgroundWidth).toBeGreaterThan("○ Disabled".length)
+
+    await act(async () => {
+      ui.mockInput.pressKey(" ")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+    await Bun.sleep(0)
+    await act(async () => {
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(ui.captureCharFrame()).toContain("Enabled")
     expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "readonly"]) ?? "")
 
     await act(async () => {

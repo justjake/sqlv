@@ -69,7 +69,8 @@ So the adapter renders that distinction explicitly:
 
 - `useIsFocused()` reflects committed focus
 - `useIsHighlighted()` reflects the temporary navigation target
-- [`FocusHalo.tsx`](./FocusHalo.tsx) renders highlight chrome
+- `Focusable` renders highlight chrome by default unless `hideNavigationHalo` is set
+- [`FocusHalo.tsx`](./FocusHalo.tsx) implements the shared halo chrome
 - [`FocusNavigationHint.tsx`](./FocusNavigationHint.tsx) renders the mode affordance
 
 This is an important principle in the bindings: visual focus navigation state is derived from the focus tree, not inferred from OpenTUI's focused renderable.
@@ -85,6 +86,7 @@ That gives the binding a consistent place to do several jobs:
 - attach a stable renderable id derived from the path
 - expose a wrapper rect when the inner widget is not directly measurable
 - synchronize mouse-down with real focus path updates
+- render the shared navigation halo unless a caller opts out
 
 Some widgets focus an inner renderable directly. Others only need the wrapper.
 
@@ -262,7 +264,7 @@ The tree stays authoritative even though OpenTUI ultimately owns the real focuse
 
 ## Design Summary
 
-The OpenTUI layer is intentionally responsible for everything that is true because of OpenTUI and *only* because of OpenTUI:
+The OpenTUI layer is intentionally responsible for everything that is true because of OpenTUI and _only_ because of OpenTUI:
 
 - renderer-level key interception
 - temporary blur / restore of real focus

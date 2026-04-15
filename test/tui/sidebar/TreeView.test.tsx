@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { useEffect } from "react"
 import { useFocusNavigationState, useFocusTree } from "../../../src/tui/focus"
 import { flattenTree, clampTreeIndex, TreeView } from "../../../src/tui/sidebar/TreeView"
+import { IconProvider } from "../../../src/tui/ui/icons"
 import { createTuiRenderHarness } from "../testUtils"
 
 const { dispatchInput, focusedPathLine, render, settleDeferredRender } = createTuiRenderHarness()
@@ -220,12 +221,12 @@ describe("TreeView", () => {
     )
 
     const [rootLine, reactLine, srcLine, leafLine, vitestLine, solidLine] = ui.captureCharFrame().split("\n")
-    expect(rootLine?.startsWith("    Root")).toBe(true)
-    expect(reactLine?.startsWith("      React")).toBe(true)
-    expect(srcLine?.startsWith("    │   Src")).toBe(true)
-    expect(leafLine?.startsWith("    │ │ └ * Leaf")).toBe(true)
-    expect(vitestLine?.startsWith("    │ └ * vitest.config.ts")).toBe(true)
-    expect(solidLine?.startsWith("      Solid")).toBe(true)
+    expect(rootLine?.startsWith("  Root")).toBe(true)
+    expect(reactLine?.startsWith("    React")).toBe(true)
+    expect(srcLine?.startsWith("  │   Src")).toBe(true)
+    expect(leafLine?.startsWith("  │ │ └ * Leaf")).toBe(true)
+    expect(vitestLine?.startsWith("  │ └ * vitest.config.ts")).toBe(true)
+    expect(solidLine?.startsWith("    Solid")).toBe(true)
   })
 
   test("keeps tree rows single-line when labels are long", async () => {
@@ -245,9 +246,9 @@ describe("TreeView", () => {
     )
 
     const [rootLine, childLine, thirdLine] = ui.captureCharFrame().split("\n")
-    expect(rootLine?.startsWith("    ")).toBe(true)
+    expect(rootLine?.startsWith("  ")).toBe(true)
     expect(rootLine).toContain("")
-    expect(childLine?.startsWith("    └ * ")).toBe(true)
+    expect(childLine?.startsWith("  └ * ")).toBe(true)
     expect(rootLine).toContain("A root")
     expect(childLine).toContain("A child")
     expect(thirdLine?.trim()).toBe("")
@@ -269,7 +270,7 @@ describe("TreeView", () => {
     )
 
     const [rootLine] = ui.captureCharFrame().split("\n")
-    expect(rootLine?.startsWith("    Local DB")).toBe(true)
+    expect(rootLine?.startsWith("  Local DB")).toBe(true)
     expect(rootLine?.endsWith("bunsqlite")).toBe(true)
     expect(rootLine).not.toContain("(bunsqlite)")
   })
@@ -297,7 +298,71 @@ describe("TreeView", () => {
     )
 
     const [openLine, closedLine] = ui.captureCharFrame().split("\n")
-    expect(openLine?.startsWith("   󰉖 open-empty")).toBe(true)
-    expect(closedLine?.startsWith("    closed-empty")).toBe(true)
+    expect(openLine?.startsWith(" 󰉖 open-empty")).toBe(true)
+    expect(closedLine?.startsWith("  closed-empty")).toBe(true)
+  })
+
+  test("renders index nodes with a semantic index icon", async () => {
+    const nodes = [
+      {
+        expanded: true,
+        children: [{ key: "email_idx", kind: "index", name: "email_idx" }],
+        expandable: true,
+        key: "root",
+        name: "Root",
+      },
+    ]
+
+    const ui = await render(
+      <TreeView nodes={nodes} />,
+      { height: 4, width: 40 },
+    )
+
+    const [, childLine] = ui.captureCharFrame().split("\n")
+    expect(childLine?.startsWith("  └ ⌗ email_idx")).toBe(true)
+  })
+
+  test("keeps the semantic table icon when a table row is expandable", async () => {
+    const nodes = [
+      {
+        expanded: true,
+        children: [{ key: "email_idx", kind: "index", name: "email_idx" }],
+        kind: "table",
+        key: "users",
+        name: "users",
+      },
+    ]
+
+    const ui = await render(
+      <TreeView nodes={nodes} />,
+      { height: 4, width: 40 },
+    )
+
+    const [tableLine, childLine] = ui.captureCharFrame().split("\n")
+    expect(tableLine?.startsWith(" 󰓫 users")).toBe(true)
+    expect(childLine?.startsWith("  └ ⌗ email_idx")).toBe(true)
+  })
+
+  test("renders unicode fallback icons when wrapped in the unicode icon provider", async () => {
+    const nodes = [
+      {
+        expanded: true,
+        children: [{ key: "table", kind: "table", name: "users" }],
+        expandable: true,
+        key: "root",
+        name: "Root",
+      },
+    ]
+
+    const ui = await render(
+      <IconProvider style="unicode">
+        <TreeView nodes={nodes} />
+      </IconProvider>,
+      { height: 4, width: 40 },
+    )
+
+    const [rootLine, childLine] = ui.captureCharFrame().split("\n")
+    expect(rootLine?.startsWith("▾ ◫ Root")).toBe(true)
+    expect(childLine?.startsWith("  └ ▦ users")).toBe(true)
   })
 })

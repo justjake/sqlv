@@ -11,11 +11,7 @@ import { createTuiRenderHarness } from "../testUtils"
 
 const { dispatchInput, focusedPathLine, render, settleDeferredRender } = createTuiRenderHarness()
 
-function ResultsTableHarness(props: {
-  rows: object[]
-  initialPath?: readonly string[]
-  width?: number
-}) {
+function ResultsTableHarness(props: { rows: object[]; initialPath?: readonly string[]; width?: number }) {
   const tree = useFocusTree()
   const state = useFocusNavigationState()
 
@@ -128,6 +124,34 @@ describe("ResultsTable", () => {
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("END", { ctrl: true }))
     expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-1")
+  })
+
+  test("supports modifier nav aliases alongside edge jumps in the results grid", async () => {
+    const ui = await render(
+      <ResultsTableHarness
+        initialPath={[RESULTS_TABLE_FOCUS_ID]}
+        rows={[
+          { id: 1, name: "Ada", city: "London" },
+          { id: 2, name: "Grace", city: "New York" },
+        ]}
+      />,
+      { height: 8, width: 60 },
+    )
+
+    await settleDeferredRender(ui)
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-0")
+
+    await dispatchInput(ui, () => ui.mockInput.pressKey("l", { ctrl: true }))
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-2")
+
+    await dispatchInput(ui, () => ui.mockInput.pressArrow("down", { ctrl: true }))
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-2")
+
+    await dispatchInput(ui, () => ui.mockInput.pressKey("k", { ctrl: true }))
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-2")
+
+    await dispatchInput(ui, () => ui.mockInput.pressArrow("left", { ctrl: true }))
+    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-0")
   })
 
   test("measures result tables to the parent pane and keeps rows single-line", async () => {

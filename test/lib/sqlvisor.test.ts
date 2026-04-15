@@ -10,8 +10,9 @@ import { type LogEntry } from "../../src/lib/types/Log"
 import type { ObjectInfo } from "../../src/lib/types/objects"
 import { rowDispatcher, type BaseRow } from "../../src/lib/types/RowStore"
 import type { SavedQuery } from "../../src/lib/types/SavedQuery"
+import { defaultSettingsState, type AnySettingsRow } from "../../src/lib/types/Settings"
 import { unsafeRawSQL, type SQL } from "../../src/lib/types/SQL"
-import { makeConnection, makeQueryExecution, makeSavedQuery } from "../support"
+import { makeConnection, makeQueryExecution, makeSavedQuery, makeSettingsRow } from "../support"
 
 class FakeBunAdapter implements Adapter<{ path: string }, unknown, {}> {
   readonly protocol = "bunsqlite"
@@ -151,6 +152,7 @@ function createPersistence(
   initialConnections = [makeConnection({ config: { path: ":memory:" }, protocol: "bunsqlite" })],
   initialLogEntries: LogEntry[] = [],
   initialSavedQueries: SavedQuery[] = [],
+  initialSettings: AnySettingsRow[] = [],
 ) {
   const session = createSession("sqlvisor")
   const persist: LocalPersistence["persist"] = {
@@ -158,6 +160,7 @@ function createPersistence(
     log: createMemoryStore<LogEntry>(initialLogEntries),
     savedQueries: createMemoryStore(initialSavedQueries, (rows) =>
       rows.toSorted((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))),
+    settings: createMemoryStore(initialSettings),
   }
 
   return {
@@ -254,6 +257,148 @@ describe("SqlVisor", () => {
     expect(await persistence.persist.log.get({ id: persistence.session.id, type: "session" })).toEqual(
       persistence.session,
     )
+    expect(state.settings).toEqual({
+      ...defaultSettingsState(),
+      sidebarState: {
+        lastSelectedConnectionId: "conn-2",
+      },
+    })
+  })
+
+  test("loads and updates persisted settings", async () => {
+    const fakeAdapter = new FakeBunAdapter()
+    const registry = new AdapterRegistry([fakeAdapter])
+    const persistence = createPersistence(
+      undefined,
+      [],
+      [],
+      [makeSettingsRow("appearance", { useNerdFont: true }, { createdAt: 10 })],
+    )
+
+    const engine = await SqlVisor.create({
+      persistence,
+      queryClient: createQueryClient(),
+      registry,
+    })
+
+    expect(engine.getState().settings).toEqual({
+      ...defaultSettingsState(),
+      appearance: {
+        useNerdFont: true,
+      },
+      sidebarState: {
+        lastSelectedConnectionId: "conn-1",
+      },
+    })
+
+    await engine.updateSettings("appearance", { useNerdFont: false })
+
+    expect(engine.getState().settings).toEqual({
+      ...defaultSettingsState(),
+      appearance: {
+        useNerdFont: false,
+      },
+      sidebarState: {
+        lastSelectedConnectionId: "conn-1",
+      },
+    })
+    expect(await persistence.persist.settings.get({ id: "appearance", type: "settings" })).toMatchObject({
+      createdAt: 10,
+      id: "appearance",
+      settings: {
+        useNerdFont: false,
+      },
+      type: "settings",
+      updatedAt: expect.any(Number),
+    })
+  })
+
+  test("restores the selected connection from sidebar settings and only loads that branch", async () => {
+    const fakeAdapter = new FakeBunAdapter()
+    fakeAdapter.objects = [{ name: "main", type: "database" }]
+    const first = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      id: "conn-1",
+      name: "First",
+      protocol: "bunsqlite",
+    })
+    const second = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      id: "conn-2",
+      name: "Second",
+      protocol: "bunsqlite",
+    })
+    const persistence = createPersistence(
+      [first, second],
+      [],
+      [],
+      [makeSettingsRow("sidebarState", { lastSelectedConnectionId: "conn-1" }, { createdAt: 10 })],
+    )
+
+    const engine = await SqlVisor.create({
+      persistence,
+      queryClient: createQueryClient(),
+      registry: new AdapterRegistry([fakeAdapter]),
+    })
+
+    await waitFor(() => engine.getState().objectsByConnectionId["conn-1"]?.data?.length === 1)
+
+    expect(engine.getState().selectedConnectionId).toBe("conn-1")
+    expect(engine.getState().settings).toEqual({
+      ...defaultSettingsState(),
+      sidebarState: {
+        lastSelectedConnectionId: "conn-1",
+      },
+    })
+    expect(engine.getState().objectsByConnectionId["conn-1"]?.data).toEqual(fakeAdapter.objects)
+    expect(engine.getState().objectsByConnectionId["conn-2"]).toBeUndefined()
+    expect(fakeAdapter.fetchObjectsCalls).toBe(1)
+  })
+
+  test("persists sidebar selection when the selected connection changes", async () => {
+    const fakeAdapter = new FakeBunAdapter()
+    fakeAdapter.objects = [{ name: "main", type: "database" }]
+    const first = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      id: "conn-1",
+      name: "First",
+      protocol: "bunsqlite",
+    })
+    const second = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      id: "conn-2",
+      name: "Second",
+      protocol: "bunsqlite",
+    })
+    const persistence = createPersistence([first, second])
+
+    const engine = await SqlVisor.create({
+      persistence,
+      queryClient: createQueryClient(),
+      registry: new AdapterRegistry([fakeAdapter]),
+    })
+
+    engine.selectConnection(first.id)
+
+    await waitFor(() => engine.getState().settings.sidebarState.lastSelectedConnectionId === first.id)
+
+    expect(engine.getState().selectedConnectionId).toBe(first.id)
+    expect(engine.getState().settings.sidebarState.lastSelectedConnectionId).toBe(first.id)
+    expect(await persistence.persist.settings.get({ id: "sidebarState", type: "settings" })).toMatchObject({
+      id: "sidebarState",
+      settings: {
+        lastSelectedConnectionId: first.id,
+      },
+      type: "settings",
+    })
   })
 
   test("updates state, notifies listeners, and loads connection objects", async () => {

@@ -25,6 +25,7 @@ import type { ObjectInfo } from "./types/objects"
 import { OrderString } from "./types/Order"
 import { pendingQueryState, queryStateOrPending, type QueryState } from "./types/QueryState"
 import type { SavedQuery } from "./types/SavedQuery"
+import { defaultSettingsState, type AnySettingsRow, type SettingsId, type SettingsRow, type SettingsSchema, type SettingsState } from "./types/Settings"
 import { unsafeRawSQL } from "./types/SQL"
 
 export type EditorSuggestionMenuItemRef = {
@@ -112,6 +113,7 @@ export type SqlVisorState = {
   editor: EditorState
   history: QueryExecution[]
   savedQueries: SavedQuery[]
+  settings: SettingsState
   detailView: DetailView
   queryExecution: QueryExecutionState
   activeQueries: ActiveQuery[]
@@ -173,6 +175,7 @@ export type SqlVisorCreateOptions = {
 }
 
 type Listener = () => void
+type SettingsRowMap = Partial<Record<SettingsId, AnySettingsRow>>
 
 export class SqlVisor {
   static async create(options: SqlVisorCreateOptions = {}): Promise<SqlVisor> {
@@ -194,6 +197,7 @@ export class SqlVisor {
       suggestionProviders: options.suggestionProviders ?? builtInSuggestionProviders(),
     })
 
+    await engine.#loadPersistedSettings()
     await engine.refreshConnections()
     await engine.#loadPersistedHistory()
     await engine.#loadPersistedSavedQueries()
@@ -214,6 +218,7 @@ export class SqlVisor {
   #suggestionRequestSerial = 0
   #editorAnalysisAbortController: AbortController | undefined
   #editorAnalysisRequestSerial = 0
+  #settingsRows: SettingsRowMap = {}
   #state: SqlVisorState
 
   private constructor(args: {
@@ -243,6 +248,7 @@ export class SqlVisor {
       },
       history: [],
       savedQueries: [],
+      settings: defaultSettingsState(),
       detailView: {
         kind: "empty",
         title: "Results",
@@ -284,14 +290,13 @@ export class SqlVisor {
       staleTime: 0,
     })
 
-    const selectedConnectionId = connections.some((connection) => connection.id === this.#state.selectedConnectionId)
-      ? this.#state.selectedConnectionId
-      : connections[0]?.id
+    const selectedConnectionId = this.#resolveSelectedConnectionId(connections)
 
     this.#setState({
       selectedConnectionId,
     })
     this.#syncQueryState()
+    this.#persistSidebarSelection(selectedConnectionId)
 
     if (selectedConnectionId) {
       void this.loadConnectionObjects(selectedConnectionId)
@@ -319,6 +324,16 @@ export class SqlVisor {
       `,
     )
     this.#setState({ savedQueries: sortSavedQueries(savedQueries) })
+  }
+
+  async #loadPersistedSettings(): Promise<void> {
+    const rows = await this.persist.settings.query(
+      (table) => sqlite<AnySettingsRow>`
+        ${selectStoredRows<AnySettingsRow>(table)}
+        ORDER BY createdAt ASC
+      `,
+    )
+    this.#replaceSettingsRows(rows)
   }
 
   async addConnection<P extends Protocol>(input: AddConnectionInput<P>): Promise<Connection<ProtocolConfig<P>>> {
@@ -358,6 +373,7 @@ export class SqlVisor {
       selectedConnectionId: connectionId,
     })
     this.#syncQueryState()
+    this.#persistSidebarSelection(connectionId)
 
     if (connectionId) {
       void this.loadConnectionObjects(connectionId)
@@ -469,6 +485,31 @@ export class SqlVisor {
       savedQueries: sortSavedQueries([savedQuery, ...this.#state.savedQueries.filter((entry) => entry.id !== savedQuery.id)]),
     })
     return savedQuery
+  }
+
+  async updateSettings<Id extends SettingsId>(
+    id: Id,
+    patch: Partial<SettingsSchema[Id]>,
+  ): Promise<SettingsSchema[Id]> {
+    return this.replaceSettings(id, {
+      ...this.#state.settings[id],
+      ...patch,
+    })
+  }
+
+  async replaceSettings<Id extends SettingsId>(id: Id, settings: SettingsSchema[Id]): Promise<SettingsSchema[Id]> {
+    const now = EpochMillis.now()
+    const currentRow = this.#settingsRows[id] as SettingsRow<Id> | undefined
+    const nextRow: SettingsRow<Id> = {
+      createdAt: currentRow?.createdAt ?? now,
+      id,
+      settings,
+      type: "settings",
+      updatedAt: currentRow ? now : undefined,
+    }
+    const persistedRow = await this.persist.settings.upsert(nextRow as AnySettingsRow) as SettingsRow<Id>
+    this.#applySettingsRow(persistedRow)
+    return persistedRow.settings
   }
 
   setDetailView(detailView: DetailView) {
@@ -1101,9 +1142,6 @@ export class SqlVisor {
       this.#queryClient.getQueryState<Connection<any>[]>(this.#connectionsQueryKey()),
     )
     const connectionIds = new Set<string>()
-    for (const connection of connections.data ?? []) {
-      connectionIds.add(connection.id)
-    }
     if (this.#state.selectedConnectionId) {
       connectionIds.add(this.#state.selectedConnectionId)
     }
@@ -1196,6 +1234,30 @@ export class SqlVisor {
     return this.#state.connections.data?.find((connection) => connection.id === this.#state.selectedConnectionId)?.protocol
   }
 
+  #resolveSelectedConnectionId(connections: Connection<any>[]): string | undefined {
+    if (connections.some((connection) => connection.id === this.#state.selectedConnectionId)) {
+      return this.#state.selectedConnectionId
+    }
+
+    const persistedConnectionId = this.#state.settings.sidebarState.lastSelectedConnectionId
+    if (persistedConnectionId && connections.some((connection) => connection.id === persistedConnectionId)) {
+      return persistedConnectionId
+    }
+
+    return connections[0]?.id
+  }
+
+  #persistSidebarSelection(connectionId: string | undefined) {
+    const lastSelectedConnectionId = connectionId ?? ""
+    if (this.#state.settings.sidebarState.lastSelectedConnectionId === lastSelectedConnectionId) {
+      return
+    }
+
+    void this.replaceSettings("sidebarState", {
+      lastSelectedConnectionId,
+    })
+  }
+
   #currentEditorFormatterLanguage(): string | undefined {
     const protocol = this.#currentEditorProtocol()
     if (!protocol) {
@@ -1230,6 +1292,33 @@ export class SqlVisor {
     }
 
     return connections.find((connection) => connection.protocol === savedQuery.protocol)?.id ?? this.#state.selectedConnectionId
+  }
+
+  #replaceSettingsRows(rows: AnySettingsRow[]) {
+    const settingsRows = {} as SettingsRowMap
+    const settings = defaultSettingsState()
+    const settingsRecord = settings as Record<SettingsId, SettingsSchema[SettingsId]>
+
+    for (const row of rows) {
+      settingsRows[row.id] = row as AnySettingsRow
+      settingsRecord[row.id] = row.settings
+    }
+
+    this.#settingsRows = settingsRows
+    this.#setState({ settings })
+  }
+
+  #applySettingsRow<Id extends SettingsId>(row: SettingsRow<Id>) {
+    this.#settingsRows = {
+      ...this.#settingsRows,
+      [row.id]: row,
+    }
+    this.#setState({
+      settings: {
+        ...this.#state.settings,
+        [row.id]: row.settings,
+      } as SettingsState,
+    })
   }
 }
 

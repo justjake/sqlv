@@ -1,5 +1,5 @@
 import type { InputRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { sameFocusPath } from "../../lib/focus"
 import type {
   AnyAdapter,
@@ -19,7 +19,7 @@ import {
   useIsFocusWithin,
   useRememberedDescendantPath,
 } from "../focus"
-import { FormInput, FormLabel } from "../form"
+import { CheckboxInput, FormLabel, RadioSelectRowInput, TextInput } from "../form"
 import { Shortcut } from "../Shortcut"
 import { useKeybindHandler } from "../ui/keybind"
 import { useModalBottomRight } from "../ui/Modal"
@@ -28,7 +28,6 @@ import { useTheme } from "../ui/theme"
 import { useSqlVisor, useSqlVisorState } from "../useSqlVisor"
 
 type AddConnectionPaneProps = {
-  onBack: () => void
   onSaved: () => void
 }
 
@@ -48,9 +47,10 @@ type FieldNavProps = {
 }
 
 export const ADD_CONNECTION_AREA_ID = "add-connection"
+const CYCLE_HINT_LABEL = "← ⟶ cycle"
 
 export function AddConnectionPane(props: AddConnectionPaneProps) {
-  const { onBack, onSaved } = props
+  const { onSaved } = props
   const engine = useSqlVisor()
   const state = useSqlVisorState()
   const focusTree = useFocusTree()
@@ -128,13 +128,9 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
         focusSelf
         focusable
         focusableId={ADD_CONNECTION_AREA_ID}
-        onTrapEsc={onBack}
-        trap
-        trapEscLabel="Close"
+        navigable={false}
       >
-        <AddConnectionChrome onClose={onBack}>
-          <Text>No connection forms are available for the registered adapters.</Text>
-        </AddConnectionChrome>
+        <Text>No connection forms are available for the registered adapters.</Text>
       </Focusable>
     )
   }
@@ -168,16 +164,6 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
     }
   }
 
-  function cycleProtocol(step: number) {
-    const currentProtocol = protocolRef.current
-    if (!currentProtocol || !adapters.length) return
-    const index = adapters.findIndex((candidate) => candidate.protocol === currentProtocol)
-    if (index < 0) return
-    const nextIndex = stepIndex(index, adapters.length, step)
-    const nextProtocol = adapters[nextIndex]?.protocol
-    if (nextProtocol) loadProtocol(nextProtocol, "protocol")
-  }
-
   function updateStringField(key: string, nextValue: string) {
     valuesRef.current = { ...valuesRef.current, [key]: nextValue }
     setValues((current) => ({ ...current, [key]: nextValue }))
@@ -198,6 +184,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
   return (
     <Focusable
       alignSelf="stretch"
+      childrenNavigable={false}
       delegatesFocus
       flexDirection="column"
       flexGrow={1}
@@ -206,10 +193,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
       focusable
       focusableId={ADD_CONNECTION_AREA_ID}
       navigable={false}
-      onTrapEsc={onBack}
       scrollRef={scrollRef}
-      trap
-      trapEscLabel="Close"
     >
       <AddConnectionPaneBody
         adapters={adapters}
@@ -217,8 +201,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
         focusFields={focusFields}
         formError={formError}
         name={name}
-        onBack={onBack}
-        onCycleProtocol={cycleProtocol}
+        onSelectProtocol={(nextProtocol) => loadProtocol(nextProtocol, "protocol")}
         onSave={() => void saveConnection()}
         onSetName={(value) => {
           nameRef.current = value
@@ -243,8 +226,7 @@ function AddConnectionPaneBody(props: {
   focusFields: FocusField[]
   formError: string | undefined
   name: string
-  onBack: () => void
-  onCycleProtocol: (step: number) => void
+  onSelectProtocol: (value: Protocol) => void
   onSave: () => void
   onSetName: (value: string) => void
   onSetStringField: (key: string, value: string) => void
@@ -261,8 +243,7 @@ function AddConnectionPaneBody(props: {
     focusFields,
     formError,
     name,
-    onBack,
-    onCycleProtocol,
+    onSelectProtocol,
     onSave,
     onSetBooleanField,
     onSetName,
@@ -303,125 +284,103 @@ function AddConnectionPaneBody(props: {
   }
 
   return (
-    <AddConnectionChrome onClose={onBack}>
-      <scrollbox ref={scrollRef} flexGrow={1} contentOptions={{ flexDirection: "column", gap: 1 }}>
-        {formError && <Text>{formError}</Text>}
-
-        <ProtocolPickerField
-          adapters={adapters}
-          onCycle={onCycleProtocol}
-          onNext={navigateNext}
-          onPrev={navigatePrev}
-          protocol={protocol}
-          remembered={!focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath("protocol"))}
-        />
-
-        <TextInputField
-          error={errors.name}
-          focusableId="name"
-          label="Connection Name"
-          onChange={onSetName}
-          onNext={navigateNext}
-          onPrev={navigatePrev}
-          placeholder={spec?.defaultName}
-          remembered={!focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath("name"))}
-          value={name}
-        />
-
-        {spec?.fields.map((field) => {
-          if (!(field.visible?.(values) ?? true)) {
-            return null
-          }
-
-          const remembered = !focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath(field.key))
-          switch (field.kind) {
-            case "boolean":
-              return (
-                <BooleanField
-                  key={field.key}
-                  checked={booleanField(values, field.key, field.defaultValue ?? false)}
-                  description={field.description}
-                  error={errors[field.key]}
-                  focusableId={field.key}
-                  label={field.label}
-                  onChange={(value) => onSetBooleanField(field.key, value)}
-                  onNext={navigateNext}
-                  onPrev={navigatePrev}
-                  remembered={remembered}
-                />
-              )
-            case "text":
-            case "path":
-            case "secret":
-              return (
-                <TextInputField
-                  key={field.key}
-                  description={field.description}
-                  error={errors[field.key]}
-                  focusableId={field.key}
-                  label={field.label}
-                  onChange={(value) => onSetStringField(field.key, value)}
-                  onNext={navigateNext}
-                  onPrev={navigatePrev}
-                  placeholder={textFieldPlaceholder(field)}
-                  remembered={remembered}
-                  value={stringField(values, field.key, field.defaultValue ?? "")}
-                />
-              )
-            case "select":
-              return (
-                <SelectField
-                  key={field.key}
-                  description={field.description}
-                  error={errors[field.key]}
-                  field={field}
-                  focusableId={field.key}
-                  onChange={(value) => onSetStringField(field.key, value)}
-                  onNext={navigateNext}
-                  onPrev={navigatePrev}
-                  remembered={remembered}
-                  value={stringField(values, field.key, field.defaultValue ?? "")}
-                />
-              )
-          }
-        })}
-      </scrollbox>
-    </AddConnectionChrome>
-  )
-}
-
-function AddConnectionChrome(props: { children: ReactNode; onClose: () => void }) {
-  const theme = useTheme()
-  const navigationActive = useIsFocusNavigationActive()
-
-  return (
-    <box
+    <scrollbox
+      ref={scrollRef}
       alignSelf="stretch"
-      flexDirection="column"
       flexGrow={1}
-      gap={1}
-      height="100%"
-      paddingBottom={1}
-      paddingLeft={2}
-      paddingRight={2}
+      minWidth={0}
+      contentOptions={{ flexDirection: "column", gap: 1, paddingBottom: 1, paddingLeft: 2, paddingRight: 2 }}
     >
-      <box flexDirection="row" justifyContent="space-between">
-        <Text>Add Connection</Text>
-        <box flexDirection="row" gap={1} onMouseUp={props.onClose}>
-          <Text fg={navigationActive ? theme.mutedFg : undefined}>esc</Text>
-          <Text fg={navigationActive ? undefined : theme.mutedFg}>esc</Text>
-        </box>
-      </box>
-      {props.children}
-    </box>
+      {formError && <Text>{formError}</Text>}
+
+      <ProtocolPickerField
+        adapters={adapters}
+        onChange={onSelectProtocol}
+        onNext={navigateNext}
+        onPrev={navigatePrev}
+        protocol={protocol}
+        remembered={!focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath("protocol"))}
+      />
+
+      <TextInputField
+        error={errors.name}
+        focusableId="name"
+        label="Connection Name"
+        onChange={onSetName}
+        onNext={navigateNext}
+        onPrev={navigatePrev}
+        placeholder={spec?.defaultName}
+        remembered={!focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath("name"))}
+        value={name}
+      />
+
+      {spec?.fields.map((field) => {
+        if (!(field.visible?.(values) ?? true)) {
+          return null
+        }
+
+        const remembered = !focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath(field.key))
+        switch (field.kind) {
+          case "boolean":
+            return (
+              <BooleanField
+                key={field.key}
+                checked={booleanField(values, field.key, field.defaultValue ?? false)}
+                description={field.description}
+                error={errors[field.key]}
+                fieldFocused={focusedWithin && currentFieldKey === field.key}
+                focusableId={field.key}
+                label={field.label}
+                onChange={(value) => onSetBooleanField(field.key, value)}
+                onNext={navigateNext}
+                onPrev={navigatePrev}
+                remembered={remembered}
+              />
+            )
+          case "text":
+          case "path":
+          case "secret":
+            return (
+              <TextInputField
+                key={field.key}
+                description={field.description}
+                error={errors[field.key]}
+                focusableId={field.key}
+                label={field.label}
+                onChange={(value) => onSetStringField(field.key, value)}
+                onNext={navigateNext}
+                onPrev={navigatePrev}
+                placeholder={textFieldPlaceholder(field)}
+                remembered={remembered}
+                value={stringField(values, field.key, field.defaultValue ?? "")}
+              />
+            )
+          case "select":
+            return (
+              <SelectField
+                key={field.key}
+                description={field.description}
+                error={errors[field.key]}
+                field={field}
+                focusableId={field.key}
+                onChange={(value) => onSetStringField(field.key, value)}
+                onNext={navigateNext}
+                onPrev={navigatePrev}
+                remembered={remembered}
+                value={stringField(values, field.key, field.defaultValue ?? "")}
+              />
+            )
+        }
+      })}
+    </scrollbox>
   )
 }
 
 function ProtocolPickerField(
   props: FieldNavProps & {
     adapters: AdapterWithConnectionSpec[]
+    onChange: (value: Protocol) => void
     protocol: Protocol | undefined
-    onCycle: (step: number) => void
   },
 ) {
   return (
@@ -434,41 +393,37 @@ function ProtocolPickerField(
 function ProtocolPickerBody(
   props: FieldNavProps & {
     adapters: AdapterWithConnectionSpec[]
+    onChange: (value: Protocol) => void
     protocol: Protocol | undefined
-    onCycle: (step: number) => void
   },
 ) {
-  const { onPrev, onNext, adapters, protocol, onCycle } = props
+  const { onPrev, onNext, adapters, onChange, protocol, remembered } = props
   const focused = useIsFocused()
   const highlighted = useIsHighlighted()
   const navigationActive = useIsFocusNavigationActive()
   const active = navigationActive ? highlighted : focused
-  const theme = useTheme()
 
   useKeybindHandler({
     enabled: focused,
+    detect: isFieldNavKey,
     onKey(event) {
-      if (handleFieldNav(event, onPrev, onNext)) return
-      if (event.name === "right" || event.name === "enter" || event.name === "return") {
-        event.preventDefault()
-        event.stopPropagation()
-        onCycle(1)
-      } else if (event.name === "left") {
-        event.preventDefault()
-        event.stopPropagation()
-        onCycle(-1)
-      }
+      handleFieldNav(event, onPrev, onNext)
     },
   })
 
   return (
-    <FormLabel active={active} description="Pick the adapter that will own this connection." name="Protocol">
-      <box alignSelf="stretch" flexDirection="row" gap={1} minWidth={0}>
-        <Text flexGrow={1} flexShrink={1} truncate wrapMode="none">
-          {renderProtocolOptions(adapters, protocol, theme)}
-        </Text>
-        {focused && !navigationActive && <Text fg={theme.mutedFg}>← → cycle</Text>}
-      </box>
+    <FormLabel
+      active={active || remembered}
+      description="Pick the adapter that will own this connection."
+      inputFocused={!navigationActive && focused}
+      name="Protocol"
+    >
+      <RadioSelectRowInput
+        hint={CYCLE_HINT_LABEL}
+        onChange={onChange}
+        options={adapters.map((adapter) => ({ key: adapter.protocol, label: adapter.protocol, value: adapter.protocol }))}
+        value={protocol}
+      />
     </FormLabel>
   )
 }
@@ -524,6 +479,7 @@ function TextInputFieldBody(props: {
 
   useKeybindHandler({
     enabled: focused,
+    detect: isFieldNavKey,
     onKey(event) {
       handleFieldNav(event, props.onPrev, props.onNext)
     },
@@ -537,7 +493,7 @@ function TextInputFieldBody(props: {
       inputFocused={!navigationActive && focused}
       name={props.label}
     >
-      <FormInput
+      <TextInput
         inputRef={props.inputRef}
         onInput={props.onChange}
         placeholder={props.placeholder}
@@ -552,6 +508,7 @@ function BooleanField(
     focusableId: string
     label: string
     checked: boolean
+    fieldFocused: boolean
     description?: string
     error?: string
     onChange: (value: boolean) => void
@@ -568,38 +525,36 @@ function BooleanFieldBody(
   props: FieldNavProps & {
     label: string
     checked: boolean
+    fieldFocused: boolean
     description?: string
     error?: string
     onChange: (value: boolean) => void
   },
 ) {
-  const { checked, description, error, label, onChange, onNext, onPrev, remembered } = props
+  const { checked, description, error, fieldFocused, label, onChange, onNext, onPrev, remembered } = props
   const focused = useIsFocused()
   const highlighted = useIsHighlighted()
   const navigationActive = useIsFocusNavigationActive()
   const active = navigationActive ? highlighted : focused
-  const theme = useTheme()
+  const fieldActive = fieldFocused || active || remembered
 
   useKeybindHandler({
     enabled: focused,
+    detect: isFieldNavKey,
     onKey(event) {
       if (handleFieldNav(event, onPrev, onNext)) return
-      if (event.name === "space" || event.name === "enter" || event.name === "return") {
-        event.preventDefault()
-        event.stopPropagation()
-        onChange(!checked)
-      }
     },
   })
 
   return (
-    <FormLabel active={active || remembered} description={description} error={error} name={label}>
-      <box alignSelf="stretch" flexDirection="row" gap={1} minWidth={0} onMouseUp={() => onChange(!checked)}>
-        <Text flexGrow={1} flexShrink={1} truncate wrapMode="none">
-          {checked ? "◉" : "○"} {checked ? "Enabled" : "Disabled"}
-        </Text>
-        {focused && !navigationActive && <Text fg={theme.mutedFg}>space toggle</Text>}
-      </box>
+    <FormLabel
+      active={fieldActive}
+      description={description}
+      error={error}
+      inputFocused={fieldFocused || (!navigationActive && focused)}
+      name={label}
+    >
+      <CheckboxInput checked={checked} hint="space toggle" onChange={onChange} />
     </FormLabel>
   )
 }
@@ -639,6 +594,9 @@ function SelectFieldBody(
 
   useKeybindHandler({
     enabled: focused,
+    detect(event) {
+      return isFieldNavKey(event) || event.name === "left" || event.name === "right" || event.name === "enter" || event.name === "return"
+    },
     onKey(event) {
       if (handleFieldNav(event, onPrev, onNext)) return
       if (event.name === "right" || event.name === "enter" || event.name === "return") {
@@ -668,10 +626,14 @@ function SelectFieldBody(
         <Text flexGrow={1} flexShrink={1} truncate wrapMode="none">
           {displayLabel}
         </Text>
-        {focused && !navigationActive && <Text fg={theme.mutedFg}>← → cycle</Text>}
+        {focused && !navigationActive && <Text fg={theme.mutedFg}>{CYCLE_HINT_LABEL}</Text>}
       </box>
     </FormLabel>
   )
+}
+
+function isFieldNavKey(event: KeyEvent): boolean {
+  return event.name === "tab" || event.name === "up" || event.name === "down"
 }
 
 function handleFieldNav(event: KeyEvent, onPrev: () => void, onNext: () => void): boolean {
@@ -730,24 +692,6 @@ function resolveDirectChildKey(path: readonly string[] | undefined): string | un
 function findFieldIndex(fields: FocusField[], key: string): number {
   const index = fields.findIndex((field) => field.key === key)
   return index < 0 ? 0 : index
-}
-
-function renderProtocolOptions(
-  adapters: AdapterWithConnectionSpec[],
-  activeProtocol: Protocol | undefined,
-  theme: ReturnType<typeof useTheme>,
-): ReactNode[] {
-  return adapters.flatMap((adapter, index) => {
-    const active = adapter.protocol === activeProtocol
-    return [
-      index > 0 ? "  " : null,
-      <span key={adapter.protocol}>
-        <span fg={active ? theme.focusPrimaryFg : theme.mutedFg}>{active ? "◉" : "○"}</span>
-        {" "}
-        {adapter.protocol}
-      </span>,
-    ]
-  })
 }
 
 function defaultFieldValues(spec: ConnectionSpec<any>): ConnectionFormValues {

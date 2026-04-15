@@ -4,7 +4,14 @@ import { act, useEffect } from "react"
 import { Focusable, useFocusNavigationState, useFocusTree } from "../../src/tui/focus"
 import { Shortcut } from "../../src/tui/Shortcut"
 import { normalizeShortcutKeyName } from "../../src/tui/ui/shortcutKeys"
-import { parseKeys, stepMatches } from "../../src/tui/ui/keybind"
+import {
+  labelizeShortcutInput,
+  parseKeys,
+  stepMatches,
+  translateNavKey,
+  useNavKeys,
+  type AliasedByNavKey,
+} from "../../src/tui/ui/keybind"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, focusedPathLine, render, settleDeferredRender } = createTuiRenderHarness()
@@ -44,12 +51,71 @@ function FocusNavigationHarness() {
   )
 }
 
+function GlobalShortcutHarness(props: { onHit: (value: string) => void }) {
+  const tree = useFocusTree()
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      tree.focusPath(["other"])
+    })
+  }, [tree])
+
+  return (
+    <box flexDirection="column">
+      <Focusable focusableId="scoped">
+        <Shortcut global keys="ctrl+n" enabled label="Global" onKey={() => props.onHit("global")} />
+      </Focusable>
+      <Focusable focusable focusableId="other">
+        <text>Other</text>
+      </Focusable>
+    </box>
+  )
+}
+
+function NavKeysRegistrar(props: {
+  onHit: (value: string) => void
+  prevent?: AliasedByNavKey | readonly AliasedByNavKey[]
+}) {
+  useNavKeys({
+    activate: () => props.onHit("activate"),
+    "ctrl+up": () => props.onHit("ctrl+up"),
+    down: () => props.onHit("down"),
+    esc: () => props.onHit("esc"),
+    left: () => props.onHit("left"),
+    prevent: props.prevent,
+    right: () => props.onHit("right"),
+    up: () => props.onHit("up"),
+  })
+
+  return null
+}
+
+function NavKeysHarness(props: {
+  onHit: (value: string) => void
+  prevent?: AliasedByNavKey | readonly AliasedByNavKey[]
+}) {
+  const tree = useFocusTree()
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      tree.focusPath(["nav"])
+    })
+  }, [tree])
+
+  return (
+    <Focusable focusable focusableId="nav">
+      <NavKeysRegistrar onHit={props.onHit} prevent={props.prevent} />
+      <text>Nav</text>
+    </Focusable>
+  )
+}
+
 describe("Shortcut", () => {
   test("renders shortcuts and only fires matching key bindings", async () => {
     const hits: string[] = []
     const ui = await render(<Shortcut keys="ctrl+x" enabled label="Execute" onKey={() => hits.push("run")} />)
 
-    expect(ui.captureCharFrame()).toContain("^x Execute")
+    expect(ui.captureCharFrame()).toContain("⌃x Execute")
 
     await act(async () => {
       ui.mockInput.pressKey("x", { ctrl: true })
@@ -82,7 +148,7 @@ describe("Shortcut", () => {
 
   test("supports alternative shortcut sequences", async () => {
     const hits: string[] = []
-    const ui = await render(<Shortcut keys={["up", "k"]} enabled label="Prev" onKey={() => hits.push("prev")} />)
+    const ui = await render(<Shortcut keys={{ or: ["up", "k"] }} enabled label="Prev" onKey={() => hits.push("prev")} />)
 
     expect(ui.captureCharFrame()).toContain("↑ / k Prev")
 
@@ -98,6 +164,110 @@ describe("Shortcut", () => {
     expect(hits).toEqual(["prev", "prev"])
   })
 
+  test("treats array keys as chord chains", async () => {
+    const hits: string[] = []
+    const ui = await render(<Shortcut keys={["ctrl+x", "d"]} enabled label="Chord" onKey={() => hits.push("chord")} />)
+
+    expect(ui.captureCharFrame()).toContain("⌃x d Chord")
+
+    await act(async () => {
+      ui.mockInput.pressKey("x", { ctrl: true })
+      await ui.renderOnce()
+      ui.mockInput.pressKey("d")
+      await ui.renderOnce()
+    })
+
+    expect(hits).toEqual(["chord"])
+  })
+
+  test("allows scoped shortcuts to opt into global fallback routing", async () => {
+    const hits: string[] = []
+    const ui = await render(<GlobalShortcutHarness onHit={(value) => hits.push(value)} />)
+
+    await settleDeferredRender(ui)
+
+    await act(async () => {
+      ui.mockInput.pressKey("n", { ctrl: true })
+      await ui.renderOnce()
+    })
+
+    expect(hits).toEqual(["global"])
+  })
+
+  test("useNavKeys wires arrows, vim aliases, activate, and escape", async () => {
+    const hits: string[] = []
+    const ui = await render(<NavKeysHarness onHit={(value) => hits.push(value)} />)
+
+    await settleDeferredRender(ui)
+
+    await act(async () => {
+      ui.mockInput.pressArrow("up")
+      await ui.renderOnce()
+      ui.mockInput.pressKey("j")
+      await ui.renderOnce()
+      ui.mockInput.pressKey("h")
+      await ui.renderOnce()
+      ui.mockInput.pressKey("l")
+      await ui.renderOnce()
+      ui.mockInput.pressEnter()
+      await ui.renderOnce()
+      ui.mockInput.pressKey(" ")
+      await ui.renderOnce()
+    })
+
+    await dispatchInput(ui, () => ui.mockInput.pressEscape())
+
+    expect(hits).toEqual(["up", "down", "left", "right", "activate", "activate", "esc"])
+  })
+
+  test("translateNavKey expands modifiers through nav aliases", () => {
+    expect(translateNavKey("up")).toEqual({ or: ["up", "k"] })
+    expect(translateNavKey("ctrl+up")).toEqual({ or: ["ctrl+up", "ctrl+k"] })
+    expect(translateNavKey("activate")).toEqual({ or: ["space", "return"] })
+  })
+
+  test("useNavKeys routes modifier aliases through the same nav handler", async () => {
+    const hits: string[] = []
+    const ui = await render(<NavKeysHarness onHit={(value) => hits.push(value)} />)
+
+    await settleDeferredRender(ui)
+
+    await act(async () => {
+      ui.mockInput.pressArrow("up", { ctrl: true })
+      await ui.renderOnce()
+      ui.mockInput.pressKey("k", { ctrl: true })
+      await ui.renderOnce()
+    })
+
+    expect(hits).toEqual(["ctrl+up", "ctrl+up"])
+  })
+
+  test("useNavKeys can suppress selected aliases", async () => {
+    const hits: string[] = []
+    const ui = await render(<NavKeysHarness onHit={(value) => hits.push(value)} prevent={["h", "ctrl+k"]} />)
+
+    await settleDeferredRender(ui)
+
+    await act(async () => {
+      ui.mockInput.pressKey("h")
+      await ui.renderOnce()
+      ui.mockInput.pressKey("j")
+      await ui.renderOnce()
+      ui.mockInput.pressKey("k", { ctrl: true })
+      await ui.renderOnce()
+      ui.mockInput.pressArrow("up", { ctrl: true })
+      await ui.renderOnce()
+      ui.mockInput.pressKey("l")
+      await ui.renderOnce()
+      ui.mockInput.pressArrow("left")
+      await ui.renderOnce()
+      ui.mockInput.pressArrow("right")
+      await ui.renderOnce()
+    })
+
+    expect(hits).toEqual(["down", "ctrl+up", "right", "left", "right"])
+  })
+
   test("matches canonical shortcut key names against OpenTUI event names", () => {
     const step = parseKeys("esc")[0]!
     const key = { name: "escape", ctrl: false, shift: false, meta: false, option: false } as KeyEvent
@@ -111,6 +281,13 @@ describe("Shortcut", () => {
 
     expect(step.name).toBe("plus")
     expect(normalizeShortcutKeyName(step.name)).toBe("+")
+    expect(stepMatches(step, key)).toBe(true)
+  })
+
+  test("matches collapsed ctrl punctuation events from terminals", () => {
+    const step = parseKeys("ctrl+,")[0]!
+    const key = { name: "\u001c", ctrl: false, shift: false, meta: false, option: false } as KeyEvent
+
     expect(stepMatches(step, key)).toBe(true)
   })
 
@@ -147,7 +324,7 @@ describe("Shortcut", () => {
   test("renders combined modifiers in macOS display order", async () => {
     const ui = await render(<Shortcut keys="ctrl+option+shift+f" enabled label="Format" />)
 
-    expect(ui.captureCharFrame()).toContain("^⌥⬆f Format")
+    expect(ui.captureCharFrame()).toContain("⌃⌥⇧f Format")
   })
 
   test("renders and dispatches command shortcuts via OpenTUI super", async () => {
@@ -168,10 +345,36 @@ describe("Shortcut", () => {
     expect(hits).toEqual(["format"])
   })
 
+  test("collapses ctrl and command alternatives for display by platform", () => {
+    expect(labelizeShortcutInput({ or: ["command+return", "ctrl+return"] }, "darwin")).toBe("⌘⮐")
+    expect(labelizeShortcutInput({ or: ["command+return", "ctrl+return"] }, "linux")).toBe("⌃⮐")
+    expect(labelizeShortcutInput({ or: ["option+home", "command+home", "ctrl+home"] }, "darwin")).toBe(
+      "⌥home / ⌘home",
+    )
+    expect(labelizeShortcutInput({ or: ["option+home", "command+home", "ctrl+home"] }, "linux")).toBe(
+      "⌥home / ⌃home",
+    )
+  })
+
+  test("renders platform-preferred ctrl and command alternatives once", async () => {
+    const ui = await render(<Shortcut keys={{ or: ["command+return", "ctrl+return"] }} enabled label="Execute" />, {
+      kittyKeyboard: true,
+    })
+
+    expect(ui.captureCharFrame()).toContain(`${process.platform === "darwin" ? "⌘⮐" : "⌃⮐"} Execute`)
+    expect(ui.captureCharFrame()).not.toContain(" / ")
+  })
+
+  test("renders return using the mac-style symbol", async () => {
+    const ui = await render(<Shortcut keys="return" enabled label="Save" />)
+
+    expect(ui.captureCharFrame()).toContain("⮐ Save")
+  })
+
   test("renders plus shortcuts using the plus symbol", async () => {
     const ui = await render(<Shortcut keys="ctrl+plus" enabled label="Zoom" />)
 
-    expect(ui.captureCharFrame()).toContain("^+ Zoom")
+    expect(ui.captureCharFrame()).toContain("⌃+ Zoom")
   })
 
   test("routes hjkl through focus navigation mode", async () => {

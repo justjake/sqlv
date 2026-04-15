@@ -1,7 +1,13 @@
+import type { Renderable } from "@opentui/core"
 import { useTheme } from "../ui/theme"
 import { useIsFocusNavigationActive, useIsHighlighted } from "./context"
 
-export function FocusHalo() {
+export type FocusHaloProps = {
+  baseZIndex?: number
+  renderable?: Renderable | null
+}
+
+export function FocusHalo(props: FocusHaloProps) {
   const theme = useTheme()
   const active = useIsFocusNavigationActive()
   const highlighted = useIsHighlighted()
@@ -12,14 +18,13 @@ export function FocusHalo() {
 
   return (
     <box
-      border
-      borderColor={theme.focusNavBorder}
+      backgroundColor={theme.focusNavHaloBg}
       bottom={0}
       left={0}
       position="absolute"
       right={0}
       top={0}
-      zIndex={1}
+      zIndex={Math.max((props.renderable?.zIndex ?? props.baseZIndex ?? 0) + 1, 1)}
     />
   )
 }

@@ -24,7 +24,7 @@ export type SecretStore = {
   delete: (args: SecretRef) => Promise<boolean>
 }
 
-export type PersistenceStore = Pick<Persist, "connections" | "log" | "savedQueries">
+export type PersistenceStore = Pick<Persist, "connections" | "log" | "savedQueries" | "settings">
 
 export type LocalPersistence = {
   session: Session

@@ -1,6 +1,7 @@
 import type { BoxRenderable, MouseEvent, Renderable, ScrollBoxRenderable } from "@opentui/core"
 import { useInsertionEffect, useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from "react"
 import { focusPath, type FocusApplyContext, type FocusPath, type FocusableRegistration } from "../../lib/focus"
+import { FocusHalo } from "./FocusHalo"
 import { FocusPathProvider, useFocusParentPath, useFocusTree } from "./context"
 import { focusableRenderableId, renderableViewportRect, scrollViewportRect } from "./utils"
 
@@ -34,6 +35,7 @@ export type FocusableProps = Omit<BoxProps, "children" | "id" | "onMouseDown" | 
   revealDescendant?: FocusableRegistration["revealDescendant"]
   captureSnapshot?: FocusableRegistration["captureSnapshot"]
   restoreSnapshot?: FocusableRegistration["restoreSnapshot"]
+  hideNavigationHalo?: boolean
 }
 
 export function Focusable(props: FocusableProps) {
@@ -48,6 +50,7 @@ export function Focusable(props: FocusableProps) {
     focusSelf,
     focusable,
     focusableId,
+    hideNavigationHalo,
     navigable,
     onMouseDown,
     onTrapEsc,
@@ -80,6 +83,7 @@ export function Focusable(props: FocusableProps) {
   scrollTargetRef.current = scrollRef
   onTrapEscRef.current = onTrapEsc
   focusSelfRef.current = focusSelf
+  const showNavigationHalo = !hideNavigationHalo && ((focusable ?? false) || navigable === true)
 
   function buildRegistration(): FocusableRegistration {
     const resolvedApplyFocus = applyFocusRef.current
@@ -115,8 +119,7 @@ export function Focusable(props: FocusableProps) {
         const reveal = revealDescendantRef.current ?? makeScrollReveal(scrollTargetRef.current)
         reveal?.(descendantPath, options)
       },
-      captureSnapshot: () =>
-        (captureSnapshotRef.current ?? makeScrollSnapshotCapture(scrollTargetRef.current))?.(),
+      captureSnapshot: () => (captureSnapshotRef.current ?? makeScrollSnapshotCapture(scrollTargetRef.current))?.(),
       restoreSnapshot: (snapshot) =>
         (restoreSnapshotRef.current ?? makeScrollSnapshotRestore(scrollTargetRef.current))?.(snapshot),
     }
@@ -132,17 +135,7 @@ export function Focusable(props: FocusableProps) {
 
   useLayoutEffect(() => {
     tree.updateFocusable(path, buildRegistration())
-  }, [
-    childrenNavigable,
-    delegatesFocus,
-    disabled,
-    focusable,
-    navigable,
-    path,
-    trap,
-    trapEscLabel,
-    tree,
-  ])
+  }, [childrenNavigable, delegatesFocus, disabled, focusable, navigable, path, trap, trapEscLabel, tree])
 
   useLayoutEffect(() => {
     if (!autoFocus) {
@@ -165,6 +158,12 @@ export function Focusable(props: FocusableProps) {
         ref={wrapperRef}
       >
         {children}
+        {showNavigationHalo && (
+          <FocusHalo
+            baseZIndex={typeof boxProps.zIndex === "number" ? boxProps.zIndex : undefined}
+            renderable={renderableRef?.current ?? wrapperRef.current}
+          />
+        )}
       </box>
     </FocusPathProvider>
   )

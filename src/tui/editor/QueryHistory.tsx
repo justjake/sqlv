@@ -5,7 +5,6 @@ import type { QueryExecution } from "../../index"
 import type { Connection } from "../../lib/types/Connection"
 import type { SavedQuery } from "../../lib/types/SavedQuery"
 import {
-  FocusHalo,
   Focusable,
   useFocusedDescendantPath,
   useFocusTree,
@@ -84,10 +83,12 @@ export function QueryHistory(props: QueryHistoryProps) {
   )
 }
 
-function QueryHistoryBody(props: QueryHistoryProps & {
-  filterInputRef: RefObject<InputRenderable | null>
-  scrollRef: RefObject<ScrollBoxRenderable | null>
-}) {
+function QueryHistoryBody(
+  props: QueryHistoryProps & {
+    filterInputRef: RefObject<InputRenderable | null>
+    scrollRef: RefObject<ScrollBoxRenderable | null>
+  },
+) {
   const {
     connections,
     entries,
@@ -112,12 +113,13 @@ function QueryHistoryBody(props: QueryHistoryProps & {
     [entries, showSystemQueries],
   )
   const filteredEntries = useMemo(
-    () => filterQueryFinderEntries({
-      connections,
-      entries: visibleEntries,
-      filterText,
-      savedQueries,
-    }),
+    () =>
+      filterQueryFinderEntries({
+        connections,
+        entries: visibleEntries,
+        filterText,
+        savedQueries,
+      }),
     [connections, filterText, savedQueries, visibleEntries],
   )
   const totalVisibleItemCount = visibleEntries.length + savedQueries.length
@@ -188,7 +190,11 @@ function QueryHistoryBody(props: QueryHistoryProps & {
         width: { grow: 2 },
         Cell: ({ row }) => (
           <Text fg={theme.mutedFg} wrapMode="none" truncate>
-            {row.kind === "saved" ? (row.lastExecution ? formatTime(row.lastExecution.createdAt) : "") : row.connectionName}
+            {row.kind === "saved"
+              ? row.lastExecution
+                ? formatTime(row.lastExecution.createdAt)
+                : ""
+              : row.connectionName}
           </Text>
         ),
       },
@@ -215,13 +221,13 @@ function QueryHistoryBody(props: QueryHistoryProps & {
       <box flexDirection="row" flexShrink={0} flexWrap="wrap" gap={1}>
         <Shortcut keys="ctrl+r" label="Back" enabled={shortcutsEnabled} onKey={onBack} />
         <Shortcut
-          keys={["up", "k"]}
+          keys={{ or: ["up", "k"] }}
           label="Prev"
           enabled={shortcutsEnabled && filteredEntries.length > 0}
           onKey={() => focusRow(Math.max(0, currentIndex - 1))}
         />
         <Shortcut
-          keys={["down", "j"]}
+          keys={{ or: ["down", "j"] }}
           label="Next"
           enabled={shortcutsEnabled && filteredEntries.length > 0}
           onKey={() => focusRow(Math.min(filteredEntries.length - 1, currentIndex + 1))}
@@ -269,12 +275,7 @@ function QueryHistoryBody(props: QueryHistoryProps & {
           </box>
         </box>
       </Focusable>
-      <Focusable
-        focusableId={QUERY_HISTORY_RESULTS_AREA_ID}
-        flexDirection="column"
-        flexGrow={1}
-        scrollRef={scrollRef}
-      >
+      <Focusable focusableId={QUERY_HISTORY_RESULTS_AREA_ID} flexDirection="column" flexGrow={1} scrollRef={scrollRef}>
         <scrollbox ref={scrollRef} flexGrow={1} contentOptions={{ flexDirection: "column" }}>
           {totalVisibleItemCount === 0 && (
             <box paddingLeft={1} paddingRight={1}>
@@ -295,12 +296,13 @@ function QueryHistoryBody(props: QueryHistoryProps & {
               getRowFocusableId={(row) => entryFocusId(row.id)}
               isRowDimmed={(row) => row.kind === "history" && row.entry.initiator === "system"}
               isRowFocused={(row) => sameFocusPath(historyEntryPath(row.id), focusedDescendantPath)}
-              isRowSelected={(row) => !focusedWithin && sameFocusPath(historyEntryPath(row.id), rememberedDescendantPath)}
+              isRowSelected={(row) =>
+                !focusedWithin && sameFocusPath(historyEntryPath(row.id), rememberedDescendantPath)
+              }
             />
           )}
         </scrollbox>
       </Focusable>
-      <FocusHalo />
     </box>
   )
 }
@@ -419,17 +421,12 @@ function filterQueryFinderEntries(args: {
     } satisfies SavedQueryMatch)
   }
 
-  return [...historyMatches, ...savedMatches]
-    .sort((a, b) => {
-      if (tokens.length === 0) {
-        return (a.kind === "history" ? 0 : 1) - (b.kind === "history" ? 0 : 1) || a.index - b.index
-      }
-      return (
-        b.score - a.score ||
-        (a.kind === "saved" ? 0 : 1) - (b.kind === "saved" ? 0 : 1) ||
-        a.index - b.index
-      )
-    })
+  return [...historyMatches, ...savedMatches].sort((a, b) => {
+    if (tokens.length === 0) {
+      return (a.kind === "history" ? 0 : 1) - (b.kind === "history" ? 0 : 1) || a.index - b.index
+    }
+    return b.score - a.score || (a.kind === "saved" ? 0 : 1) - (b.kind === "saved" ? 0 : 1) || a.index - b.index
+  })
 }
 
 function finderItemId(kind: QueryFinderMatch["kind"], id: string): string {

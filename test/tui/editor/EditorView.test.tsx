@@ -64,7 +64,7 @@ describe("EditorView", () => {
     await act(async () => {
       await ui.mockInput.typeText("select 1")
       await ui.renderOnce()
-      ui.mockInput.pressKey("x", { ctrl: true })
+      ui.mockInput.pressEnter({ ctrl: true })
       await ui.renderOnce()
       ui.mockInput.pressKey("d", { ctrl: true })
       await ui.renderOnce()
@@ -81,6 +81,42 @@ describe("EditorView", () => {
     expect(executions).toEqual(["select 1"])
     expect(historyCount).toBe(1)
     expect(saveAsNewCount).toBe(0)
+  })
+
+  test("executes from the editor with command+return", async () => {
+    const executions: string[] = []
+    const ui = await render(
+      <EditorView
+        autoFocus
+        editor={createEditorState({
+          cursorOffset: "select 1".length,
+          text: "select 1",
+        })}
+        onExecute={(sql: string) => executions.push(sql)}
+      />,
+      { height: 12, kittyKeyboard: true, width: 80 },
+    )
+
+    await act(async () => {
+      ui.mockInput.pressEnter({ super: true })
+      await ui.renderOnce()
+    })
+
+    expect(executions).toEqual(["select 1"])
+  })
+
+  test("does not render an add-connection shortcut in the editor toolbar", async () => {
+    const ui = await render(
+      <EditorView
+        autoFocus
+        editor={createEditorState({
+          text: "select 1",
+        })}
+      />,
+      { height: 12, width: 80 },
+    )
+
+    expect(ui.captureCharFrame()).not.toContain("Add Conn")
   })
 
   test("formats the editor query with option+f", async () => {
