@@ -1,0 +1,59 @@
+   ~/src/opentui                       │   1   import { basename, dirname, join } from "node:path"
+    .git                              │   2   import { fileURLToPath } from "node:url"
+    .github                           │   3   import { defineConfig } from "vitest/config"
+    node_modules                     │   4
+    packages                          │   5   export default defineConfig({
+      core                            │   6   │ resolve: {
+      react                           │   7   │ │ alias: {
+    │   dist                         │   8   │ │ │ "bun:test": fileURLToPath(new URL("../core/src/compat/test.ts", import.meta.url)),
+    │   dist-test                     │   9   │ │ },
+    │   docs                          │  10   │ },
+    │   examples                      │  11   │ test: {
+    │   node_modules                 │  12   │ │ environment: "node",
+    │   scripts                       │  13   │ │ resolveSnapshotPath: (testPath, ext) =>
+    │   src                           │  14   │ │ │ join(dirname(testPath), "__snapshots__", `${basename(testPath)}.nodejs${ext}`),
+    │ │   components                  │  15   │ │ exclude: ["node_modules/**", "dist-test/**"],
+    │ │   hooks                       │  16   │ },
+    │ │   plugins                     │  17   })
+    │ │   reconciler                  │
+    │ │   types                       │
+    │ │   utils                       │
+    │ │ │ 󰆼 example.sql                │
+    │ │ │ 󰛦 index.ts                    │
+    │ │ │ 󰛦 test-utils.ts               │
+    │ │ └  time-to-first-draw.tsx      │
+    │   tests                         │
+    │ │  README.md                     │
+    │ │  bunfig.toml                   │
+    │ │ 󰛦 jsx-dev-runtime.d.ts          │
+    │ │ 󰌞 jsx-dev-runtime.js            │
+    │ │ 󰛦 jsx-namespace.d.ts            │
+    │ │ 󰛦 jsx-runtime.d.ts              │
+    │ │ 󰌞 jsx-runtime.js                │
+    │ │ 󰘦 package.json                  │
+    │ │ 󰘦 tsconfig.build.json           │
+    │ │ 󰘦 tsconfig.json                 │
+    │ └ 󰛦 vitest.config.ts              │
+      solid                           │
+      web                             │
+        node_modules                 │
+        public                        │
+        scripts                       │
+        src                           │
+      │ 󰊢 .gitignore                    │
+      │ 󰌞 astro.config.mjs              │
+      │ 󰘦 package.json                  │
+      └ 󰘦 tsconfig.json                 │
+    scripts                           │
+     .editorconfig                     │
+    󰊢 .gitignore                        │
+    󰘦 .oxfmtrc.json                     │
+    󰘦 .oxlintrc.json                    │
+    * .zig-version                      │
+    󰍔 AGENTS.md                         │
+    󰺾 CONTRIBUTING.md                   │
+     LICENSE                           │
+    󰍔 NODEJS_COMPAT.md                  │
+     README.md                         │
+    󰘦 bun.lock                          │
+ NORMAL   justjake--node-compat-static  󱉭  react  󰛦  packages/react/vitest.config.ts                                                                                             5   39  Bot  17:2    00:11
