@@ -4,6 +4,7 @@ import { useTheme } from "../ui/theme"
 import { useFormFieldContext } from "./context"
 
 export type TextInputProps = {
+  disabled?: boolean
   inputRef?: RefObject<InputRenderable | null>
   onInput: (value: string) => void
   placeholder?: string
@@ -14,20 +15,21 @@ export function TextInput(props: TextInputProps) {
   const theme = useTheme()
   const { active, inputFocused } = useFormFieldContext()
   const backgroundColor = active ? theme.formFieldBackgroundActive : theme.formFieldBackground
+  const editable = !props.disabled
 
   return (
     <box alignSelf="stretch" backgroundColor={backgroundColor} flexDirection="row" minWidth={0} width="100%">
       <input
         cursorColor={theme.primaryFg}
         flexGrow={1}
-        focused={inputFocused}
+        focused={editable && inputFocused}
         focusedTextColor={theme.primaryFg}
         minWidth={0}
-        onInput={props.onInput}
+        onInput={editable ? props.onInput : undefined}
         placeholder={props.placeholder}
         placeholderColor={theme.mutedFg}
         ref={props.inputRef}
-        textColor={theme.primaryFg}
+        textColor={editable ? theme.primaryFg : theme.mutedFg}
         value={props.value}
       />
     </box>

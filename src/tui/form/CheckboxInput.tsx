@@ -7,6 +7,7 @@ import { useFormFieldContext } from "./context"
 export type CheckboxInputProps = {
   checked: boolean
   checkedLabel?: ReactNode
+  disabled?: boolean
   hint?: ReactNode
   onChange?: (value: boolean) => void
   uncheckedLabel?: ReactNode
@@ -16,9 +17,12 @@ export function CheckboxInput(props: CheckboxInputProps) {
   const theme = useTheme()
   const { active, inputFocused } = useFormFieldContext()
   const backgroundColor = active ? theme.formFieldBackgroundActive : theme.formFieldBackground
+  const interactive = !props.disabled && !!props.onChange
+  const indicatorColor = props.disabled ? theme.mutedFg : active ? theme.focusPrimaryFg : undefined
+  const labelColor = props.disabled ? theme.mutedFg : undefined
 
   useKeybindHandler({
-    enabled: inputFocused && !!props.onChange,
+    enabled: inputFocused && interactive,
     keys: { or: ["space", "return"] },
     onKey(event) {
       event.preventDefault()
@@ -34,16 +38,16 @@ export function CheckboxInput(props: CheckboxInputProps) {
       flexDirection="row"
       gap={1}
       minWidth={0}
-      onMouseUp={props.onChange ? () => props.onChange?.(!props.checked) : undefined}
+      onMouseUp={interactive ? () => props.onChange?.(!props.checked) : undefined}
       width="100%"
     >
-      <Text fg={active ? theme.focusPrimaryFg : undefined} wrapMode="none">
+      <Text fg={indicatorColor} wrapMode="none">
         {props.checked ? "◉" : "○"}
       </Text>
-      <Text flexGrow={1} flexShrink={1} truncate wrapMode="none">
+      <Text fg={labelColor} flexGrow={1} flexShrink={1} truncate wrapMode="none">
         {props.checked ? (props.checkedLabel ?? "Enabled") : (props.uncheckedLabel ?? "Disabled")}
       </Text>
-      {inputFocused && props.hint ? <Text fg={theme.mutedFg}>{props.hint}</Text> : null}
+      {inputFocused && interactive && props.hint ? <Text fg={theme.mutedFg}>{props.hint}</Text> : null}
     </box>
   )
 }

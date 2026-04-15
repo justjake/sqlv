@@ -87,6 +87,8 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
   const uri = draft.uri
   const adapter = protocol ? adapters.find((candidate) => candidate.protocol === protocol) : undefined
   const spec = adapter?.getConnectionSpec()
+  const protocolLocked =
+    !!initialSuggestion && adapters.some((candidate) => candidate.protocol === initialSuggestion.protocol)
   const uriEnabled = hasURIHelpers(spec)
   const visibleFields = spec?.fields.filter((field) => field.visible?.(values) ?? true) ?? []
   const focusFields: FocusField[] =
@@ -287,6 +289,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
         onSetStringField={updateStringField}
         onSetBooleanField={updateBooleanField}
         protocol={protocol}
+        protocolDisabled={protocolLocked}
         saving={saving}
         scrollRef={scrollRef}
         spec={spec}
@@ -311,6 +314,7 @@ function AddConnectionPaneBody(props: {
   onSetStringField: (key: string, value: string) => void
   onSetBooleanField: (key: string, value: boolean) => void
   protocol: Protocol | undefined
+  protocolDisabled: boolean
   saving: boolean
   scrollRef: RefObject<ScrollBoxRenderable | null>
   spec: ConnectionSpec<any> | undefined
@@ -331,6 +335,7 @@ function AddConnectionPaneBody(props: {
     onSetURI,
     onSetStringField,
     protocol,
+    protocolDisabled,
     saving,
     scrollRef,
     spec,
@@ -383,6 +388,7 @@ function AddConnectionPaneBody(props: {
         onNext={navigateNext}
         onPrev={navigatePrev}
         protocol={protocol}
+        disabled={protocolDisabled}
         remembered={!focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath("protocol"))}
       />
 
@@ -478,6 +484,7 @@ function AddConnectionPaneBody(props: {
 function ProtocolPickerField(
   props: FieldNavProps & {
     adapters: AdapterWithConnectionSpec[]
+    disabled?: boolean
     onChange: (value: Protocol) => void
     protocol: Protocol | undefined
   },
@@ -492,11 +499,12 @@ function ProtocolPickerField(
 function ProtocolPickerBody(
   props: FieldNavProps & {
     adapters: AdapterWithConnectionSpec[]
+    disabled?: boolean
     onChange: (value: Protocol) => void
     protocol: Protocol | undefined
   },
 ) {
-  const { onPrev, onNext, adapters, onChange, protocol, remembered } = props
+  const { onPrev, onNext, adapters, disabled, onChange, protocol, remembered } = props
   const focused = useIsFocused()
   const highlighted = useIsHighlighted()
   const navigationActive = useIsFocusNavigationActive()
@@ -518,6 +526,7 @@ function ProtocolPickerBody(
       name="Protocol"
     >
       <RadioSelectRowInput
+        disabled={disabled}
         hint={CYCLE_HINT_LABEL}
         onChange={onChange}
         options={adapters.map((adapter) => ({

@@ -46,4 +46,22 @@ describe("CheckboxInput", () => {
 
     expect(values).toEqual([true])
   })
+
+  test("does not toggle while disabled", async () => {
+    const values: boolean[] = []
+    const ui = await render(
+      <FormLabel active inputFocused name="Readonly">
+        <CheckboxInput checked={false} disabled hint="space toggle" onChange={(value) => values.push(value)} />
+      </FormLabel>,
+      { height: 6, width: 40 },
+    )
+
+    await act(async () => {
+      ui.mockInput.pressKey(" ")
+      await ui.renderOnce()
+    })
+
+    expect(values).toEqual([])
+    expect(ui.captureCharFrame()).not.toContain("space toggle")
+  })
 })

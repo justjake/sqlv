@@ -105,8 +105,9 @@ function SettingsPaneBody(props: {
         name="Icon style"
       >
         <RadioSelectRowInput
+          disabled={props.saving}
           hint={ICON_STYLE_HINT}
-          onChange={props.saving ? undefined : props.onSetIconStyle}
+          onChange={props.onSetIconStyle}
           options={props.iconStyleOptions}
           value={props.iconStyle}
         />

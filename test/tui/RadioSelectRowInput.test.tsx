@@ -77,6 +77,39 @@ describe("RadioSelectRowInput", () => {
     expect(ui.captureCharFrame()).toContain("○ turso")
   })
 
+  test("does not cycle while disabled", async () => {
+    function Harness() {
+      const [value, setValue] = useState<"bunsqlite" | "turso">("bunsqlite")
+
+      return (
+        <FormLabel active inputFocused name="Protocol">
+          <RadioSelectRowInput
+            disabled
+            hint="← ⟶ cycle"
+            onChange={setValue}
+            options={[
+              { key: "bunsqlite", label: "bunsqlite", value: "bunsqlite" },
+              { key: "turso", label: "turso", value: "turso" },
+            ]}
+            value={value}
+          />
+        </FormLabel>
+      )
+    }
+
+    const ui = await render(<Harness />, { height: 6, width: 50 })
+
+    await act(async () => {
+      ui.mockInput.pressArrow("right")
+      await ui.renderOnce()
+    })
+    await settleDeferredRender(ui)
+
+    expect(ui.captureCharFrame()).toContain("◉ bunsqlite")
+    expect(ui.captureCharFrame()).toContain("○ turso")
+    expect(ui.captureCharFrame()).not.toContain("← ⟶ cycle")
+  })
+
   test("resets the prev next anchor to the first option when the remembered key is removed", async () => {
     let removeSelectedOption: (() => void) | undefined
 

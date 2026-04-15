@@ -13,6 +13,7 @@ export type RadioSelectRowOption<Value extends string = string> = {
 }
 
 export type RadioSelectRowInputProps<Value extends string = string> = {
+  disabled?: boolean
   hint?: ReactNode
   onChange?: (value: Value) => void
   options: readonly RadioSelectRowOption<Value>[]
@@ -23,6 +24,7 @@ export function RadioSelectRowInput<Value extends string>(props: RadioSelectRowI
   const theme = useTheme()
   const { active, inputFocused } = useFormFieldContext()
   const backgroundColor = active ? theme.formFieldBackgroundActive : theme.formFieldBackground
+  const interactive = !props.disabled && !!props.onChange && props.options.length > 0
   const [lastSelectedKey, setLastSelectedKey] = useState<RadioSelectRowOptionKey | undefined>(() =>
     resolveSelectedOptionKey(props.options, props.value, undefined) ?? props.options[0]?.key,
   )
@@ -60,7 +62,7 @@ export function RadioSelectRowInput<Value extends string>(props: RadioSelectRowI
   }, [lastSelectedKey, props.options])
 
   useKeybindHandler({
-    enabled: inputFocused && !!props.onChange && props.options.length > 0,
+    enabled: inputFocused && interactive,
     detect(event) {
       return event.name === "left" || event.name === "right" || event.name === "enter" || event.name === "return"
     },
@@ -99,19 +101,24 @@ export function RadioSelectRowInput<Value extends string>(props: RadioSelectRowI
               flexShrink={1}
               gap={1}
               minWidth={0}
-              onMouseUp={props.onChange ? () => handleSelectOption(option) : undefined}
+              onMouseUp={interactive ? () => handleSelectOption(option) : undefined}
             >
-              <Text fg={selected ? theme.focusPrimaryFg : theme.mutedFg} wrapMode="none">
+              <Text
+                fg={
+                  props.disabled ? theme.mutedFg : selected ? theme.focusPrimaryFg : theme.mutedFg
+                }
+                wrapMode="none"
+              >
                 {selected ? "◉" : "○"}
               </Text>
               <box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-                {renderOptionLabel(option.label)}
+                {renderOptionLabel(option.label, props.disabled ? theme.mutedFg : undefined)}
               </box>
             </box>
           )
         })}
       </box>
-      {inputFocused && props.hint ? <Text fg={theme.mutedFg}>{props.hint}</Text> : null}
+      {inputFocused && interactive && props.hint ? <Text fg={theme.mutedFg}>{props.hint}</Text> : null}
     </box>
   )
 }
@@ -150,10 +157,10 @@ function stepRadioSelectOption<Value extends string>(
   return options[(currentIndex + step + options.length) % options.length]
 }
 
-function renderOptionLabel(label: ReactNode) {
+function renderOptionLabel(label: ReactNode, textColor?: string) {
   if (typeof label === "string" || typeof label === "number") {
     return (
-      <Text flexShrink={1} truncate wrapMode="none">
+      <Text fg={textColor} flexShrink={1} truncate wrapMode="none">
         {label}
       </Text>
     )

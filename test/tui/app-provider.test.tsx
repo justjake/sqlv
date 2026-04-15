@@ -1474,6 +1474,25 @@ describe("SqlVisor provider and app", () => {
     expect(frame).toContain("Host")
     expect(frame).toContain("postgres")
     expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
+
+    await act(async () => {
+      ui.mockInput.pressTab({ shift: true })
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+    await settleRenderedUi(ui, { renders: 2 })
+
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "protocol"]) ?? "")
+
+    await act(async () => {
+      ui.mockInput.pressArrow("left")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+    await settleRenderedUi(ui, { renders: 2 })
+
+    expect(ui.captureCharFrame()).toContain("◉ postgresql")
+    expect(ui.captureCharFrame()).not.toContain("◉ bunsqlite")
   })
 
   test("syncs URI input with adapter fields when a connection spec provides URI helpers", async () => {
