@@ -271,4 +271,92 @@ describe("FocusTree", () => {
       highlightedPath: ["table", "cell-0"],
     })
   })
+
+  test("resolves nested delegated descendants for ordinary focus requests", () => {
+    const tree = new FocusTree()
+
+    tree.registerNode({
+      id: "sidebar",
+      focusable: true,
+      delegatesFocus: true,
+      parentPath: ROOT_FOCUS_PATH,
+      applyFocus: () => undefined,
+      getViewportRect: () => ({ x: 0, y: 0, width: 20, height: 10 }),
+    })
+    tree.registerNode({
+      id: "tree",
+      focusable: true,
+      delegatesFocus: true,
+      parentPath: ["sidebar"],
+      applyFocus: () => undefined,
+      getViewportRect: () => ({ x: 0, y: 1, width: 20, height: 9 }),
+    })
+    tree.registerNode({
+      id: "row-0",
+      focusable: true,
+      navigable: false,
+      parentPath: ["sidebar", "tree"],
+      getViewportRect: () => ({ x: 0, y: 1, width: 20, height: 1 }),
+    })
+
+    expect(tree.focusPath(["sidebar"])).toBe(true)
+    expect(tree.getNavigationState()).toMatchObject({
+      active: false,
+      focusedPath: ["sidebar", "tree", "row-0"],
+      highlightedPath: ["sidebar", "tree", "row-0"],
+    })
+  })
+
+  test("activating a highlighted delegated focusable resolves to its nested descendant", () => {
+    const tree = new FocusTree()
+
+    tree.registerNode({
+      id: "sidebar",
+      focusable: true,
+      delegatesFocus: true,
+      parentPath: ROOT_FOCUS_PATH,
+      applyFocus: () => undefined,
+      getViewportRect: () => ({ x: 0, y: 0, width: 20, height: 10 }),
+    })
+    tree.registerNode({
+      id: "tree",
+      focusable: true,
+      delegatesFocus: true,
+      parentPath: ["sidebar"],
+      applyFocus: () => undefined,
+      getViewportRect: () => ({ x: 0, y: 1, width: 20, height: 9 }),
+    })
+    tree.registerNode({
+      id: "row-0",
+      focusable: true,
+      navigable: false,
+      parentPath: ["sidebar", "tree"],
+      getViewportRect: () => ({ x: 0, y: 1, width: 20, height: 1 }),
+    })
+    tree.registerNode({
+      id: "editor",
+      focusable: true,
+      parentPath: ROOT_FOCUS_PATH,
+      applyFocus: () => undefined,
+      getViewportRect: () => ({ x: 30, y: 0, width: 40, height: 10 }),
+    })
+
+    tree.setFocusedPath(["editor"])
+    tree.startFocusNavigation()
+    tree.moveFocusNavigation("left")
+
+    expect(tree.getNavigationState()).toMatchObject({
+      active: true,
+      focusedPath: ["editor"],
+      highlightedPath: ["sidebar"],
+    })
+
+    tree.activateHighlightedFocusable()
+
+    expect(tree.getNavigationState()).toMatchObject({
+      active: false,
+      focusedPath: ["sidebar", "tree", "row-0"],
+      highlightedPath: ["sidebar", "tree", "row-0"],
+    })
+  })
 })

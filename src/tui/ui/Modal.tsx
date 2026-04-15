@@ -1,13 +1,12 @@
-import { RGBA } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import { useKeybindHandler } from "./keybind"
+import { DEFAULT_MODAL_Z_INDEX, resolveModalViewportBounds } from "./modalShared"
 import { useIsFocusNavigationActive } from "../focus"
 import { Text } from "./Text"
 import { useTheme } from "./theme"
 
 const ModalBottomRightContext = createContext<((node: ReactNode | undefined) => void) | null>(null)
-const MODAL_EDGE_MARGIN = 3
 
 export type ModalProps = {
   children: ReactNode
@@ -40,10 +39,10 @@ export function Modal(props: ModalProps) {
   const { width: terminalWidth, height: terminalHeight } = useTerminalDimensions()
   const theme = useTheme()
   const [slottedBottomRight, setSlottedBottomRight] = useState<ReactNode>()
-  const horizontalMargin = Math.min(MODAL_EDGE_MARGIN, Math.max(0, Math.floor((terminalWidth - 1) / 2)))
-  const verticalMargin = Math.min(MODAL_EDGE_MARGIN, Math.max(0, Math.floor((terminalHeight - 1) / 2)))
-  const maxPanelWidth = Math.max(1, terminalWidth - horizontalMargin * 2)
-  const maxPanelHeight = Math.max(1, terminalHeight - verticalMargin * 2)
+  const { horizontalMargin, maxPanelHeight, maxPanelWidth, verticalMargin } = resolveModalViewportBounds(
+    terminalWidth,
+    terminalHeight,
+  )
   const panelWidth = props.width ?? (props.size === "large" ? 80 : 60)
   const resolvedWidth = Math.max(1, Math.min(panelWidth, maxPanelWidth))
   const resolvedHeight = props.height === undefined ? undefined : Math.max(1, Math.min(props.height, maxPanelHeight))
@@ -65,7 +64,7 @@ export function Modal(props: ModalProps) {
   return (
     <box
       alignItems="center"
-      backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
+      backgroundColor={theme.modalBackdropBg}
       flexDirection="column"
       height={terminalHeight}
       justifyContent="center"
@@ -78,11 +77,11 @@ export function Modal(props: ModalProps) {
       position="absolute"
       top={0}
       width={terminalWidth}
-      zIndex={props.zIndex ?? 200}
+      zIndex={props.zIndex ?? DEFAULT_MODAL_Z_INDEX}
     >
       <ModalBottomRightContext value={setSlottedBottomRight}>
         <box
-          backgroundColor={theme.focusHintBg}
+          backgroundColor={theme.backgroundBg}
           flexDirection="column"
           height={resolvedHeight}
           onMouseDown={(event) => {

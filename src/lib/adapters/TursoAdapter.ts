@@ -1,15 +1,33 @@
 import * as turso from "@tursodatabase/database"
+import { stat } from "node:fs/promises"
 import { mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
-import { type Adapter, type ConnectionFormValues, type ConnectionSpec } from "../interface/Adapter"
+import {
+  type Adapter,
+  type ConnectionFormValues,
+  type ConnectionSpec,
+  type ConnectionSuggestion,
+} from "../interface/Adapter"
 import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "../interface/Executor"
+import {
+  defaultPersistLocation,
+  getExistingLocalEncryptionKey,
+} from "../createLocalPersistence"
+import { findLocalSqliteDatabaseFiles, localDatabaseSuggestionName } from "../connectionSuggestions"
 import { aborter } from "../types/defer"
 import type { ExplainInput, ExplainResult } from "../types/Explain"
 import type { ObjectInfo } from "../types/objects"
 import type { QueryRunner } from "../types/QueryRunner"
 import { ident, type SQL } from "../types/SQL"
 import type { SqliteArg } from "./sqlite"
-import { IterateSqliteSchema, explainSqliteQuery, parsePragmaDatabaseListRow, parseSqliteSchemaRow, PragmaDatabaseList } from "./sqlite"
+import {
+  createSqliteIndexOriginResolver,
+  IterateSqliteSchema,
+  explainSqliteQuery,
+  parsePragmaDatabaseListRow,
+  parseSqliteSchemaRow,
+  PragmaDatabaseList,
+} from "./sqlite"
 
 type connectArgs = Parameters<typeof turso.connect>
 type DatabaseOpts = NonNullable<connectArgs[1]>
@@ -34,6 +52,19 @@ export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatur
   readonly protocol = "turso"
   readonly treeSitterGrammar = "sql"
   readonly sqlFormatterLanguage = "sqlite"
+  #searchDirectory: string
+  #systemPath: string
+  #loadSystemKey: () => Promise<string | undefined>
+
+  constructor(args: {
+    searchDirectory?: string
+    systemPath?: string
+    loadSystemKey?: () => Promise<string | undefined>
+  } = {}) {
+    this.#searchDirectory = args.searchDirectory ?? process.cwd()
+    this.#systemPath = args.systemPath ?? defaultPersistLocation()
+    this.#loadSystemKey = args.loadSystemKey ?? (() => getExistingLocalEncryptionKey())
+  }
 
   describeConfig(config: TursoConfig): string {
     let desc = config.path
@@ -99,6 +130,19 @@ export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatur
         },
       ],
       label: "Turso SQLite",
+      configToValues(config) {
+        return {
+          encryptionCipher:
+            config.encryption && typeof config.encryption.cipher === "string" ? config.encryption.cipher : undefined,
+          encryptionEnabled: config.encryption !== undefined,
+          encryptionKey:
+            config.encryption && "hexkey" in config.encryption && typeof config.encryption.hexkey === "string"
+              ? config.encryption.hexkey
+              : undefined,
+          path: typeof config.path === "string" ? config.path : undefined,
+          readonly: booleanOrUndefined(config.readonly),
+        }
+      },
       createConfig(values) {
         const encryptionEnabled = booleanField(values, "encryptionEnabled", false)
         return {
@@ -132,11 +176,51 @@ export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatur
     }
   }
 
+  async findConnections(): Promise<Array<ConnectionSuggestion<TursoConfig>>> {
+    const files = await findLocalSqliteDatabaseFiles(this.#searchDirectory)
+    const suggestions: Array<ConnectionSuggestion<TursoConfig>> = files.map((path) => ({
+      name: localDatabaseSuggestionName(path),
+      config: {
+        path,
+      },
+    }))
+    const systemSuggestion = await this.#findSystemConnection()
+    if (systemSuggestion) {
+      suggestions.push(systemSuggestion)
+    }
+
+    return dedupeSuggestionsByPath(suggestions)
+  }
+
+  async #findSystemConnection(): Promise<ConnectionSuggestion<TursoConfig> | undefined> {
+    if (!(await pathExists(this.#systemPath))) {
+      return undefined
+    }
+
+    const hexkey = await this.#loadSystemKey()
+    if (!hexkey) {
+      return undefined
+    }
+
+    return {
+      name: localDatabaseSuggestionName(this.#systemPath),
+      config: {
+        encryption: {
+          cipher: "aegis256",
+          hexkey,
+        },
+        path: this.#systemPath,
+      },
+    }
+  }
+
   async fetchObjects(db: QueryRunner<TursoConfig>): Promise<ObjectInfo[]> {
     const databaseList = await db.query(PragmaDatabaseList)
     const databaseInfos = databaseList.map(parsePragmaDatabaseListRow)
     const result: ObjectInfo[] = [...databaseInfos]
     for (const namespace of databaseInfos) {
+      const getIndexOrigin = createSqliteIndexOriginResolver(db, namespace.name)
+
       for await (const rows of db.iterate(IterateSqliteSchema, {
         schemaTable: ident("sqlite_schema", {
           schema: namespace.name,
@@ -144,7 +228,12 @@ export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatur
         limit: 500,
         cursor: { type: "", name: "" },
       })) {
-        rows.forEach((r) => result.push(parseSqliteSchemaRow({ database: namespace.name, schema: undefined }, r)))
+        for (const row of rows) {
+          const indexOrigin =
+            row.type === "index" ? await getIndexOrigin(row.tbl_name, row.name) : undefined
+
+          result.push(parseSqliteSchemaRow({ database: namespace.name, schema: undefined }, row, { indexOrigin }))
+        }
       }
     }
     return result
@@ -224,6 +313,31 @@ function coerceEncryptionCipher(cipher: number): NativeTursoEncryptionOpts["ciph
   return cipher as unknown as NativeTursoEncryptionOpts["cipher"]
 }
 
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function dedupeSuggestionsByPath(
+  suggestions: Array<ConnectionSuggestion<TursoConfig>>,
+): Array<ConnectionSuggestion<TursoConfig>> {
+  const suggestionByPath = new Map<string, ConnectionSuggestion<TursoConfig>>()
+
+  for (const suggestion of suggestions) {
+    const path = typeof suggestion.config.path === "string" ? suggestion.config.path : undefined
+    if (!path) {
+      continue
+    }
+    suggestionByPath.set(path, suggestion)
+  }
+
+  return [...suggestionByPath.values()].toSorted((left, right) => left.name.localeCompare(right.name))
+}
+
 function booleanField(values: ConnectionFormValues, key: string, defaultValue: boolean): boolean {
   const value = values[key]
   return typeof value === "boolean" ? value : defaultValue
@@ -245,4 +359,8 @@ function cipherField(
   defaultValue: TursoCipherName,
 ): TursoEncryptionOpts["cipher"] {
   return stringField(values, key, defaultValue) as TursoEncryptionOpts["cipher"]
+}
+
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined
 }

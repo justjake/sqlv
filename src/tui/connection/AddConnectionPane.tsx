@@ -1,6 +1,7 @@
 import type { InputRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { sameFocusPath } from "../../lib/focus"
+import type { DiscoveredConnectionSuggestion } from "../../lib/SqlVisor"
 import type {
   AnyAdapter,
   ConnectionField,
@@ -29,15 +30,24 @@ import { useSqlVisor, useSqlVisorState } from "../useSqlVisor"
 
 type AddConnectionPaneProps = {
   onSaved: () => void
+  initialSuggestion?: DiscoveredConnectionSuggestion
 }
 
 type FocusField =
   | { kind: "protocol"; key: "protocol" }
   | { kind: "name"; key: "name" }
+  | { kind: "uri"; key: "uri" }
   | { kind: "field"; field: ConnectionField; key: string }
 
 type AdapterWithConnectionSpec = AnyAdapter & {
   getConnectionSpec: () => ConnectionSpec<any>
+}
+
+type AddConnectionDraft = {
+  protocol: Protocol | undefined
+  name: string
+  values: ConnectionFormValues
+  uri: string
 }
 
 type FieldNavProps = {
@@ -50,29 +60,34 @@ export const ADD_CONNECTION_AREA_ID = "add-connection"
 const CYCLE_HINT_LABEL = "← ⟶ cycle"
 
 export function AddConnectionPane(props: AddConnectionPaneProps) {
-  const { onSaved } = props
+  const { initialSuggestion, onSaved } = props
   const engine = useSqlVisor()
   const state = useSqlVisorState()
   const focusTree = useFocusTree()
   const adapters = engine.registry.list().filter(hasConnectionSpec)
-  const initialProtocol = pickInitialProtocol(adapters, state.selectedConnectionId, state.connections.data)
-  const initialSpec = initialProtocol
-    ? adapters.find((candidate) => candidate.protocol === initialProtocol)?.getConnectionSpec()
-    : undefined
-  const [protocol, setProtocol] = useState<Protocol | undefined>(initialProtocol)
-  const [name, setName] = useState("")
-  const [values, setValues] = useState<ConnectionFormValues>(() => (initialSpec ? defaultFieldValues(initialSpec) : {}))
-  const protocolRef = useRef<Protocol | undefined>(initialProtocol)
-  const nameRef = useRef("")
-  const valuesRef = useRef<ConnectionFormValues>(initialSpec ? defaultFieldValues(initialSpec) : {})
+  const {
+    name: initialName,
+    protocol: initialProtocol,
+    spec: initialSpec,
+    values: initialValues,
+  } = resolveInitialDraft(adapters, state.selectedConnectionId, state.connections.data, initialSuggestion)
+  const [draft, setDraft] = useState<AddConnectionDraft>(() =>
+    createConnectionDraft(initialProtocol, initialName, initialSpec, initialValues),
+  )
   const [errors, setErrors] = useState<Record<string, string | undefined>>({})
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | undefined>()
   const scrollRef = useRef<ScrollBoxRenderable>(null)
   const didRequestInitialFocusRef = useRef(false)
+  const suppressedTextInputValuesRef = useRef<Record<string, string | undefined>>({})
 
+  const protocol = draft.protocol
+  const name = draft.name
+  const values = draft.values
+  const uri = draft.uri
   const adapter = protocol ? adapters.find((candidate) => candidate.protocol === protocol) : undefined
   const spec = adapter?.getConnectionSpec()
+  const uriEnabled = hasURIHelpers(spec)
   const visibleFields = spec?.fields.filter((field) => field.visible?.(values) ?? true) ?? []
   const focusFields: FocusField[] =
     adapters.length === 0
@@ -80,6 +95,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
       : [
           { kind: "protocol", key: "protocol" },
           { kind: "name", key: "name" },
+          ...(uriEnabled ? ([{ kind: "uri", key: "uri" }] as const) : []),
           ...visibleFields.map((field): FocusField => ({ kind: "field", field, key: field.key })),
         ]
 
@@ -89,12 +105,9 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
       if (!nextAdapter) return
 
       const nextSpec = nextAdapter.getConnectionSpec()
-      protocolRef.current = nextProtocol
-      nameRef.current = ""
-      valuesRef.current = defaultFieldValues(nextSpec)
-      setProtocol(nextProtocol)
-      setName("")
-      setValues(valuesRef.current)
+      const nextDraft = createConnectionDraft(nextProtocol, "", nextSpec, defaultFieldValues(nextSpec))
+      suppressDraftTextInputEchoes(suppressedTextInputValuesRef.current, nextSpec, nextDraft)
+      setDraft(nextDraft)
       setErrors({})
       setFormError(undefined)
       focusTree.focusPath(addConnectionFieldPath(focusFieldKey))
@@ -103,9 +116,12 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
   )
 
   useEffect(() => {
-    if (protocol || !initialProtocol) return
-    loadProtocol(initialProtocol)
-  }, [initialProtocol, loadProtocol, protocol])
+    if (draft.protocol || !initialProtocol) return
+
+    const nextDraft = createConnectionDraft(initialProtocol, initialName, initialSpec, initialValues)
+    suppressDraftTextInputEchoes(suppressedTextInputValuesRef.current, initialSpec, nextDraft)
+    setDraft(nextDraft)
+  }, [draft.protocol, initialName, initialProtocol, initialSpec, initialValues])
 
   useEffect(() => {
     if (didRequestInitialFocusRef.current || focusFields.length === 0) {
@@ -136,12 +152,10 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
   }
 
   async function saveConnection() {
-    const currentProtocol = protocolRef.current
-    const currentValues = valuesRef.current
-    if (!currentProtocol || !spec || saving) return
+    if (!protocol || !spec || saving) return
 
-    const resolvedName = resolveConnectionName(nameRef.current, spec.defaultName)
-    const nextErrors = validateDraft(spec, { name: resolvedName, values: currentValues })
+    const resolvedName = resolveConnectionName(name, spec.defaultName)
+    const nextErrors = validateDraft(spec, { name: resolvedName, values })
     if (hasErrors(nextErrors)) {
       setErrors(nextErrors)
       setFormError(undefined)
@@ -152,9 +166,9 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
     setFormError(undefined)
     try {
       await engine.addConnection({
-        config: spec.createConfig(currentValues),
+        config: spec.createConfig(values),
         name: resolvedName,
-        protocol: currentProtocol,
+        protocol,
       })
       onSaved()
     } catch (error) {
@@ -164,16 +178,72 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
     }
   }
 
+  function replaceFormValues(nextValues: ConnectionFormValues, options: { preserveURI?: string } = {}) {
+    const nextURI = options.preserveURI ?? deriveConnectionURI(spec, nextValues)
+    suppressTextInputEcho(suppressedTextInputValuesRef.current, "uri", nextURI)
+    setDraft((current) =>
+      current.values === nextValues && current.uri === nextURI
+        ? current
+        : { ...current, values: nextValues, uri: nextURI },
+    )
+    if (nextURI.length > 0 || !uriEnabled) {
+      clearError("uri")
+    }
+  }
+
   function updateStringField(key: string, nextValue: string) {
-    valuesRef.current = { ...valuesRef.current, [key]: nextValue }
-    setValues((current) => ({ ...current, [key]: nextValue }))
+    if (consumeSuppressedTextInputEcho(suppressedTextInputValuesRef.current, key, nextValue)) {
+      return
+    }
+    if (values[key] === nextValue) {
+      return
+    }
+    replaceFormValues({ ...values, [key]: nextValue })
     clearError(key)
   }
 
   function updateBooleanField(key: string, nextValue: boolean) {
-    valuesRef.current = { ...valuesRef.current, [key]: nextValue }
-    setValues((current) => ({ ...current, [key]: nextValue }))
+    if (values[key] === nextValue) {
+      return
+    }
+    replaceFormValues({ ...values, [key]: nextValue })
     clearError(key)
+  }
+
+  function updateURIField(nextValue: string) {
+    if (consumeSuppressedTextInputEcho(suppressedTextInputValuesRef.current, "uri", nextValue)) {
+      return
+    }
+    if (uri === nextValue) {
+      return
+    }
+    setFormError(undefined)
+
+    if (!hasURIHelpers(spec)) {
+      suppressTextInputEcho(suppressedTextInputValuesRef.current, "uri", nextValue)
+      setDraft((current) => ({ ...current, uri: nextValue }))
+      clearError("uri")
+      return
+    }
+
+    try {
+      const nextConfig = spec.fromURI(nextValue)
+      const nextDraft = {
+        ...draft,
+        values: fieldValuesFromConfig(spec, nextConfig),
+        uri: nextValue,
+      }
+      suppressDraftTextInputEchoes(suppressedTextInputValuesRef.current, spec, nextDraft)
+      setDraft(nextDraft)
+      clearError("uri")
+    } catch (error) {
+      suppressTextInputEcho(suppressedTextInputValuesRef.current, "uri", nextValue)
+      setDraft((current) => ({ ...current, uri: nextValue }))
+      setErrors((current) => ({
+        ...current,
+        uri: error instanceof Error ? error.message : "Invalid connection URI.",
+      }))
+    }
   }
 
   function clearError(key: string) {
@@ -204,16 +274,24 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
         onSelectProtocol={(nextProtocol) => loadProtocol(nextProtocol, "protocol")}
         onSave={() => void saveConnection()}
         onSetName={(value) => {
-          nameRef.current = value
-          setName(value)
+          if (consumeSuppressedTextInputEcho(suppressedTextInputValuesRef.current, "name", value)) {
+            return
+          }
+          if (name === value) {
+            return
+          }
+          setDraft((current) => ({ ...current, name: value }))
           clearError("name")
         }}
+        onSetURI={updateURIField}
         onSetStringField={updateStringField}
         onSetBooleanField={updateBooleanField}
         protocol={protocol}
         saving={saving}
         scrollRef={scrollRef}
         spec={spec}
+        uri={uri}
+        uriEnabled={uriEnabled}
         values={values}
       />
     </Focusable>
@@ -229,12 +307,15 @@ function AddConnectionPaneBody(props: {
   onSelectProtocol: (value: Protocol) => void
   onSave: () => void
   onSetName: (value: string) => void
+  onSetURI: (value: string) => void
   onSetStringField: (key: string, value: string) => void
   onSetBooleanField: (key: string, value: boolean) => void
   protocol: Protocol | undefined
   saving: boolean
   scrollRef: RefObject<ScrollBoxRenderable | null>
   spec: ConnectionSpec<any> | undefined
+  uri: string
+  uriEnabled: boolean
   values: ConnectionFormValues
 }) {
   const {
@@ -247,11 +328,14 @@ function AddConnectionPaneBody(props: {
     onSave,
     onSetBooleanField,
     onSetName,
+    onSetURI,
     onSetStringField,
     protocol,
     saving,
     scrollRef,
     spec,
+    uri,
+    uriEnabled,
     values,
   } = props
   const focusTree = useFocusTree()
@@ -313,6 +397,21 @@ function AddConnectionPaneBody(props: {
         remembered={!focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath("name"))}
         value={name}
       />
+
+      {uriEnabled && (
+        <TextInputField
+          description="Paste a connection URI to populate the fields below. Editing the fields keeps this URI in sync."
+          error={errors.uri}
+          focusableId="uri"
+          label="Connection URI"
+          onChange={onSetURI}
+          onNext={navigateNext}
+          onPrev={navigatePrev}
+          placeholder={protocol ? `${protocol}://...` : undefined}
+          remembered={!focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath("uri"))}
+          value={uri}
+        />
+      )}
 
       {spec?.fields.map((field) => {
         if (!(field.visible?.(values) ?? true)) {
@@ -421,7 +520,11 @@ function ProtocolPickerBody(
       <RadioSelectRowInput
         hint={CYCLE_HINT_LABEL}
         onChange={onChange}
-        options={adapters.map((adapter) => ({ key: adapter.protocol, label: adapter.protocol, value: adapter.protocol }))}
+        options={adapters.map((adapter) => ({
+          key: adapter.protocol,
+          label: adapter.protocol,
+          value: adapter.protocol,
+        }))}
         value={protocol}
       />
     </FormLabel>
@@ -595,7 +698,13 @@ function SelectFieldBody(
   useKeybindHandler({
     enabled: focused,
     detect(event) {
-      return isFieldNavKey(event) || event.name === "left" || event.name === "right" || event.name === "enter" || event.name === "return"
+      return (
+        isFieldNavKey(event) ||
+        event.name === "left" ||
+        event.name === "right" ||
+        event.name === "enter" ||
+        event.name === "return"
+      )
     },
     onKey(event) {
       if (handleFieldNav(event, onPrev, onNext)) return
@@ -666,6 +775,15 @@ function hasConnectionSpec(adapter: AnyAdapter): adapter is AdapterWithConnectio
   return typeof adapter.getConnectionSpec === "function"
 }
 
+type UriCapableConnectionSpec = ConnectionSpec<any> & {
+  fromURI(uri: string): any
+  toURI(config: any): string
+}
+
+function hasURIHelpers(spec: ConnectionSpec<any> | undefined): spec is UriCapableConnectionSpec {
+  return typeof spec?.fromURI === "function" && typeof spec.toURI === "function"
+}
+
 function pickInitialProtocol(
   adapters: AdapterWithConnectionSpec[],
   selectedConnectionId: string | undefined,
@@ -676,6 +794,37 @@ function pickInitialProtocol(
     return selectedProtocol
   }
   return adapters[0]?.protocol
+}
+
+function resolveInitialDraft(
+  adapters: AdapterWithConnectionSpec[],
+  selectedConnectionId: string | undefined,
+  connections: Array<{ id: string; protocol: Protocol }> | undefined,
+  initialSuggestion: DiscoveredConnectionSuggestion | undefined,
+): {
+  protocol: Protocol | undefined
+  spec: ConnectionSpec<any> | undefined
+  name: string
+  values: ConnectionFormValues
+} {
+  const suggestedProtocol =
+    initialSuggestion && adapters.some((adapter) => adapter.protocol === initialSuggestion.protocol)
+      ? initialSuggestion.protocol
+      : undefined
+  const protocol = suggestedProtocol ?? pickInitialProtocol(adapters, selectedConnectionId, connections)
+  const spec = protocol ? adapters.find((candidate) => candidate.protocol === protocol)?.getConnectionSpec() : undefined
+  const values = spec
+    ? suggestedProtocol && initialSuggestion
+      ? fieldValuesFromConfig(spec, initialSuggestion.config)
+      : defaultFieldValues(spec)
+    : {}
+
+  return {
+    protocol,
+    spec,
+    name: suggestedProtocol && initialSuggestion ? initialSuggestion.name : "",
+    values,
+  }
 }
 
 function addConnectionFieldPath(key: string) {
@@ -698,6 +847,97 @@ function defaultFieldValues(spec: ConnectionSpec<any>): ConnectionFormValues {
   const values: ConnectionFormValues = {}
   for (const field of spec.fields) values[field.key] = field.defaultValue
   return values
+}
+
+function createConnectionDraft(
+  protocol: Protocol | undefined,
+  name: string,
+  spec: ConnectionSpec<any> | undefined,
+  values: ConnectionFormValues,
+): AddConnectionDraft {
+  return {
+    protocol,
+    name,
+    values,
+    uri: deriveConnectionURI(spec, values),
+  }
+}
+
+function suppressTextInputEcho(map: Record<string, string | undefined>, key: string, value: string) {
+  map[key] = value
+}
+
+function consumeSuppressedTextInputEcho(map: Record<string, string | undefined>, key: string, value: string): boolean {
+  if (map[key] !== value) {
+    return false
+  }
+
+  delete map[key]
+  return true
+}
+
+function suppressDraftTextInputEchoes(
+  map: Record<string, string | undefined>,
+  spec: ConnectionSpec<any> | undefined,
+  draft: AddConnectionDraft,
+) {
+  suppressTextInputEcho(map, "name", draft.name)
+  suppressTextInputEcho(map, "uri", draft.uri)
+
+  for (const field of spec?.fields ?? []) {
+    if (field.kind !== "text" && field.kind !== "path" && field.kind !== "secret") {
+      continue
+    }
+
+    suppressTextInputEcho(map, field.key, stringField(draft.values, field.key, field.defaultValue ?? ""))
+  }
+}
+
+function fieldValuesFromConfig(spec: ConnectionSpec<any>, config: object): ConnectionFormValues {
+  if (spec.configToValues) {
+    return {
+      ...defaultFieldValues(spec),
+      ...spec.configToValues(config),
+    }
+  }
+
+  const values = defaultFieldValues(spec)
+  const configRecord = config as Record<string, unknown>
+
+  for (const field of spec.fields) {
+    const value = configRecord[field.key]
+    switch (field.kind) {
+      case "boolean":
+        if (typeof value === "boolean") {
+          values[field.key] = value
+        } else if (value !== undefined && value !== null) {
+          values[field.key] = true
+        }
+        break
+      case "text":
+      case "path":
+      case "secret":
+      case "select":
+        if (value !== undefined && value !== null) {
+          values[field.key] = String(value)
+        }
+        break
+    }
+  }
+
+  return values
+}
+
+function deriveConnectionURI(spec: ConnectionSpec<any> | undefined, values: ConnectionFormValues): string {
+  if (!hasURIHelpers(spec)) {
+    return ""
+  }
+
+  try {
+    return spec.toURI(spec.createConfig(values))
+  } catch {
+    return ""
+  }
 }
 
 function validateDraft(spec: ConnectionSpec<any>, draft: ConnectionSpecDraft): Record<string, string | undefined> {

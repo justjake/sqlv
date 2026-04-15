@@ -65,7 +65,7 @@ export function SaveQueryDialog(props: SaveQueryDialogProps) {
     >
       <box
         alignSelf="stretch"
-        backgroundColor={theme.inputBg}
+        backgroundColor={theme.backgroundBg}
         border={["top", "right", "bottom", "left"]}
         borderColor={theme.borderColor}
         borderStyle="single"

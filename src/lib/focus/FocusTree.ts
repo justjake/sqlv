@@ -345,8 +345,7 @@ export class FocusTree {
       return
     }
 
-    this.#commitFocusPath(highlightedPath, "activate")
-    this.#emitIfObservableChanged()
+    this.focusPath(highlightedPath, "activate")
   }
 
   activateHighlightedFocusNavigable() {
@@ -467,32 +466,41 @@ export class FocusTree {
     requestPath: FocusPath,
     reason: FocusApplyReason,
   ): FocusPath | undefined {
+    return this.#resolveRequestedLogicalPathDeep(requestPath, reason, new Set<string>())
+  }
+
+  #resolveRequestedLogicalPathDeep(
+    requestPath: FocusPath,
+    reason: FocusApplyReason,
+    visitedPathKeys: Set<string>,
+  ): FocusPath | undefined {
     const focusable = this.#getFocusable(requestPath)
     if (!focusable) {
       return undefined
     }
 
+    const requestPathKey = requirePathKey(requestPath)
+    if (visitedPathKeys.has(requestPathKey)) {
+      return undefined
+    }
+    visitedPathKeys.add(requestPathKey)
+
     if (focusable.input.focusable && !focusable.input.disabled && reason === "escape") {
       return requestPath
     }
 
-    if (focusable.input.delegatesFocus) {
-      return (
-        this.#getCurrentFocusableDescendantPathWithin(requestPath) ??
-        this.#getRememberedFocusableDescendantPathWithin(requestPath) ??
-        this.#firstFocusableDescendant(requestPath)
-      )
+    const nextPath =
+      focusable.input.delegatesFocus || !focusable.input.focusable || focusable.input.disabled
+        ? (this.#getCurrentFocusableDescendantPathWithin(requestPath) ??
+          this.#getRememberedFocusableDescendantPathWithin(requestPath) ??
+          this.#firstFocusableDescendant(requestPath))
+        : requestPath
+
+    if (!nextPath || sameFocusPath(nextPath, requestPath)) {
+      return nextPath
     }
 
-    if (focusable.input.focusable && !focusable.input.disabled) {
-      return requestPath
-    }
-
-    return (
-      this.#getCurrentFocusableDescendantPathWithin(requestPath) ??
-      this.#getRememberedFocusableDescendantPathWithin(requestPath) ??
-      this.#firstFocusableDescendant(requestPath)
-    )
+    return this.#resolveRequestedLogicalPathDeep(nextPath, reason, visitedPathKeys) ?? nextPath
   }
 
   #getCurrentFocusableDescendantPathWithin(path: FocusPath): FocusPath | undefined {

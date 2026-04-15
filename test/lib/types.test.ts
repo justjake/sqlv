@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { ConnectionSpec } from "../../src/lib/interface/Adapter"
 import { createId } from "../../src/lib/types/Id"
 import { EpochMillis } from "../../src/lib/types/Log"
 import { OrderString } from "../../src/lib/types/Order"
@@ -68,6 +69,35 @@ describe("type utilities", () => {
     expect(paginated.query({ cursor: { id: 0 }, limit: 5 }).toSource()).toBe("page-5")
     expect(paginated.cursor({ id: 9 })).toEqual({ id: 9 })
     expect(paginated.count?.({ cursor: { id: 0 }, limit: 5 }).toSource()).toBe("count-5")
+  })
+
+  test("allows optional config spec URI hooks", () => {
+    const spec: ConnectionSpec<{ path: string }> = {
+      label: "Filesystem",
+      fields: [],
+      createConfig() {
+        return { path: ":memory:" }
+      },
+      fromURI(uri) {
+        return { path: uri }
+      },
+      toURI(config) {
+        return config.path
+      },
+    }
+
+    const minimalSpec: ConnectionSpec<{ path: string }> = {
+      label: "Minimal",
+      fields: [],
+      createConfig() {
+        return { path: "app.db" }
+      },
+    }
+
+    expect(spec.fromURI?.("file:///tmp/app.db")).toEqual({ path: "file:///tmp/app.db" })
+    expect(spec.toURI?.({ path: "file:///tmp/app.db" })).toBe("file:///tmp/app.db")
+    expect(minimalSpec.fromURI).toBeUndefined()
+    expect(minimalSpec.toURI).toBeUndefined()
   })
 
   test("supports Result combinators and unwrap helpers", async () => {

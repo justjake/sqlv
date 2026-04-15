@@ -1,11 +1,11 @@
-import { RGBA } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
 import type { ReactNode } from "react"
 import { Focusable } from "../focus"
+import { DEFAULT_MODAL_Z_INDEX, resolveModalViewportBounds } from "./modalShared"
 import { Text } from "./Text"
 import { useTheme } from "./theme"
 
-const MODAL_EDGE_MARGIN = 3
+const PROMPT_MODAL_FOOTER_HEIGHT = 3
 
 export type PromptModalProps = {
   children: ReactNode
@@ -20,17 +20,17 @@ export type PromptModalProps = {
 export function PromptModal(props: PromptModalProps) {
   const { width: terminalWidth, height: terminalHeight } = useTerminalDimensions()
   const theme = useTheme()
-  const horizontalMargin = Math.min(MODAL_EDGE_MARGIN, Math.max(0, Math.floor((terminalWidth - 1) / 2)))
-  const verticalMargin = Math.min(MODAL_EDGE_MARGIN, Math.max(0, Math.floor((terminalHeight - 1) / 2)))
-  const maxPanelWidth = Math.max(1, terminalWidth - horizontalMargin * 2)
+  const { horizontalMargin, maxPanelHeight, maxPanelWidth, verticalMargin } = resolveModalViewportBounds(
+    terminalWidth,
+    terminalHeight,
+  )
   const maxBodyWidth = Math.max(1, maxPanelWidth - 4)
-  const maxPanelHeight = Math.max(1, terminalHeight - verticalMargin * 2)
 
   return (
     <Focusable
       autoFocus
       alignItems="center"
-      backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
+      backgroundColor={theme.modalBackdropBg}
       flexDirection="column"
       focusable={false}
       focusableId={props.focusableId}
@@ -50,7 +50,7 @@ export function PromptModal(props: PromptModalProps) {
       trap
       trapEscLabel={props.trapEscLabel}
       width={terminalWidth}
-      zIndex={props.zIndex ?? 200}
+      zIndex={props.zIndex ?? DEFAULT_MODAL_Z_INDEX}
     >
       <Focusable
         delegatesFocus
@@ -62,10 +62,7 @@ export function PromptModal(props: PromptModalProps) {
         maxWidth={maxPanelWidth}
       >
         <box
-          backgroundColor={theme.inputBg}
-          border
-          borderColor={theme.borderColor}
-          borderStyle="single"
+          backgroundColor={theme.backgroundBg}
           flexDirection="column"
           onMouseDown={(event) => {
             event.stopPropagation()
@@ -90,6 +87,8 @@ export function PromptModal(props: PromptModalProps) {
           <box
             alignSelf="stretch"
             flexDirection="column"
+            justifyContent="center"
+            minHeight={5}
             maxWidth={maxBodyWidth}
             paddingBottom={1}
             paddingLeft={2}
@@ -100,13 +99,10 @@ export function PromptModal(props: PromptModalProps) {
           </box>
           {props.footer ? (
             <box
+              alignItems="stretch"
               alignSelf="stretch"
-              border={["top"]}
-              borderColor={theme.borderColor}
               flexDirection="row"
-              gap={1}
-              justifyContent="flex-end"
-              padding={1}
+              height={PROMPT_MODAL_FOOTER_HEIGHT}
             >
               {props.footer}
             </box>

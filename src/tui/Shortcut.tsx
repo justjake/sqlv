@@ -36,6 +36,7 @@ export function Shortcut(props: ShortcutProps) {
   return (
     <box
       backgroundColor={active ? theme.shortcutActiveBg : theme.shortcutBg}
+      flexShrink={0}
       onMouseDown={() => {
         if (enabled) {
           setActive(true)

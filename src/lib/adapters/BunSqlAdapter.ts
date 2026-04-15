@@ -1,14 +1,27 @@
 import { Database } from "bun:sqlite"
 import { mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
-import { type Adapter, type ConnectionFormValues, type ConnectionSpec } from "../interface/Adapter"
+import {
+  type Adapter,
+  type ConnectionFormValues,
+  type ConnectionSpec,
+  type ConnectionSuggestion,
+} from "../interface/Adapter"
 import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "../interface/Executor"
+import { findLocalSqliteDatabaseFiles, localDatabaseSuggestionName } from "../connectionSuggestions"
 import type { ExplainInput, ExplainResult } from "../types/Explain"
 import type { ObjectInfo } from "../types/objects"
 import type { QueryRunner } from "../types/QueryRunner"
 import { ident, type SQL } from "../types/SQL"
 import type { SqliteArg } from "./sqlite"
-import { IterateSqliteSchema, explainSqliteQuery, parsePragmaDatabaseListRow, parseSqliteSchemaRow, PragmaDatabaseList } from "./sqlite"
+import {
+  createSqliteIndexOriginResolver,
+  IterateSqliteSchema,
+  explainSqliteQuery,
+  parsePragmaDatabaseListRow,
+  parseSqliteSchemaRow,
+  PragmaDatabaseList,
+} from "./sqlite"
 
 type ConnectArgs = ConstructorParameters<typeof Database>
 type DatabaseOpts = Exclude<ConnectArgs[1], number | undefined>
@@ -26,6 +39,11 @@ export class BunSqlAdapter implements Adapter<BunSqlConfig, SqliteArg, BunSqlFea
   readonly protocol = "bunsqlite"
   readonly treeSitterGrammar = "sql"
   readonly sqlFormatterLanguage = "sqlite"
+  #searchDirectory: string
+
+  constructor(args: { searchDirectory?: string } = {}) {
+    this.#searchDirectory = args.searchDirectory ?? process.cwd()
+  }
 
   describeConfig(config: BunSqlConfig): string {
     let desc = config.path || ":memory:"
@@ -90,6 +108,16 @@ export class BunSqlAdapter implements Adapter<BunSqlConfig, SqliteArg, BunSqlFea
         },
       ],
       label: "Bun SQLite",
+      configToValues(config) {
+        return {
+          create: booleanOrUndefined(config.create),
+          path: typeof config.path === "string" ? config.path : undefined,
+          readonly: booleanOrUndefined(config.readonly),
+          readwrite: booleanOrUndefined(config.readwrite),
+          safeIntegers: booleanOrUndefined(config.safeIntegers),
+          strict: booleanOrUndefined(config.strict),
+        }
+      },
       createConfig(values) {
         return {
           create: booleanField(values, "create", true),
@@ -103,11 +131,23 @@ export class BunSqlAdapter implements Adapter<BunSqlConfig, SqliteArg, BunSqlFea
     }
   }
 
+  async findConnections(): Promise<Array<ConnectionSuggestion<BunSqlConfig>>> {
+    const files = await findLocalSqliteDatabaseFiles(this.#searchDirectory)
+    return files.map((path) => ({
+      name: localDatabaseSuggestionName(path),
+      config: {
+        path,
+      },
+    }))
+  }
+
   async fetchObjects(db: QueryRunner<BunSqlConfig>): Promise<ObjectInfo[]> {
     const databaseList = await db.query(PragmaDatabaseList)
     const databaseInfos = databaseList.map(parsePragmaDatabaseListRow)
     const result: ObjectInfo[] = [...databaseInfos]
     for (const namespace of databaseInfos) {
+      const getIndexOrigin = createSqliteIndexOriginResolver(db, namespace.name)
+
       for await (const rows of db.iterate(IterateSqliteSchema, {
         schemaTable: ident("sqlite_schema", {
           schema: namespace.name,
@@ -115,7 +155,12 @@ export class BunSqlAdapter implements Adapter<BunSqlConfig, SqliteArg, BunSqlFea
         limit: 500,
         cursor: { type: "", name: "" },
       })) {
-        rows.forEach((r) => result.push(parseSqliteSchemaRow({ database: namespace.name, schema: undefined }, r)))
+        for (const row of rows) {
+          const indexOrigin =
+            row.type === "index" ? await getIndexOrigin(row.tbl_name, row.name) : undefined
+
+          result.push(parseSqliteSchemaRow({ database: namespace.name, schema: undefined }, row, { indexOrigin }))
+        }
       }
     }
     return result
@@ -170,6 +215,10 @@ function withoutUndefined<T extends object>(options: T): Partial<T> {
     }
   }
   return result
+}
+
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined
 }
 
 function booleanField(values: ConnectionFormValues, key: string, defaultValue: boolean): boolean {

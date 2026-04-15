@@ -1,5 +1,6 @@
 import { CancelledError, QueryClient } from "@tanstack/query-core"
 import { BunSqlAdapter } from "./adapters/BunSqlAdapter"
+import { PostgresAdapter } from "./adapters/postgres"
 import { sqlite } from "./adapters/sqlite"
 import { TursoAdapter } from "./adapters/TursoAdapter"
 import { createLocalPersistence, type LocalPersistence, type PersistenceStore } from "./createLocalPersistence"
@@ -25,7 +26,14 @@ import type { ObjectInfo } from "./types/objects"
 import { OrderString } from "./types/Order"
 import { pendingQueryState, queryStateOrPending, type QueryState } from "./types/QueryState"
 import type { SavedQuery } from "./types/SavedQuery"
-import { defaultSettingsState, type AnySettingsRow, type SettingsId, type SettingsRow, type SettingsSchema, type SettingsState } from "./types/Settings"
+import {
+  defaultSettingsState,
+  type AnySettingsRow,
+  type SettingsId,
+  type SettingsRow,
+  type SettingsSchema,
+  type SettingsState,
+} from "./types/Settings"
 import { unsafeRawSQL } from "./types/SQL"
 
 export type EditorSuggestionMenuItemRef = {
@@ -92,8 +100,16 @@ export type DetailView =
     }
 
 export type ConnectionsState = QueryState<Connection<any>[]>
+export type ConnectionSuggestionsState = QueryState<DiscoveredConnectionSuggestion[]>
 export type ConnectionObjectsState = QueryState<ObjectInfo[]>
 export type QueryExecutionState = QueryState<QueryExecution>
+
+export type DiscoveredConnectionSuggestion<P extends Protocol = Protocol> = {
+  id: string
+  protocol: P
+  name: string
+  config: Partial<ProtocolConfig<P>>
+}
 
 export type QueryRef = {
   queryId: string
@@ -109,6 +125,7 @@ export type ActiveQuery = {
 export type SqlVisorState = {
   sessionId: string
   connections: ConnectionsState
+  connectionSuggestions: ConnectionSuggestionsState
   selectedConnectionId?: string
   editor: EditorState
   history: QueryExecution[]
@@ -201,6 +218,7 @@ export class SqlVisor {
     await engine.refreshConnections()
     await engine.#loadPersistedHistory()
     await engine.#loadPersistedSavedQueries()
+    void engine.refreshConnectionSuggestions().catch(() => undefined)
     return engine
   }
 
@@ -237,6 +255,7 @@ export class SqlVisor {
     this.#state = this.#normalizeState({
       sessionId: args.session.id,
       connections: pendingQueryState<Connection<any>[]>(),
+      connectionSuggestions: pendingQueryState<DiscoveredConnectionSuggestion[]>(),
       selectedConnectionId: undefined,
       editor: {
         analysis: idleEditorAnalysisState(),
@@ -305,6 +324,18 @@ export class SqlVisor {
     return connections
   }
 
+  async refreshConnectionSuggestions(): Promise<DiscoveredConnectionSuggestion[]> {
+    const suggestions = await this.#queryClient.fetchQuery({
+      gcTime: 5 * 60 * 1000,
+      queryKey: this.#connectionSuggestionsQueryKey(),
+      queryFn: async () => this.#findConnectionSuggestions(),
+      retry: false,
+      staleTime: 0,
+    })
+    this.#syncQueryState()
+    return suggestions
+  }
+
   async #loadPersistedHistory(): Promise<void> {
     const logEntries = await this.persist.log.query(
       (table) => sqlite<LogEntry>`
@@ -354,8 +385,34 @@ export class SqlVisor {
       queryKey: this.#connectionsQueryKey(),
     })
     await this.refreshConnections()
+    void this.refreshConnectionSuggestions().catch(() => undefined)
     this.selectConnection(connection.id)
     return connection
+  }
+
+  async deleteConnection(connectionId: string): Promise<void> {
+    const connection = this.#requireConnection(connectionId)
+    if (connectionId === this.#state.selectedConnectionId) {
+      this.#abortEditorAnalysisRequest()
+    }
+
+    this.#queryRunners.get(connection.id)?.cancelAll()
+    this.#queryRunners.delete(connection.id)
+
+    await this.persist.connections.delete({
+      id: connection.id,
+      type: "connection",
+    })
+    this.#queryClient.removeQueries({
+      exact: true,
+      queryKey: this.#connectionObjectsQueryKey(connection.id),
+    })
+    await this.#queryClient.invalidateQueries({
+      exact: true,
+      queryKey: this.#connectionsQueryKey(),
+    })
+    await this.refreshConnections()
+    void this.refreshConnectionSuggestions().catch(() => undefined)
   }
 
   selectConnection(connectionId: string | undefined) {
@@ -380,15 +437,18 @@ export class SqlVisor {
     }
   }
 
-  setEditorState(patch: Partial<Pick<EditorState, "text" | "cursorOffset">> & {
-    savedQueryId?: string | null
-  }) {
+  setEditorState(
+    patch: Partial<Pick<EditorState, "text" | "cursorOffset">> & {
+      savedQueryId?: string | null
+    },
+  ) {
     this.#setState({
       editor: {
         ...this.#state.editor,
         text: patch.text ?? this.#state.editor.text,
         cursorOffset: patch.cursorOffset ?? this.#state.editor.cursorOffset,
-        savedQueryId: patch.savedQueryId === undefined ? this.#state.editor.savedQueryId : (patch.savedQueryId ?? undefined),
+        savedQueryId:
+          patch.savedQueryId === undefined ? this.#state.editor.savedQueryId : (patch.savedQueryId ?? undefined),
       },
     })
   }
@@ -443,7 +503,10 @@ export class SqlVisor {
         ...this.#state.editor,
         savedQueryId: savedQuery.id,
       },
-      savedQueries: sortSavedQueries([savedQuery, ...this.#state.savedQueries.filter((entry) => entry.id !== savedQuery.id)]),
+      savedQueries: sortSavedQueries([
+        savedQuery,
+        ...this.#state.savedQueries.filter((entry) => entry.id !== savedQuery.id),
+      ]),
     })
     return savedQuery
   }
@@ -482,15 +545,15 @@ export class SqlVisor {
         ...this.#state.editor,
         savedQueryId: savedQuery.id,
       },
-      savedQueries: sortSavedQueries([savedQuery, ...this.#state.savedQueries.filter((entry) => entry.id !== savedQuery.id)]),
+      savedQueries: sortSavedQueries([
+        savedQuery,
+        ...this.#state.savedQueries.filter((entry) => entry.id !== savedQuery.id),
+      ]),
     })
     return savedQuery
   }
 
-  async updateSettings<Id extends SettingsId>(
-    id: Id,
-    patch: Partial<SettingsSchema[Id]>,
-  ): Promise<SettingsSchema[Id]> {
+  async updateSettings<Id extends SettingsId>(id: Id, patch: Partial<SettingsSchema[Id]>): Promise<SettingsSchema[Id]> {
     return this.replaceSettings(id, {
       ...this.#state.settings[id],
       ...patch,
@@ -507,7 +570,7 @@ export class SqlVisor {
       type: "settings",
       updatedAt: currentRow ? now : undefined,
     }
-    const persistedRow = await this.persist.settings.upsert(nextRow as AnySettingsRow) as SettingsRow<Id>
+    const persistedRow = (await this.persist.settings.upsert(nextRow as AnySettingsRow)) as SettingsRow<Id>
     this.#applySettingsRow(persistedRow)
     return persistedRow.settings
   }
@@ -967,6 +1030,37 @@ export class SqlVisor {
     return queryRunner
   }
 
+  async #findConnectionSuggestions(): Promise<DiscoveredConnectionSuggestion[]> {
+    const adapters = this.registry.list()
+    const connections = this.#state.connections.data ?? []
+    const results = await Promise.all(
+      adapters.map(async (adapter) => {
+        if (!adapter.findConnections) {
+          return []
+        }
+
+        const suggestions = await adapter.findConnections()
+        return suggestions
+          .filter((suggestion) => !matchesExistingConnection(connections, adapter.protocol, suggestion.config))
+          .map((suggestion, index) => ({
+            config: suggestion.config,
+            id: discoveredConnectionSuggestionId(adapter.protocol, suggestion, index),
+            name: suggestion.name,
+            protocol: adapter.protocol,
+          }) satisfies DiscoveredConnectionSuggestion)
+      }),
+    )
+
+    const suggestionById = new Map<string, DiscoveredConnectionSuggestion>()
+    for (const suggestion of results.flat()) {
+      suggestionById.set(suggestion.id, suggestion)
+    }
+
+    return [...suggestionById.values()].toSorted(
+      (left, right) => left.protocol.localeCompare(right.protocol) || left.name.localeCompare(right.name),
+    )
+  }
+
   #requireConnection(connectionId: string): Connection<any> {
     const connection = this.#state.connections.data?.find((candidate) => candidate.id === connectionId)
     if (!connection) {
@@ -1043,7 +1137,10 @@ export class SqlVisor {
         },
       })
     } finally {
-      if (this.#suggestionRequestSerial === requestId && this.#suggestionAbortController?.signal === request.abortSignal) {
+      if (
+        this.#suggestionRequestSerial === requestId &&
+        this.#suggestionAbortController?.signal === request.abortSignal
+      ) {
         this.#suggestionAbortController = undefined
       }
     }
@@ -1054,13 +1151,16 @@ export class SqlVisor {
     this.#suggestionAbortController = undefined
   }
 
-  async #loadEditorAnalysis(requestId: number, args: {
-    abortSignal: AbortSignal
-    connection: Connection<any>
-    connectionId: string
-    parentFlowId?: string
-    text: string
-  }) {
+  async #loadEditorAnalysis(
+    requestId: number,
+    args: {
+      abortSignal: AbortSignal
+      connection: Connection<any>
+      connectionId: string
+      parentFlowId?: string
+      text: string
+    },
+  ) {
     const { abortSignal, connection, connectionId, parentFlowId, text } = args
     const adapter = this.registry.get(connection.protocol)
     if (!adapter.explain) {
@@ -1126,7 +1226,10 @@ export class SqlVisor {
       if (db && flow) {
         await db.closeFlow(flow, { cancelled: abortSignal.aborted })
       }
-      if (this.#editorAnalysisRequestSerial === requestId && this.#editorAnalysisAbortController?.signal === abortSignal) {
+      if (
+        this.#editorAnalysisRequestSerial === requestId &&
+        this.#editorAnalysisAbortController?.signal === abortSignal
+      ) {
         this.#editorAnalysisAbortController = undefined
       }
     }
@@ -1141,12 +1244,18 @@ export class SqlVisor {
     const connections = queryStateOrPending(
       this.#queryClient.getQueryState<Connection<any>[]>(this.#connectionsQueryKey()),
     )
+    const connectionSuggestions = queryStateOrPending(
+      this.#queryClient.getQueryState<DiscoveredConnectionSuggestion[]>(this.#connectionSuggestionsQueryKey()),
+    )
+    const knownConnectionIds = new Set((connections.data ?? []).map((connection) => connection.id))
     const connectionIds = new Set<string>()
-    if (this.#state.selectedConnectionId) {
+    if (this.#state.selectedConnectionId && knownConnectionIds.has(this.#state.selectedConnectionId)) {
       connectionIds.add(this.#state.selectedConnectionId)
     }
     for (const connectionId of Object.keys(this.#state.objectsByConnectionId)) {
-      connectionIds.add(connectionId)
+      if (knownConnectionIds.has(connectionId)) {
+        connectionIds.add(connectionId)
+      }
     }
 
     const objectsByConnectionId: Record<string, ConnectionObjectsState> = {}
@@ -1177,6 +1286,7 @@ export class SqlVisor {
 
     this.#replaceState({
       connections,
+      connectionSuggestions,
       queryExecution,
       activeQueries,
       objectsByConnectionId,
@@ -1193,7 +1303,12 @@ export class SqlVisor {
     }
   }
 
-  #replaceState(patch: Pick<SqlVisorState, "connections" | "queryExecution" | "activeQueries" | "objectsByConnectionId">) {
+  #replaceState(
+    patch: Pick<
+      SqlVisorState,
+      "connections" | "connectionSuggestions" | "queryExecution" | "activeQueries" | "objectsByConnectionId"
+    >,
+  ) {
     this.#state = this.#normalizeState({
       ...this.#state,
       ...patch,
@@ -1222,6 +1337,10 @@ export class SqlVisor {
     return [this.#queryKeyPrefix[0], this.#queryKeyPrefix[1], "connections"]
   }
 
+  #connectionSuggestionsQueryKey(): readonly ["sqlvisor", string, "connection-suggestions"] {
+    return [this.#queryKeyPrefix[0], this.#queryKeyPrefix[1], "connection-suggestions"]
+  }
+
   #connectionObjectsQueryKey(connectionId: string): readonly ["sqlvisor", string, "connections", string, "objects"] {
     return [this.#queryKeyPrefix[0], this.#queryKeyPrefix[1], "connections", connectionId, "objects"]
   }
@@ -1231,7 +1350,8 @@ export class SqlVisor {
   }
 
   #currentEditorProtocol(): Protocol | undefined {
-    return this.#state.connections.data?.find((connection) => connection.id === this.#state.selectedConnectionId)?.protocol
+    return this.#state.connections.data?.find((connection) => connection.id === this.#state.selectedConnectionId)
+      ?.protocol
   }
 
   #resolveSelectedConnectionId(connections: Connection<any>[]): string | undefined {
@@ -1267,7 +1387,9 @@ export class SqlVisor {
     return this.registry.get(protocol).sqlFormatterLanguage
   }
 
-  #resolveEditorTreeSitterGrammar(state: Pick<SqlVisorState, "connections" | "selectedConnectionId">): string | undefined {
+  #resolveEditorTreeSitterGrammar(
+    state: Pick<SqlVisorState, "connections" | "selectedConnectionId">,
+  ): string | undefined {
     const connection = state.connections.data?.find((candidate) => candidate.id === state.selectedConnectionId)
     if (!connection) {
       return undefined
@@ -1291,7 +1413,10 @@ export class SqlVisor {
       return selectedConnection.id
     }
 
-    return connections.find((connection) => connection.protocol === savedQuery.protocol)?.id ?? this.#state.selectedConnectionId
+    return (
+      connections.find((connection) => connection.protocol === savedQuery.protocol)?.id ??
+      this.#state.selectedConnectionId
+    )
   }
 
   #replaceSettingsRows(rows: AnySettingsRow[]) {
@@ -1323,7 +1448,7 @@ export class SqlVisor {
 }
 
 function builtInAdapters(): AnyAdapter[] {
-  return [new TursoAdapter(), new BunSqlAdapter()]
+  return [new TursoAdapter(), new BunSqlAdapter(), new PostgresAdapter()]
 }
 
 function builtInSuggestionProviders(): SuggestionProvider[] {
@@ -1460,6 +1585,65 @@ function isQueryCancellationError(error: Error): boolean {
 
 function isAbortError(error: Error): boolean {
   return error.name === "AbortError"
+}
+
+function discoveredConnectionSuggestionId(
+  protocol: Protocol,
+  suggestion: {
+    name: string
+    config: object
+  },
+  index: number,
+): string {
+  return `${protocol}:${suggestion.name}:${stableJsonSignature(suggestion.config)}:${index}`
+}
+
+function stableJsonSignature(value: unknown): string {
+  return JSON.stringify(sortJsonValue(value))
+}
+
+function sortJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortJsonValue)
+  }
+
+  if (value && typeof value === "object") {
+    const sortedEntries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => [key, sortJsonValue(child)])
+    return Object.fromEntries(sortedEntries)
+  }
+
+  return value
+}
+
+function matchesExistingConnection(
+  connections: Connection<any>[],
+  protocol: Protocol,
+  suggestionConfig: object,
+): boolean {
+  return connections.some(
+    (connection) => connection.protocol === protocol && partialConfigMatches(connection.config, suggestionConfig),
+  )
+}
+
+function partialConfigMatches(actual: unknown, partial: unknown): boolean {
+  if (partial === undefined) {
+    return true
+  }
+
+  if (
+    partial === null ||
+    typeof partial !== "object" ||
+    actual === null ||
+    typeof actual !== "object" ||
+    Array.isArray(partial) ||
+    Array.isArray(actual)
+  ) {
+    return Object.is(actual, partial)
+  }
+
+  return Object.entries(partial).every(([key, value]) => partialConfigMatches((actual as Record<string, unknown>)[key], value))
 }
 
 function closedEditorSuggestionMenuState(): EditorSuggestionMenuState {

@@ -63,6 +63,7 @@ describe("sqlite-backed storage", () => {
         name: "users_name_idx",
       }),
     ).toEqual({
+      name: "users_name_idx",
       on: {
         database: "main",
         name: "users",
@@ -218,6 +219,9 @@ describe("sqlite-backed storage", () => {
     const db = new QueryRunnerImpl(createSession("adapter"), connection, executor, createNoopLogStore())
 
     await db.query(unsafeRawSQL("CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT)"))
+    await db.query(
+      unsafeRawSQL("CREATE TABLE memberships (user_id TEXT, role_id TEXT, PRIMARY KEY (user_id, role_id))"),
+    )
     await db.query(unsafeRawSQL("CREATE VIEW widget_names AS SELECT name FROM widgets"))
 
     const objects = await adapter.fetchObjects(db)
@@ -238,6 +242,17 @@ describe("sqlite-backed storage", () => {
       name: "widget_names",
       schema: undefined,
       type: "view",
+    })
+    expect(objects).toContainEqual({
+      automatic: true,
+      name: "sqlite_autoindex_memberships_1",
+      on: {
+        database: "main",
+        name: "memberships",
+        schema: undefined,
+        type: "table",
+      },
+      type: "index",
     })
   })
 })

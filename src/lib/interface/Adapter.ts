@@ -47,11 +47,19 @@ export type ConnectionSpecDraft = {
   values: ConnectionFormValues
 }
 
+export type ConnectionSuggestion<Config = {}> = {
+  name: string
+  config: Partial<Config>
+}
+
 export type ConnectionSpec<Config = {}> = {
   label: string
   defaultName?: string
   fields: ConnectionField[]
   createConfig(values: ConnectionFormValues): Config
+  configToValues?(config: Partial<Config>): ConnectionFormValues
+  fromURI?(uri: string): Config
+  toURI?(config: Config): string
   validate?: (draft: ConnectionSpecDraft) => Record<string, string | undefined>
 }
 
@@ -63,6 +71,7 @@ export type Adapter<Config = {}, Arg = {}, F extends Record<string, Feature<unkn
   describeConfig(config: Config): string
   fetchObjects(db: QueryRunner<Config>): Promise<ObjectInfo[]>
   explain?(db: QueryRunner<Config>, input: ExplainInput): Promise<ExplainResult>
+  findConnections?(): Promise<Array<ConnectionSuggestion<Config>>>
   renderSQL(sql: SQL<any>): { source: string; args: Arg[] }
   getConnectionSpec?: () => ConnectionSpec<Config>
   sample?: {

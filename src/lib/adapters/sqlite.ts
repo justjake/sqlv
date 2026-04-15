@@ -7,6 +7,7 @@ import { unreachable } from "../types/unreachable"
 export type SqliteArg = string | number | null
 
 export type SqliteObjectType = "table" | "index" | "view" | "trigger"
+export type SqliteIndexOrigin = "c" | "u" | "pk"
 
 export const SQLITE_SCHEMA_TABLE_NAME = "sqlite_schema"
 
@@ -70,6 +71,14 @@ export type SqliteSchemaRow = {
   sql: string | null
 }
 
+export type SqlitePragmaIndexListRow = {
+  seq: number
+  name: string
+  unique: 0 | 1
+  origin: SqliteIndexOrigin
+  partial: 0 | 1
+}
+
 type SqliteNamespace = {
   database: string | undefined
   schema: string | undefined
@@ -98,6 +107,9 @@ export const IterateSqliteSchema = new Paginated<
 export function parseSqliteSchemaRow(
   parent: { database: string | undefined; schema: string | undefined },
   row: SqliteSchemaRow,
+  options: {
+    indexOrigin?: SqliteIndexOrigin
+  } = {},
 ): ObjectInfo {
   switch (row.type) {
     case "table":
@@ -105,7 +117,9 @@ export function parseSqliteSchemaRow(
     case "index":
       return {
         type: "index",
+        name: row.name,
         on: makeTable(row.tbl_name, parent),
+        ...(options.indexOrigin === "pk" ? { automatic: true } : {}),
       }
     case "view":
       return {
@@ -133,11 +147,33 @@ export type PragmaDatabaseListRow = {
 
 export const PragmaDatabaseList = sql<PragmaDatabaseListRow, SqliteArg>`pragma database_list`
 
+export function PragmaIndexList(tableName: string, database?: string): SQL<SqlitePragmaIndexListRow> {
+  return unsafeRawSQL<SqlitePragmaIndexListRow>(
+    `pragma ${database ? `${quoteSqliteIdentifier(database)}.` : ""}index_list(${quoteSqliteString(tableName)})`,
+  )
+}
+
 export function parsePragmaDatabaseListRow(row: PragmaDatabaseListRow): DatabaseInfo {
   return {
     type: "database",
     name: row.name,
     file: row.file,
+  }
+}
+
+export function createSqliteIndexOriginResolver<Config>(db: QueryRunner<Config>, database?: string) {
+  const cache = new Map<string, Promise<Map<string, SqliteIndexOrigin>>>()
+
+  return async (tableName: string, indexName: string): Promise<SqliteIndexOrigin | undefined> => {
+    let tableOrigins = cache.get(tableName)
+    if (!tableOrigins) {
+      tableOrigins = db.query(PragmaIndexList(tableName, database)).then(
+        (rows) => new Map(rows.map((row) => [row.name, row.origin])),
+      )
+      cache.set(tableName, tableOrigins)
+    }
+
+    return (await tableOrigins).get(indexName)
   }
 }
 
@@ -186,6 +222,14 @@ export async function explainSqliteQuery<Config>(
 
 function normalizeSqliteExplainErrorMessage(message: string): string {
   return message.replace(/^SQLite3?\s+Error:\s*/i, "").trim()
+}
+
+function quoteSqliteIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`
+}
+
+function quoteSqliteString(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
 }
 
 function inferSqliteDiagnosticRange(

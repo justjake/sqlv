@@ -1,6 +1,7 @@
 import { TextAttributes, type BoxRenderable } from "@opentui/core"
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { sameFocusPath } from "../../lib/focus"
+import type { DiscoveredConnectionSuggestion } from "../../lib/SqlVisor"
 import {
   Focusable,
   type FocusableProps,
@@ -12,7 +13,7 @@ import {
   useFocusTree,
 } from "../focus"
 import { useIconGlyph, type IconName } from "../ui/icons"
-import { useKeybind, useNavKeys } from "../ui/keybind"
+import { useKeybind, useNavKeys, useShortcut } from "../ui/keybind"
 import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 
@@ -20,8 +21,16 @@ export type TreeNode = {
   key: string
   name: string
   accessory?: string
+  accessoryIcon?: IconName
+  accessoryPlacement?: "inline" | "right"
+  accessorySeparator?: boolean
+  inlineAccessory?: string
+  inlineAccessoryIcon?: IconName
+  inlineAccessorySeparator?: boolean
+  automatic?: boolean
   kind?: string
   connectionId?: string
+  suggestion?: DiscoveredConnectionSuggestion
   expandable?: boolean
   expanded?: boolean
   children?: TreeNode[]
@@ -43,6 +52,7 @@ type VisibleTreeNode = FlatTreeNode & {
 
 export type TreeViewProps = {
   nodes: TreeNode[]
+  onBackspace?: (idx: number, node: TreeNode) => void
   onFocus?: (idx: number, node: TreeNode) => void
   onExpand?: (idx: number, node: TreeNode) => void
   onSelect?: (idx: number, node: TreeNode) => void
@@ -74,7 +84,7 @@ export function TreeView(props: TreeViewProps) {
 }
 
 function TreeViewBody(props: Omit<TreeViewProps, "focusableProps">) {
-  const { nodes, onExpand, onFocus, onSelect } = props
+  const { nodes, onBackspace, onExpand, onFocus, onSelect } = props
   const { inChordRef } = useKeybind()
   const tree = useFocusTree()
   const treePath = useFocusPath() ?? [SIDEBAR_TREE_AREA_ID]
@@ -183,6 +193,7 @@ function TreeViewBody(props: Omit<TreeViewProps, "focusableProps">) {
   }
 
   const shortcutsEnabled = !navigationActive && !inChordRef.current && focusedWithin && rows.length > 0
+  const backspaceEnabled = !inChordRef.current && focusedWithin && rows.length > 0
 
   useNavKeys({
     enabled: shortcutsEnabled,
@@ -220,6 +231,20 @@ function TreeViewBody(props: Omit<TreeViewProps, "focusableProps">) {
       key.preventDefault()
       key.stopPropagation()
       toggleCurrentRow()
+    },
+  })
+
+  useShortcut({
+    enabled: backspaceEnabled && !!currentRow && !!onBackspace,
+    keys: "backspace",
+    onKey(key) {
+      if (!currentRow) {
+        return
+      }
+
+      key.preventDefault()
+      key.stopPropagation()
+      onBackspace?.(currentIndex, currentRow.node)
     },
   })
 
@@ -293,9 +318,22 @@ function TreeNodeView(
   const expandClosed = useIconGlyph("expandClosed")
   const prefix = treePrefix(props, props.isExpanded ? expandOpen : expandClosed)
   const icon = useIconGlyph(treeIconName(props))
-  const labelFg = focused ? theme.formFieldLabelActiveFg : theme.primaryFg
+  const inlineAccessory = node.inlineAccessory ?? (node.accessoryPlacement === "inline" ? node.accessory : undefined)
+  const inlineAccessoryIconName =
+    node.inlineAccessoryIcon ?? (node.accessoryPlacement === "inline" ? node.accessoryIcon : undefined)
+  const inlineAccessorySeparator =
+    node.inlineAccessorySeparator ?? (node.accessoryPlacement === "inline" ? node.accessorySeparator : undefined)
+  const rightAccessory = node.accessoryPlacement === "inline" ? undefined : node.accessory
+  const rightAccessoryIconName = node.accessoryPlacement === "inline" ? undefined : node.accessoryIcon
+  const rightAccessorySeparator = node.accessoryPlacement === "inline" ? undefined : node.accessorySeparator
+  const inlineAccessoryIcon = useIconGlyph(inlineAccessoryIconName ?? "placeholder")
+  const rightAccessoryIcon = useIconGlyph(rightAccessoryIconName ?? "placeholder")
+  const showInlineAccessory = !!inlineAccessory
+  const showRightAccessory = !!rightAccessory
+  const dimAttributes = node.automatic ? TextAttributes.DIM : 0
+  const labelFg = focused ? theme.formFieldLabelActiveFg : node.automatic ? theme.mutedFg : theme.primaryFg
   const prefixFg = focused ? theme.formFieldLabelActiveFg : theme.mutedFg
-  const iconFg = focused ? theme.formFieldLabelActiveFg : theme.focusBg
+  const iconFg = focused ? theme.formFieldLabelActiveFg : node.automatic ? theme.mutedFg : theme.focusBg
   const accessoryFg = focused ? theme.formFieldLabelActiveFg : theme.mutedFg
 
   return (
@@ -306,37 +344,51 @@ function TreeNodeView(
     >
       <box flexGrow={0} flexShrink={0} width={textCells(prefix)}>
         <Text fg={prefixFg} wrapMode="none">
-          {prefix}
+          <span attributes={dimAttributes}>{prefix}</span>
         </Text>
       </box>
       <box flexGrow={0} flexShrink={0} width={textCells(icon)}>
         <Text fg={iconFg} wrapMode="none">
-          {icon}
+          <span attributes={dimAttributes}>{icon}</span>
         </Text>
       </box>
       <box flexGrow={0} flexShrink={0} width={1}>
         <Text fg={prefixFg} wrapMode="none">
-          {" "}
+          <span attributes={dimAttributes}> </span>
         </Text>
       </box>
-      <box flexGrow={1} flexShrink={1}>
+      <box flexGrow={1} flexShrink={1} minWidth={0}>
         <Text fg={labelFg} truncate wrapMode="none">
-          {node.name}
+          <span attributes={dimAttributes}>{node.name}</span>
+          {showInlineAccessory && (
+            <>
+              <span attributes={TextAttributes.DIM | dimAttributes} fg={accessoryFg}>
+                {inlineAccessorySeparator ? (
+                  <span attributes={TextAttributes.DIM | dimAttributes}>{`${expandClosed} `}</span>
+                ) : (
+                  ""
+                )}
+              </span>
+              {inlineAccessoryIconName && (
+                <span attributes={dimAttributes} fg={iconFg}>{`${inlineAccessoryIcon} `}</span>
+              )}
+              <span attributes={dimAttributes} fg={labelFg}>
+                {inlineAccessory}
+              </span>
+            </>
+          )}
         </Text>
       </box>
-      {node.accessory && (
-        <>
-          <box flexGrow={0} flexShrink={0} width={1}>
-            <Text fg={prefixFg} wrapMode="none">
-              {" "}
-            </Text>
-          </box>
-          <box flexGrow={0} flexShrink={0}>
-            <Text fg={accessoryFg} wrapMode="none">
-              <span attributes={TextAttributes.DIM}>{node.accessory}</span>
-            </Text>
-          </box>
-        </>
+      {showRightAccessory && (
+        <box flexGrow={0} flexShrink={100} minWidth={0}>
+          <Text fg={accessoryFg} truncate wrapMode="none">
+            <span attributes={TextAttributes.DIM | dimAttributes}>
+              {rightAccessorySeparator ? "| " : ""}
+              {rightAccessoryIconName ? `${rightAccessoryIcon} ` : ""}
+              {rightAccessory}
+            </span>
+          </Text>
+        </box>
       )}
     </box>
   )
@@ -346,8 +398,12 @@ function treeRowPath(path: readonly string[], rowKey: string): readonly string[]
   return [...path, rowFocusId(rowKey)]
 }
 
-function rowFocusId(rowKey: string): string {
+export function treeRowFocusId(rowKey: string): string {
   return `row-${rowKey}`
+}
+
+function rowFocusId(rowKey: string): string {
+  return treeRowFocusId(rowKey)
 }
 
 function treePrefix(row: VisibleTreeNode, disclosure: string): string {
@@ -406,6 +462,7 @@ function treeIconName(row: Pick<VisibleTreeNode, "isExpandable" | "isExpanded" |
 function treeSemanticIconName(kind: TreeNode["kind"]): IconName | undefined {
   switch (kind) {
     case "database":
+    case "connectionSuggestion":
       return "database"
     case "schema":
       return "schema"

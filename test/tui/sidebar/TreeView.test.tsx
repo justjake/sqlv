@@ -1,3 +1,4 @@
+import { TextAttributes } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
 import { useEffect } from "react"
 import { useFocusNavigationState, useFocusTree } from "../../../src/tui/focus"
@@ -273,6 +274,111 @@ describe("TreeView", () => {
     expect(rootLine?.startsWith("  Local DB")).toBe(true)
     expect(rootLine?.endsWith("bunsqlite")).toBe(true)
     expect(rootLine).not.toContain("(bunsqlite)")
+  })
+
+  test("truncates right-side accessories before truncating the main label", async () => {
+    const nodes = [
+      {
+        accessory: "bunsqlite",
+        expandable: true,
+        key: "root",
+        name: "LabelPriority",
+      },
+    ]
+
+    const ui = await render(
+      <TreeView nodes={nodes} />,
+      { height: 4, width: 17 },
+    )
+
+    const [rootLine] = ui.captureCharFrame().split("\n")
+    expect(rootLine?.startsWith("  LabelPriority")).toBe(true)
+    expect(rootLine).not.toContain("bunsqlite")
+  })
+
+  test("renders accessory icons with a separator when requested", async () => {
+    const nodes: Parameters<typeof TreeView>[0]["nodes"] = [
+      {
+        accessory: "main",
+        accessoryIcon: "database",
+        accessorySeparator: true,
+        expandable: true,
+        key: "root",
+        name: "Mem",
+      },
+    ]
+
+    const ui = await render(
+      <TreeView nodes={nodes} />,
+      { height: 4, width: 30 },
+    )
+
+    const [rootLine] = ui.captureCharFrame().split("\n")
+    expect(rootLine?.startsWith("  Mem")).toBe(true)
+    expect(rootLine).toContain("|")
+    expect(rootLine).toContain("main")
+  })
+
+  test("renders inline accessory icons next to the main label and keeps the icon accent color", async () => {
+    const nodes: Parameters<typeof TreeView>[0]["nodes"] = [
+      {
+        accessory: "bunsqlite",
+        expandable: true,
+        inlineAccessory: "main",
+        inlineAccessoryIcon: "database",
+        inlineAccessorySeparator: true,
+        key: "root",
+        name: "Mem",
+      },
+    ]
+
+    const ui = await render(
+      <TreeView nodes={nodes} />,
+      { height: 4, width: 40 },
+    )
+
+    const [rootLine] = ui.captureCharFrame().split("\n")
+    const rootSpanLine = ui.captureSpans().lines[0]
+    const folderIconSpan = rootSpanLine?.spans.find((span) => span.text.includes(""))
+    const databaseIconSpan = rootSpanLine?.spans.find((span) => span.text.includes("󰆼"))
+
+    expect(rootLine?.startsWith("  Mem 󰆼 main")).toBe(true)
+    expect(rootLine?.trimEnd().endsWith("bunsqlite")).toBe(true)
+    expect(folderIconSpan).toBeDefined()
+    expect(databaseIconSpan).toBeDefined()
+    expect(databaseIconSpan?.fg.equals(folderIconSpan!.fg)).toBe(true)
+  })
+
+  test("dims automatic rows while leaving regular rows undimmed", async () => {
+    const nodes = [
+      {
+        expanded: true,
+        children: [
+          { accessory: "idx", key: "manual", kind: "index", name: "users_name_idx" },
+          { accessory: "idx", automatic: true, key: "auto", kind: "index", name: "sqlite_autoindex_users_1" },
+        ],
+        expandable: true,
+        key: "root",
+        name: "users",
+      },
+    ]
+
+    const ui = await render(
+      <TreeView nodes={nodes} />,
+      { height: 5, width: 60 },
+    )
+
+    const manualLine = ui.captureSpans().lines.find((line) =>
+      line.spans.map((span) => span.text).join("").includes("users_name_idx"),
+    )
+    const automaticLine = ui.captureSpans().lines.find((line) =>
+      line.spans.map((span) => span.text).join("").includes("sqlite_autoindex_users_1"),
+    )
+    const manualLabelSpan = manualLine?.spans.find((span) => span.text.includes("users_name_idx"))
+    const automaticLabelSpan = automaticLine?.spans.find((span) => span.text.includes("sqlite_autoindex_users_1"))
+
+    expect(((manualLabelSpan?.attributes ?? 0) & TextAttributes.DIM) === TextAttributes.DIM).toBe(false)
+    expect((automaticLabelSpan?.attributes ?? 0) & TextAttributes.DIM).toBe(TextAttributes.DIM)
   })
 
   test("renders the empty-folder icon when an empty folder is open", async () => {

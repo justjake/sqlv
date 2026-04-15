@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { join } from "node:path"
+import { mkdir, writeFile } from "node:fs/promises"
+import { basename, join } from "node:path"
 import { BunSqlAdapter } from "../../src/lib/adapters/BunSqlAdapter"
 import { TursoAdapter } from "../../src/lib/adapters/TursoAdapter"
 import { createSession } from "../../src/lib/createLocalPersistence"
@@ -87,6 +88,38 @@ describe("database adapters", () => {
     }
   })
 
+  test("finds local sqlite file suggestions for the Bun adapter", async () => {
+    const dir = await createTempDir()
+    try {
+      await writeFile(join(dir, "alpha.db"), "")
+      await writeFile(join(dir, "beta.sqlite3"), "")
+      await writeFile(join(dir, "gamma.db-wal"), "")
+      await writeFile(join(dir, "delta.sqlite-shm"), "")
+      await writeFile(join(dir, "epsilon.db.lock"), "")
+      await mkdir(join(dir, "nested"))
+      await writeFile(join(dir, "nested", "ignored.db"), "")
+
+      const suggestions = await new BunSqlAdapter({ searchDirectory: dir }).findConnections()
+
+      expect(suggestions).toEqual([
+        {
+          config: {
+            path: join(dir, "alpha.db"),
+          },
+          name: `${basename(dir)}/alpha.db`,
+        },
+        {
+          config: {
+            path: join(dir, "beta.sqlite3"),
+          },
+          name: `${basename(dir)}/beta.sqlite3`,
+        },
+      ])
+    } finally {
+      await removePath(dir)
+    }
+  })
+
   test("executes queries with the Turso adapter against local files", async () => {
     const adapter = new TursoAdapter()
 
@@ -134,6 +167,43 @@ describe("database adapters", () => {
         schema: undefined,
         type: "table",
       })
+    } finally {
+      await removePath(dir)
+    }
+  })
+
+  test("finds local sqlite files plus the sqlv system database for the Turso adapter", async () => {
+    const dir = await createTempDir()
+    try {
+      const localPath = join(dir, "local.db")
+      const systemPath = join(dir, "sqlv.db")
+      await writeFile(localPath, "")
+      await writeFile(systemPath, "")
+
+      const suggestions = await new TursoAdapter({
+        loadSystemKey: async () => "deadbeef",
+        searchDirectory: dir,
+        systemPath,
+      }).findConnections()
+
+      expect(suggestions).toEqual([
+        {
+          config: {
+            path: localPath,
+          },
+          name: `${basename(dir)}/local.db`,
+        },
+        {
+          config: {
+            encryption: {
+              cipher: "aegis256",
+              hexkey: "deadbeef",
+            },
+            path: systemPath,
+          },
+          name: `${basename(dir)}/sqlv.db`,
+        },
+      ])
     } finally {
       await removePath(dir)
     }

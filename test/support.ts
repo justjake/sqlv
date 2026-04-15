@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunSqlAdapter, type BunSqlConfig } from "../src/lib/adapters/BunSqlAdapter"
+import { PostgresAdapter } from "../src/lib/adapters/postgres"
 import { TursoAdapter } from "../src/lib/adapters/TursoAdapter"
 import { createSession } from "../src/lib/createLocalPersistence"
 import { createNoopLogStore } from "../src/lib/createNoopLogStore"
@@ -25,10 +26,17 @@ import {
 import type { ExplainResult } from "../src/lib/types/Explain"
 import type { Connection } from "../src/lib/types/Connection"
 import { EpochMillis, type QueryExecution, type QueryInitiator } from "../src/lib/types/Log"
+import type { ObjectInfo } from "../src/lib/types/objects"
 import { OrderString } from "../src/lib/types/Order"
 import { pendingQueryState, type QueryState } from "../src/lib/types/QueryState"
 import type { SavedQuery } from "../src/lib/types/SavedQuery"
-import { defaultSettingsState, type SettingsId, type SettingsRow, type SettingsSchema, type SettingsState } from "../src/lib/types/Settings"
+import {
+  defaultSettingsState,
+  type SettingsId,
+  type SettingsRow,
+  type SettingsSchema,
+  type SettingsState,
+} from "../src/lib/types/Settings"
 
 export async function createTempDir(prefix = "sqlv-test-"): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix))
@@ -190,6 +198,7 @@ export function createSqlVisorState(patch: SqlVisorStatePatch = {}): SqlVisorSta
   return {
     sessionId: patch.sessionId ?? "session-1",
     connections: patch.connections ?? pendingQueryState<Connection<any>[]>([]),
+    connectionSuggestions: patch.connectionSuggestions ?? pendingQueryState(),
     selectedConnectionId: patch.selectedConnectionId,
     editor,
     history: patch.history ?? [],
@@ -212,10 +221,13 @@ type EngineMethodOverrides = {
   cancelQuery?: (query: QueryRef) => void
   cancelRunningQueries?: () => void
   closeEditorSuggestionMenu?: () => void
+  deleteConnection?: (connectionId: string) => Promise<void>
   formatEditorQuery?: () => boolean
   focusEditorSuggestionMenuItem?: (input: EditorSuggestionMenuItemFocusInput) => void
   getQueryState?: (query: QueryRef) => QueryState<QueryExecution>
+  loadConnectionObjects?: (connectionId: string) => Promise<ObjectInfo[]>
   openEditorSuggestionMenu?: (input: OpenEditorSuggestionMenuInput) => void
+  refreshConnectionSuggestions?: () => Promise<any[]>
   requestEditorAnalysis?: (input?: RequestEditorAnalysisInput) => void
   restoreSavedQuery?: (savedQueryId: string) => RestoreSavedQueryResult | undefined
   runQuery?: (input?: RunQueryInput) => QueryRef
@@ -225,7 +237,9 @@ type EngineMethodOverrides = {
   saveQueryAsNew?: (input: SaveQueryAsNewInput) => Promise<SavedQuery>
   saveSavedQueryChanges?: (input?: SaveSavedQueryChangesInput) => Promise<SavedQuery>
   replaceSettings?: <Id extends SettingsId>(id: Id, settings: SettingsSchema[Id]) => Promise<SettingsSchema[Id]>
-  setEditorState?: (patch: Partial<Pick<EditorState, "text" | "cursorOffset">> & { savedQueryId?: string | null }) => void
+  setEditorState?: (
+    patch: Partial<Pick<EditorState, "text" | "cursorOffset">> & { savedQueryId?: string | null },
+  ) => void
   updateSettings?: <Id extends SettingsId>(id: Id, patch: Partial<SettingsSchema[Id]>) => Promise<SettingsSchema[Id]>
 }
 
@@ -238,7 +252,8 @@ export function createEngineStub(
 ) {
   const listeners = new Set<() => void>()
   let state = createSqlVisorState(initialState)
-  const registry = options.registry ?? new AdapterRegistry([new BunSqlAdapter(), new TursoAdapter()])
+  const registry =
+    options.registry ?? new AdapterRegistry([new BunSqlAdapter(), new TursoAdapter(), new PostgresAdapter()])
   const queryStates = new Map<string, QueryState<QueryExecution>>()
 
   const calls: {
@@ -248,9 +263,12 @@ export function createEngineStub(
     cancelQuery: QueryRef[]
     cancelRunningQueries: number
     closeEditorSuggestionMenu: number
+    deleteConnection: string[]
     formatEditorQuery: number
     focusEditorSuggestionMenuItem: EditorSuggestionMenuItemFocusInput[]
+    loadConnectionObjects: string[]
     openEditorSuggestionMenu: OpenEditorSuggestionMenuInput[]
+    refreshConnectionSuggestions: number
     requestEditorAnalysis: Array<RequestEditorAnalysisInput | undefined>
     restoreHistoryEntry: string[]
     restoreQueryExecution: string[]
@@ -269,9 +287,12 @@ export function createEngineStub(
     cancelQuery: [],
     cancelRunningQueries: 0,
     closeEditorSuggestionMenu: 0,
+    deleteConnection: [],
     formatEditorQuery: 0,
     focusEditorSuggestionMenuItem: [],
+    loadConnectionObjects: [],
     openEditorSuggestionMenu: [],
+    refreshConnectionSuggestions: 0,
     requestEditorAnalysis: [],
     restoreHistoryEntry: [],
     restoreQueryExecution: [],
@@ -331,6 +352,40 @@ export function createEngineStub(
       }
       notify()
       return connection
+    },
+    async deleteConnection(connectionId: string) {
+      calls.deleteConnection.push(connectionId)
+      if (overrides.deleteConnection) {
+        return overrides.deleteConnection(connectionId)
+      }
+
+      const remainingConnections = (state.connections.data ?? []).filter((connection) => connection.id !== connectionId)
+      const nextSelectedConnectionId =
+        state.selectedConnectionId === connectionId ? remainingConnections[0]?.id : state.selectedConnectionId
+
+      const nextObjectsByConnectionId = { ...state.objectsByConnectionId }
+      delete nextObjectsByConnectionId[connectionId]
+
+      state = {
+        ...state,
+        connections: createQueryState({
+          data: remainingConnections,
+          dataUpdateCount: state.connections.dataUpdateCount + 1,
+          dataUpdatedAt: Date.now(),
+          fetchStatus: "idle",
+          status: "success",
+        }),
+        objectsByConnectionId: nextObjectsByConnectionId,
+        settings: {
+          ...state.settings,
+          sidebarState: {
+            ...state.settings.sidebarState,
+            lastSelectedConnectionId: nextSelectedConnectionId ?? "",
+          },
+        },
+        selectedConnectionId: nextSelectedConnectionId,
+      }
+      notify()
     },
     runQuery(input: RunQueryInput = {}) {
       calls.runQuery.push(input)
@@ -417,7 +472,9 @@ export function createEngineStub(
         return undefined
       }
 
-      const execution = state.history.find((entry) => entry.savedQueryId === savedQuery.id || entry.sql.source === savedQuery.text)
+      const execution = state.history.find(
+        (entry) => entry.savedQueryId === savedQuery.id || entry.sql.source === savedQuery.text,
+      )
       state = {
         ...state,
         detailView:
@@ -457,6 +514,38 @@ export function createEngineStub(
       }
       return queryStates.get(query.queryId) ?? state.queryExecution
     },
+    async loadConnectionObjects(connectionId: string) {
+      calls.loadConnectionObjects.push(connectionId)
+      if (overrides.loadConnectionObjects) {
+        return overrides.loadConnectionObjects(connectionId)
+      }
+
+      const existing = state.objectsByConnectionId[connectionId]
+      const objects = existing?.data ?? []
+      state = {
+        ...state,
+        objectsByConnectionId: {
+          ...state.objectsByConnectionId,
+          [connectionId]: createQueryState({
+            data: objects,
+            dataUpdateCount: (existing?.dataUpdateCount ?? 0) + 1,
+            dataUpdatedAt: Date.now(),
+            fetchStatus: "idle",
+            status: "success",
+          }),
+        },
+      }
+      notify()
+      return objects
+    },
+    async refreshConnectionSuggestions() {
+      calls.refreshConnectionSuggestions += 1
+      if (overrides.refreshConnectionSuggestions) {
+        return overrides.refreshConnectionSuggestions()
+      }
+
+      return state.connectionSuggestions.data ?? []
+    },
     cancelQuery(query: QueryRef) {
       calls.cancelQuery.push(query)
       if (overrides.cancelQuery) {
@@ -479,7 +568,9 @@ export function createEngineStub(
         createdAt: Date.now(),
         id: `saved-query-${calls.saveQueryAsNew.length}`,
         name: input.name,
-        protocol: input.protocol ?? state.connections.data?.find((connection) => connection.id === state.selectedConnectionId)?.protocol,
+        protocol:
+          input.protocol ??
+          state.connections.data?.find((connection) => connection.id === state.selectedConnectionId)?.protocol,
         text: input.text ?? state.editor.text,
       })
       state = {
@@ -616,7 +707,8 @@ export function createEngineStub(
         editor: {
           ...state.editor,
           cursorOffset: nextCursorOffset,
-          savedQueryId: patch.savedQueryId === undefined ? state.editor.savedQueryId : (patch.savedQueryId ?? undefined),
+          savedQueryId:
+            patch.savedQueryId === undefined ? state.editor.savedQueryId : (patch.savedQueryId ?? undefined),
           text: nextText,
         },
       }
@@ -804,7 +896,12 @@ export function createEngineStub(
             status: "closed",
           },
           suggestionScopeMode: item.connectionId ? "selected-connection" : state.editor.suggestionScopeMode,
-          text: replaceTextRange(state.editor.text, menu.replacementRange.start, menu.replacementRange.end, item.insertText),
+          text: replaceTextRange(
+            state.editor.text,
+            menu.replacementRange.start,
+            menu.replacementRange.end,
+            item.insertText,
+          ),
         },
         selectedConnectionId: item.connectionId ?? state.selectedConnectionId,
       }
@@ -842,11 +939,14 @@ export function createEngineStub(
     | "cancelRunningQueries"
     | "cancelActiveQueries"
     | "closeEditorSuggestionMenu"
+    | "deleteConnection"
     | "formatEditorQuery"
     | "focusEditorSuggestionMenuItem"
     | "getQueryState"
     | "getState"
+    | "loadConnectionObjects"
     | "openEditorSuggestionMenu"
+    | "refreshConnectionSuggestions"
     | "requestEditorAnalysis"
     | "registry"
     | "restoreHistoryEntry"

@@ -1,4 +1,14 @@
 export { BunSqlAdapter, type BunSqlConfig } from "./lib/adapters/BunSqlAdapter"
+export {
+  PostgresAdapter,
+  postgres,
+  postgresqlProtocolResolver,
+  resolvePostgresConfig,
+  type PostgresArg,
+  type PostgresConfig,
+  type PostgresqlProtocolResolution,
+  type PostgresSQL,
+} from "./lib/adapters/postgres"
 export { sqlite, type SqliteArg, type SqliteSQL } from "./lib/adapters/sqlite"
 export { TursoAdapter, type TursoConfig } from "./lib/adapters/TursoAdapter"
 export { createLocalPersistence, createLocalPersistenceConnection } from "./lib/createLocalPersistence"
@@ -41,6 +51,7 @@ export {
   type ConnectionFormValue,
   type ConnectionFormValues,
   type ConnectionSelectField,
+  type ConnectionSuggestion,
   type ConnectionSpec,
   type ConnectionSpecDraft,
   type ConnectionTextField,
@@ -53,7 +64,9 @@ export {
   type AddConnectionInput,
   type ConnectionObjectsState,
   type ConnectionsState,
+  type ConnectionSuggestionsState,
   type DetailView,
+  type DiscoveredConnectionSuggestion,
   type EditorAnalysisState,
   type EditorAnalysisStatus,
   type EditorState,
@@ -82,9 +95,7 @@ export {
   type SuggestionProvider,
   type SuggestionRequest,
 } from "./lib/suggestions"
-export {
-  type SavedQuery,
-} from "./lib/types/SavedQuery"
+export { type SavedQuery } from "./lib/types/SavedQuery"
 export {
   createSettingsRow,
   defaultSettingsState,
@@ -95,12 +106,7 @@ export {
   type SettingsState,
   type SettingsStore,
 } from "./lib/types/Settings"
-export {
-  type QueryExecution,
-  type QueryExecutionStatus,
-  type QueryFlow,
-  type QueryInitiator,
-} from "./lib/types/Log"
+export { type QueryExecution, type QueryExecutionStatus, type QueryFlow, type QueryInitiator } from "./lib/types/Log"
 export {
   type ExplainColumn,
   type ExplainDiagnostic,

@@ -1,4 +1,3 @@
-import { RGBA } from "@opentui/core"
 import { testRender } from "@opentui/react/test-utils"
 import { afterEach, describe, expect, test } from "bun:test"
 import { act, useEffect, type ReactNode } from "react"
@@ -10,18 +9,31 @@ import {
 } from "../../src/tui/dataview/ResultsTable"
 import { FocusProvider, focusPathSignature, useFocusNavigationState, useFocusTree } from "../../src/tui/focus"
 import { App, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID, recentQueryFocusId } from "../../src/tui/index"
-import { ADD_CONNECTION_AREA_ID } from "../../src/tui/connection/AddConnectionPane"
+import { AddConnectionPane, ADD_CONNECTION_AREA_ID } from "../../src/tui/connection/AddConnectionPane"
+import { PostgresAdapter } from "../../src/lib/adapters/postgres"
 import { objectNodes, onOpenNode, onSelectNode, SIDEBAR_AREA_ID, Sidebar } from "../../src/tui/sidebar/Sidebar"
-import { SIDEBAR_TREE_AREA_ID, type TreeNode } from "../../src/tui/sidebar/TreeView"
+import { SIDEBAR_TREE_AREA_ID, treeRowFocusId, type TreeNode } from "../../src/tui/sidebar/TreeView"
 import { KeybindProvider } from "../../src/tui/ui/keybind"
 import { Text } from "../../src/tui/ui/Text"
 import { SqlVisorProvider, useSqlVisor, useSqlVisorState } from "../../src/tui/useSqlVisor"
 import { createEngineStub, createQueryState, makeConnection, makeQueryExecution, makeSavedQuery } from "../support"
 
-let rendered: Awaited<ReturnType<typeof testRender>> | undefined
+type RenderedUi = Awaited<ReturnType<typeof testRender>>
+
+let rendered: RenderedUi | undefined
 let focusedPath = ""
 let highlightedPath = ""
 let focusNavigationActive = false
+const postgresConnectionSpec = new PostgresAdapter().getConnectionSpec()
+const defaultPostgresURI =
+  postgresConnectionSpec.toURI?.(
+    postgresConnectionSpec.createConfig({
+      database: "postgres",
+      host: "localhost",
+      port: "5432",
+      ssl: false,
+    }),
+  ) ?? ""
 
 async function render(node: ReactNode, size = { height: 18, width: 100 }) {
   rendered = await testRender(
@@ -34,6 +46,46 @@ async function render(node: ReactNode, size = { height: 18, width: 100 }) {
     await rendered?.renderOnce()
   })
   return rendered
+}
+
+async function settleRenderedUi(
+  ui: RenderedUi,
+  options: {
+    delayMs?: number
+    renders?: number
+  } = {},
+) {
+  const { delayMs = 0, renders = 1 } = options
+
+  await act(async () => {
+    if (delayMs > 0) {
+      await Bun.sleep(delayMs)
+    }
+
+    for (let index = 0; index < renders; index += 1) {
+      await ui.renderOnce()
+    }
+  })
+}
+
+async function pressBackspaceRepeated(ui: RenderedUi, count: number) {
+  await act(async () => {
+    for (let index = 0; index < count; index += 1) {
+      ui.mockInput.pressBackspace()
+      await ui.renderOnce()
+      await ui.renderOnce()
+    }
+  })
+}
+
+async function typeTextSteadily(ui: RenderedUi, text: string) {
+  await act(async () => {
+    for (const char of text) {
+      await ui.mockInput.typeText(char)
+      await ui.renderOnce()
+      await ui.renderOnce()
+    }
+  })
 }
 
 afterEach(() => {
@@ -67,9 +119,11 @@ function FocusProbe() {
 }
 
 function treeShape(nodes: readonly TreeNode[]): unknown[] {
-  return nodes.map(({ children, expanded, kind, name }) => ({
+  return nodes.map(({ accessory, automatic, children, expanded, kind, name }) => ({
     kind,
     name,
+    ...(accessory === undefined ? {} : { accessory }),
+    ...(automatic === true ? { automatic } : {}),
     ...(expanded === undefined ? {} : { expanded }),
     ...(children?.length ? { children: treeShape(children) } : {}),
   }))
@@ -153,6 +207,33 @@ describe("SqlVisor provider and app", () => {
     expect(ui.captureCharFrame()).toContain("No connections yet. Use the public API or add one next.")
   })
 
+  test("wraps sidebar shortcuts instead of shrinking them in narrow widths", async () => {
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <Sidebar onAddConnection={() => undefined} />
+      </SqlVisorProvider>,
+      { height: 12, width: 24 },
+    )
+
+    const frame = ui.captureCharFrame()
+    const shortcutLines = frame
+      .split("\n")
+      .filter((line) => line.includes("Add Conn") || line.includes("Settings") || line.includes("Refresh"))
+
+    expect(frame).toContain("Add Conn")
+    expect(frame).toContain("Settings")
+    expect(frame).toContain("Refresh")
+    expect(shortcutLines.length).toBeGreaterThan(1)
+  })
+
   test("renders sidebar object labels and handles keyboard actions", async () => {
     const connection = makeConnection({
       config: {
@@ -175,6 +256,7 @@ describe("SqlVisor provider and app", () => {
             { database: "main", name: "active_users", schema: undefined, type: "view" },
             { database: "main", name: "latest_users", schema: undefined, type: "matview" },
             {
+              name: "users_name_idx",
               on: { database: "main", name: "users", schema: undefined, type: "table" },
               type: "index",
             },
@@ -197,16 +279,25 @@ describe("SqlVisor provider and app", () => {
       { height: 20, width: 100 },
     )
 
-    expect(ui.captureCharFrame()).toContain(connection.name)
-    expect(ui.captureCharFrame()).toContain(connection.protocol)
-    expect(ui.captureCharFrame()).not.toContain(`(${connection.protocol})`)
-    expect(ui.captureCharFrame()).toContain("db main")
-    expect(ui.captureCharFrame()).toContain("schema public")
-    expect(ui.captureCharFrame()).toContain("table users")
-    expect(ui.captureCharFrame()).toContain("view active_users")
-    expect(ui.captureCharFrame()).toContain("matview latest_users")
-    expect(ui.captureCharFrame()).not.toContain("index on users")
-    expect(ui.captureCharFrame()).not.toContain("trigger on users")
+    const frame = ui.captureCharFrame()
+    const connectionLine = frame.split("\n").find((line) => line.includes(connection.name))
+    expect(frame).toContain(connection.name)
+    expect(frame).toContain(connection.protocol)
+    expect(frame).toContain("Refresh")
+    expect(frame).not.toContain(`(${connection.protocol})`)
+    expect(connectionLine?.startsWith("  Test Connection 󰆼 main")).toBe(true)
+    expect(connectionLine?.trimEnd().endsWith(connection.protocol)).toBe(true)
+    expect(connectionLine).toContain("main")
+    expect(connectionLine).toContain("")
+    expect(frame).toContain("main")
+    expect(frame).toContain("schema public")
+    expect(frame).toContain("users")
+    expect(frame).toContain("tbl")
+    expect(frame).toContain("view active_users")
+    expect(frame).toContain("matview latest_users")
+    expect(frame).not.toContain("users_name_idx")
+    expect(frame).not.toContain("idx")
+    expect(frame).not.toContain("trigger on users")
 
     await act(async () => {
       ui.mockInput.pressKey("n", { ctrl: true })
@@ -231,6 +322,115 @@ describe("SqlVisor provider and app", () => {
     expect(addConnectionCount).toBe(1)
   })
 
+  test("refreshes the focused connection branch from the sidebar refresh shortcut", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      id: "conn-refresh",
+      name: "Refresh Memory",
+      protocol: "bunsqlite",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      objectsByConnectionId: {
+        [connection.id]: createQueryState({
+          data: [
+            { name: "main", type: "database" },
+            { database: "main", name: "users", schema: undefined, type: "table" },
+          ],
+          dataUpdateCount: 1,
+          status: "success",
+        }),
+      },
+      selectedConnectionId: connection.id,
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <Sidebar onAddConnection={() => undefined} />
+        <FocusController path={[SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(connection.id)]} />
+      </SqlVisorProvider>,
+      { height: 16, width: 100 },
+    )
+
+    await settleRenderedUi(ui, { renders: 2 })
+
+    expect(ui.captureCharFrame()).toContain("Refresh")
+
+    await act(async () => {
+      ui.mockInput.pressKey("r")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(stub.calls.loadConnectionObjects).toEqual([connection.id])
+
+    await act(async () => {
+      ui.mockInput.pressArrow("down")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    await act(async () => {
+      ui.mockInput.pressKey("r")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(stub.calls.loadConnectionObjects).toEqual([connection.id, connection.id])
+  })
+
+  test("collapses a single database row into the connection row", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      name: "Mem",
+      protocol: "bunsqlite",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      objectsByConnectionId: {
+        [connection.id]: createQueryState({
+          data: [
+            { name: "main", type: "database" },
+            { database: "main", name: "some_table", schema: undefined, type: "table" },
+          ],
+          dataUpdateCount: 1,
+          status: "success",
+        }),
+      },
+      selectedConnectionId: connection.id,
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <Sidebar onAddConnection={() => undefined} />
+      </SqlVisorProvider>,
+      { height: 12, width: 80 },
+    )
+
+    const lines = ui.captureCharFrame().split("\n")
+    const connectionLine = lines.find((line) => line.includes(connection.name))
+    const tableLine = lines.find((line) => line.includes("some_table"))
+
+    expect(connectionLine?.startsWith("  Mem 󰆼 main")).toBe(true)
+    expect(connectionLine?.trimEnd().endsWith(connection.protocol)).toBe(true)
+    expect(connectionLine).toContain("main")
+    expect(connectionLine).toContain("")
+    expect(tableLine?.startsWith("  └")).toBe(true)
+    expect(lines.some((line) => line.includes("main") && !line.includes(connection.name))).toBe(false)
+  })
+
   test("nests sidebar objects under databases, schemas, and tables", () => {
     const nodes = objectNodes(
       "conn-1",
@@ -240,6 +440,13 @@ describe("SqlVisor provider and app", () => {
           { database: "main", name: "public", type: "schema" },
           { database: "main", name: "users", schema: "public", type: "table" },
           {
+            name: "users_email_idx",
+            on: { database: "main", name: "users", schema: "public", type: "table" },
+            type: "index",
+          },
+          {
+            automatic: true,
+            name: "sqlite_autoindex_users_1",
             on: { database: "main", name: "users", schema: "public", type: "table" },
             type: "index",
           },
@@ -249,6 +456,7 @@ describe("SqlVisor provider and app", () => {
           },
           { database: "main", name: "audit_log", schema: undefined, type: "table" },
           {
+            name: "audit_log_created_at_idx",
             on: { database: "main", name: "audit_log", schema: undefined, type: "table" },
             type: "index",
           },
@@ -262,7 +470,8 @@ describe("SqlVisor provider and app", () => {
     expect(treeShape(nodes)).toEqual([
       {
         kind: "database",
-        name: "db main",
+        name: "main",
+        accessory: "db",
         expanded: true,
         children: [
           {
@@ -272,20 +481,23 @@ describe("SqlVisor provider and app", () => {
             children: [
               {
                 kind: "table",
-                name: "table users",
+                name: "users",
+                accessory: "tbl",
                 expanded: false,
                 children: [
-                  { kind: "index", name: "index on users" },
+                  { kind: "index", name: "users_email_idx", accessory: "idx" },
                   { kind: "trigger", name: "trigger on users" },
+                  { kind: "index", name: "sqlite_autoindex_users_1", accessory: "idx", automatic: true },
                 ],
               },
             ],
           },
           {
             kind: "table",
-            name: "table audit_log",
+            name: "audit_log",
+            accessory: "tbl",
             expanded: false,
-            children: [{ kind: "index", name: "index on audit_log" }],
+            children: [{ kind: "index", name: "audit_log_created_at_idx", accessory: "idx" }],
           },
           { kind: "view", name: "view active_users" },
         ],
@@ -341,7 +553,8 @@ describe("SqlVisor provider and app", () => {
     const frame = ui.captureCharFrame()
     expect(frame).toContain(first.name)
     expect(frame).toContain(second.name)
-    expect(frame.match(/db main/g)?.length).toBe(2)
+    expect(frame.split("\n").find((line) => line.includes(first.name))).toContain("main")
+    expect(frame.split("\n").find((line) => line.includes(second.name))).toContain("main")
   })
 
   test("renders empty object branches as empty folders instead of placeholder rows", async () => {
@@ -428,6 +641,145 @@ describe("SqlVisor provider and app", () => {
     })
 
     expect(focusedPath).toBe(focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, `row-${second.id}`]) ?? "")
+  })
+
+  test("confirms connection deletion from backspace on a focused sidebar connection", async () => {
+    const first = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      id: "conn-first",
+      name: "First Memory",
+      protocol: "bunsqlite",
+    })
+    const second = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      id: "conn-second",
+      name: "Second Memory",
+      protocol: "bunsqlite",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [first, second],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      selectedConnectionId: first.id,
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <App />
+        <FocusController path={[SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(first.id)]} />
+        <FocusProbe />
+      </SqlVisorProvider>,
+      { height: 20, width: 100 },
+    )
+
+    await act(async () => {
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(
+      focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(first.id)]) ?? "",
+    )
+
+    ui.mockInput.pressBackspace()
+    await settleRenderedUi(ui, { delayMs: 80, renders: 3 })
+
+    expect(ui.captureCharFrame()).toContain(`Delete connection "${first.name}"?`)
+    expect(ui.captureCharFrame()).toContain("Cancel")
+    expect(ui.captureCharFrame()).toContain("Delete")
+
+    await act(async () => {
+      ui.mockInput.pressEscape()
+      await Bun.sleep(35)
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(stub.calls.deleteConnection).toEqual([])
+    expect(focusedPath).toBe(
+      focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(first.id)]) ?? "",
+    )
+
+    ui.mockInput.pressBackspace()
+    await settleRenderedUi(ui, { delayMs: 80, renders: 3 })
+
+    await act(async () => {
+      ui.mockInput.pressKey("d")
+      await Bun.sleep(80)
+      await ui.renderOnce()
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(stub.calls.deleteConnection).toEqual([first.id])
+    expect(ui.captureCharFrame()).not.toContain(first.name)
+    expect(ui.captureCharFrame()).toContain(second.name)
+    expect(focusedPath).toBe(
+      focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(second.id)]) ?? "",
+    )
+  })
+
+  test("activating the sidebar from focus navigation delegates into its first row on launch", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      id: "conn-focus-nav",
+      name: "Focus Nav Memory",
+      protocol: "bunsqlite",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <App />
+        <FocusProbe />
+      </SqlVisorProvider>,
+      { height: 24, width: 100 },
+    )
+
+    await act(async () => {
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    await act(async () => {
+      ui.mockInput.pressEscape()
+      await Bun.sleep(30)
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusNavigationActive).toBe(true)
+
+    await act(async () => {
+      ui.mockInput.pressArrow("left")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(highlightedPath).toBe(focusPathSignature([SIDEBAR_AREA_ID]) ?? "")
+
+    await act(async () => {
+      ui.mockInput.pressEnter()
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusNavigationActive).toBe(false)
+    expect(focusedPath).toBe(focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, `row-${connection.id}`]) ?? "")
   })
 
   test("renders row detail views in the app", async () => {
@@ -1043,6 +1395,7 @@ describe("SqlVisor provider and app", () => {
     expect(ui.captureCharFrame()).toContain("Protocol")
     expect(ui.captureCharFrame()).toContain("Connection Name")
     expect(ui.captureCharFrame()).toContain("◉ bunsqlite")
+    expect(ui.captureCharFrame()).toContain("○ postgresql")
     expect(ui.captureCharFrame()).toContain("○ turso")
 
     const protocolLine = ui.captureSpans().lines.find((line) =>
@@ -1054,7 +1407,193 @@ describe("SqlVisor provider and app", () => {
     const protocolBackgroundWidth =
       protocolLine?.spans.filter((span) => span.bg.a > 0).reduce((width, span) => width + span.width, 0) ?? 0
 
-    expect(protocolBackgroundWidth).toBeGreaterThan("◉ bunsqlite  ○ turso".length)
+    expect(protocolBackgroundWidth).toBeGreaterThan("◉ bunsqlite  ○ turso  ○ postgresql".length)
+  })
+
+  test("opens add connection from a sidebar suggestion with prefilled values", async () => {
+    const suggestion = {
+      config: {
+        database: "postgres",
+        host: "localhost",
+        port: 15432,
+      },
+      id: "suggestion-postgres-local",
+      name: "localhost:15432",
+      protocol: "postgresql" as const,
+    }
+    const stub = createEngineStub({
+      connectionSuggestions: createQueryState({
+        data: [suggestion],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      connections: createQueryState({
+        data: [],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <App />
+        <FocusController path={[SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId("suggestions")]} />
+        <FocusProbe />
+      </SqlVisorProvider>,
+      { height: 32, width: 120 },
+    )
+    await settleRenderedUi(ui, { renders: 2 })
+
+    expect(ui.captureCharFrame()).toContain("Suggestions")
+    expect(ui.captureCharFrame()).toContain("localhost:15432")
+    expect(ui.captureCharFrame()).not.toContain("No connections yet. Use the public API or add one next.")
+
+    await act(async () => {
+      ui.mockInput.pressArrow("down")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(
+      focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(`suggestions.${suggestion.id}`)]) ?? "",
+    )
+
+    await act(async () => {
+      ui.mockInput.pressEnter()
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+    await settleRenderedUi(ui, { renders: 2 })
+
+    const frame = ui.captureCharFrame()
+    expect(frame).toContain("Add Connection")
+    expect(frame).toContain("◉ postgresql")
+    expect(frame).toContain("Connection Name")
+    expect(frame).toContain("localhost:15432")
+    expect(frame).toContain("//localhost:15432/postgres?sslmode=disable")
+    expect(frame).toContain("Host")
+    expect(frame).toContain("postgres")
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
+  })
+
+  test("syncs URI input with adapter fields when a connection spec provides URI helpers", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      protocol: "bunsqlite",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      selectedConnectionId: connection.id,
+    })
+    const pastedURI = "postgresql://alice@db:6543/base?ssl=true&application_name=sqlv"
+    const updatedURI = "postgresql://alice@db2:6543/base?application_name=sqlv&ssl=true"
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <AddConnectionPane onSaved={() => undefined} />
+        <FocusProbe />
+      </SqlVisorProvider>,
+      { height: 28, width: 160 },
+    )
+
+    await act(async () => {
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
+
+    await act(async () => {
+      ui.mockInput.pressTab({ shift: true })
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+    await settleRenderedUi(ui, { renders: 2 })
+
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "protocol"]) ?? "")
+
+    await act(async () => {
+      ui.mockInput.pressArrow("left")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+    await settleRenderedUi(ui, { renders: 2 })
+
+    expect(ui.captureCharFrame()).toContain("Connection URI")
+    expect(ui.captureCharFrame()).toContain(defaultPostgresURI)
+
+    await act(async () => {
+      ui.mockInput.pressTab()
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
+
+    await act(async () => {
+      ui.mockInput.pressTab()
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "uri"]) ?? "")
+
+    await pressBackspaceRepeated(ui, defaultPostgresURI.length)
+
+    await act(async () => {
+      await ui.mockInput.pasteBracketedText(pastedURI)
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    let frame = ui.captureCharFrame()
+    expect(frame).toContain(pastedURI)
+    expect(frame).toContain("db")
+    expect(frame).toContain("6543")
+    expect(frame).toContain("base")
+    expect(frame).toContain("alice")
+    expect(frame).toContain("sqlv")
+
+    await act(async () => {
+      ui.mockInput.pressArrow("down")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "host"]) ?? "")
+
+    await pressBackspaceRepeated(ui, "db".length)
+
+    await act(async () => {
+      await ui.mockInput.pasteBracketedText("db2")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+    await settleRenderedUi(ui, { renders: 2 })
+
+    frame = ui.captureCharFrame()
+    expect(frame).toContain("db2")
+    expect(frame).toContain(updatedURI)
+
+    await act(async () => {
+      ui.mockInput.pressArrow("up")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "uri"]) ?? "")
+
+    await typeTextSteadily(ui, "%")
+
+    frame = ui.captureCharFrame()
+    expect(frame).toContain(`${updatedURI}%`)
+    expect(frame).toContain("db2")
   })
 
   test("allows clearing a seeded default field value in the add-connection modal", async () => {
@@ -1194,6 +1733,7 @@ describe("SqlVisor provider and app", () => {
 
     expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "protocol"]) ?? "")
     expect(ui.captureCharFrame()).toContain("◉ bunsqlite")
+    expect(ui.captureCharFrame()).toContain("○ postgresql")
     expect(ui.captureCharFrame()).toContain("○ turso")
 
     await act(async () => {
@@ -1210,6 +1750,7 @@ describe("SqlVisor provider and app", () => {
     expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "protocol"]) ?? "")
     expect(ui.captureCharFrame()).toContain("◉ turso")
     expect(ui.captureCharFrame()).toContain("○ bunsqlite")
+    expect(ui.captureCharFrame()).toContain("○ postgresql")
   })
 
   test("keeps add-connection field keybinds working after toggling a checkbox directly", async () => {

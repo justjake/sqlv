@@ -2,7 +2,7 @@ import { createCliRenderer, type MouseEvent } from "@opentui/core"
 import { createRoot, flushSync, useTerminalDimensions } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { sameFocusPath } from "../lib/focus"
-import { SqlVisor, type ActiveQuery, type DetailView, type QueryExecution } from "../index"
+import { SqlVisor, type ActiveQuery, type DetailView, type DiscoveredConnectionSuggestion, type QueryExecution } from "../index"
 import type { Connection } from "../lib/types/Connection"
 import { AddConnectionPane } from "./connection/AddConnectionPane"
 import { ResultsTable, RESULTS_TABLE_FOCUS_ID } from "./dataview/ResultsTable"
@@ -21,9 +21,12 @@ import {
 } from "./focus"
 import { Separator } from "./Separator"
 import { SettingsPane } from "./sidebar/SettingsPane"
-import { Sidebar } from "./sidebar/Sidebar"
+import { SIDEBAR_AREA_ID, Sidebar } from "./sidebar/Sidebar"
+import { SIDEBAR_TREE_AREA_ID, treeRowFocusId } from "./sidebar/TreeView"
+import { ConfirmModal } from "./ui/ConfirmModal"
 import { KeybindProvider, useKeybindHandler, useShortcut } from "./ui/keybind"
 import { Modal } from "./ui/Modal"
+import { ModalPresenterProvider, usePresentModal, usePresentedModalCount } from "./ui/presentModal"
 import { Text } from "./ui/Text"
 import { ThemeProvider, useTheme } from "./ui/theme"
 import { SqlVisorProvider, useSqlVisor, useSqlVisorState } from "./useSqlVisor"
@@ -69,11 +72,26 @@ export const RECENT_QUERY_FOCUS_ID = "recent-query-view"
 export const RECENT_QUERY_AREA_ID = "recent-query-list"
 
 export function App() {
+  return (
+    <ModalPresenterProvider>
+      <AppBody />
+    </ModalPresenterProvider>
+  )
+}
+
+function AppBody() {
   const engine = useSqlVisor()
+  const presentModal = usePresentModal()
+  const presentedModalCount = usePresentedModalCount()
   const state = useSqlVisorState()
   const tree = useFocusTree()
   const [pane, setPane] = useState<TopRightPane>("editor")
-  const [addConnectionOpen, setAddConnectionOpen] = useState(false)
+  const [addConnectionModal, setAddConnectionModal] = useState<
+    | {
+        initialSuggestion?: DiscoveredConnectionSuggestion
+      }
+    | undefined
+  >()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(30)
   const [editorHeight, setEditorHeight] = useState(12)
@@ -183,17 +201,17 @@ export function App() {
     setPane("editor")
   }, [])
 
-  const handleOpenAddConnection = useCallback(() => {
+  const handleOpenAddConnection = useCallback((initialSuggestion?: DiscoveredConnectionSuggestion) => {
     const currentPath = tree.getNavigationState().focusedPath
     addConnectionReturnFocusRef.current = currentPath ? [...currentPath] : undefined
-    setAddConnectionOpen(true)
+    setAddConnectionModal({ initialSuggestion })
   }, [tree])
 
   const handleCloseAddConnection = useCallback(() => {
     const returnFocus = addConnectionReturnFocusRef.current
     addConnectionReturnFocusRef.current = undefined
     flushSync(() => {
-      setAddConnectionOpen(false)
+      setAddConnectionModal(undefined)
     })
     if (returnFocus) {
       tree.focusPath(returnFocus)
@@ -204,7 +222,7 @@ export function App() {
     addConnectionReturnFocusRef.current = undefined
     flushSync(() => {
       setPane("editor")
-      setAddConnectionOpen(false)
+      setAddConnectionModal(undefined)
     })
     tree.focusPath([QUERY_EDITOR_FOCUS_ID])
   }, [tree])
@@ -234,6 +252,38 @@ export function App() {
 
     handleOpenSettings()
   }, [handleCloseSettings, handleOpenSettings, settingsOpen])
+
+  const handleDeleteConnection = useCallback(
+    async (connectionId: string) => {
+      const connection = connections.find((candidate) => candidate.id === connectionId)
+      if (!connection) {
+        return
+      }
+
+      const shouldDelete = await presentModal(ConfirmModal, {
+        children: `Delete connection "${connection.name}"?`,
+        default: "no",
+        no: "Cancel",
+        yes: "Delete",
+      })
+
+      if (!shouldDelete) {
+        return
+      }
+
+      await engine.deleteConnection(connectionId)
+      queueMicrotask(() => {
+        const nextSelectedConnectionId = engine.getState().selectedConnectionId
+        if (nextSelectedConnectionId) {
+          tree.focusPath([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(nextSelectedConnectionId)])
+          return
+        }
+
+        tree.focusPath([SIDEBAR_AREA_ID])
+      })
+    },
+    [connections, engine, presentModal, tree],
+  )
 
   const handleOpenSaveDialog = useCallback(() => {
     setSaveDialog({
@@ -320,7 +370,7 @@ export function App() {
     setDragging(null)
   }, [])
 
-  const modalStackOpen = addConnectionOpen || !!saveDialog || settingsOpen
+  const modalStackOpen = !!addConnectionModal || !!saveDialog || settingsOpen || presentedModalCount > 0
 
   return (
     <box
@@ -335,8 +385,9 @@ export function App() {
         <Sidebar
           addConnectionEnabled={!modalStackOpen}
           onAddConnection={handleOpenAddConnection}
+          onDeleteConnection={handleDeleteConnection}
           onToggleSettings={handleToggleSettings}
-          settingsEnabled={settingsOpen || (!addConnectionOpen && !saveDialog)}
+          settingsEnabled={settingsOpen || !modalStackOpen}
         />
       </box>
 
@@ -418,8 +469,9 @@ export function App() {
           termWidth={termWidth}
         />
       )}
-      {addConnectionOpen && (
+      {addConnectionModal && (
         <AddConnectionModal
+          initialSuggestion={addConnectionModal.initialSuggestion}
           onClose={handleCloseAddConnection}
           onSaved={handleAddConnectionSaved}
           termHeight={termHeight}
@@ -433,6 +485,7 @@ export function App() {
 }
 
 function AddConnectionModal(props: {
+  initialSuggestion?: DiscoveredConnectionSuggestion
   onClose: () => void
   onSaved: () => void
   termHeight: number
@@ -442,7 +495,7 @@ function AddConnectionModal(props: {
 
   return (
     <Modal focusNavigable={false} height={dialogHeight} onClose={props.onClose} size="medium" title="Add Connection">
-      <AddConnectionPane onSaved={props.onSaved} />
+      <AddConnectionPane initialSuggestion={props.initialSuggestion} onSaved={props.onSaved} />
     </Modal>
   )
 }
@@ -914,7 +967,7 @@ function formatResultDividerLabel(rowCount: number): string {
 function truncateSql(sql: string, max: number): string {
   const oneLine = sql.replace(/\s+/g, " ").trim()
   if (oneLine.length <= max) return oneLine
-  return oneLine.slice(0, max) + "..."
+  return oneLine.slice(0, max) + "…"
 }
 
 if (import.meta.main) {

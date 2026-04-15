@@ -49,11 +49,21 @@ export function defaultPersistLocation() {
   return path.join(xdgDataHome, APP_NAME, DB_NAME)
 }
 
+export async function getExistingLocalEncryptionKey(secrets = defaultSecretStore()): Promise<string | undefined> {
+  try {
+    return (
+      (await secrets.get({
+        service: BUNDLE_ID,
+        name: ENCRYPTION_SECRET_DEFAULT_NAME,
+      })) ?? undefined
+    )
+  } catch {
+    return undefined
+  }
+}
+
 export async function getOrCreateLocalEncryptionKey(secrets: SecretStore): Promise<string> {
-  let key = await secrets.get({
-    service: BUNDLE_ID,
-    name: ENCRYPTION_SECRET_DEFAULT_NAME,
-  })
+  let key = await getExistingLocalEncryptionKey(secrets)
   if (!key) {
     key = crypto.getRandomValues(Buffer.alloc(32)).toString("hex")
     await secrets.set({

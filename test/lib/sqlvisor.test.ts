@@ -22,6 +22,7 @@ class FakeBunAdapter implements Adapter<{ path: string }, unknown, {}> {
   connectCalls = 0
   fetchObjectsCalls = 0
   explainCalls = 0
+  findConnectionsCalls = 0
   queryCalls: string[] = []
   rowsByQuery = new Map<string, object[]>()
   errorsByQuery = new Map<string, Error>()
@@ -30,6 +31,7 @@ class FakeBunAdapter implements Adapter<{ path: string }, unknown, {}> {
   explainErrorsByQuery = new Map<string, Error>()
   explainResultsByQuery = new Map<string, ExplainResult>()
   objects: ObjectInfo[] = []
+  connectionSuggestions: Array<{ name: string; config: Partial<{ path: string }> }> = []
 
   describeConfig(config: { path: string }): string {
     return config.path
@@ -75,6 +77,11 @@ class FakeBunAdapter implements Adapter<{ path: string }, unknown, {}> {
     return this.objects
   }
 
+  async findConnections() {
+    this.findConnectionsCalls += 1
+    return this.connectionSuggestions
+  }
+
   async explain(_db: unknown, input: { abortSignal: AbortSignal; text: string }): Promise<ExplainResult> {
     this.explainCalls += 1
     input.abortSignal.throwIfAborted()
@@ -102,10 +109,12 @@ class FakeBunAdapter implements Adapter<{ path: string }, unknown, {}> {
       })
     }
 
-    return this.explainResultsByQuery.get(input.text) ?? {
-      diagnostics: [],
-      status: "ok",
-    }
+    return (
+      this.explainResultsByQuery.get(input.text) ?? {
+        diagnostics: [],
+        status: "ok",
+      }
+    )
   }
 
   renderSQL(sql: SQL<any>) {
@@ -159,7 +168,8 @@ function createPersistence(
     connections: createMemoryStore(initialConnections, (rows) => rows.toSorted((a, b) => b.createdAt - a.createdAt)),
     log: createMemoryStore<LogEntry>(initialLogEntries),
     savedQueries: createMemoryStore(initialSavedQueries, (rows) =>
-      rows.toSorted((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))),
+      rows.toSorted((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt)),
+    ),
     settings: createMemoryStore(initialSettings),
   }
 
@@ -199,20 +209,16 @@ async function waitForQueryState(
   return engine.getQueryState(query)
 }
 
-function createSuggestionMenuInput(
-  patch: Partial<OpenEditorSuggestionMenuInput> = {},
-): OpenEditorSuggestionMenuInput {
+function createSuggestionMenuInput(patch: Partial<OpenEditorSuggestionMenuInput> = {}): OpenEditorSuggestionMenuInput {
   return {
     cursorOffset: patch.cursorOffset ?? 17,
     documentText: patch.documentText ?? "select * from @us",
     replacementRange: patch.replacementRange ?? { end: 17, start: 14 },
-    trigger:
-      patch.trigger ??
-      {
-        context: { triggerText: "@" },
-        kind: "mention",
-        query: "us",
-      },
+    trigger: patch.trigger ?? {
+      context: { triggerText: "@" },
+      kind: "mention",
+      query: "us",
+    },
     scope: patch.scope,
   }
 }
@@ -251,6 +257,7 @@ describe("SqlVisor", () => {
 
     expect(registry.get("bunsqlite")).toBe(fakeAdapter)
     expect(registry.has("turso")).toBe(true)
+    expect(registry.has("postgresql")).toBe(true)
     expect(state.connections.data?.map((connection) => connection.id)).toEqual(["conn-2", "conn-1"])
     expect(state.selectedConnectionId).toBe("conn-2")
     expect(state.editor.treeSitterGrammar).toBe("sql")
@@ -262,6 +269,75 @@ describe("SqlVisor", () => {
       sidebarState: {
         lastSelectedConnectionId: "conn-2",
       },
+    })
+  })
+
+  test("loads ephemeral connection suggestions, filters existing connections, and refreshes after add/delete", async () => {
+    const fakeAdapter = new FakeBunAdapter()
+    fakeAdapter.connectionSuggestions = [
+      {
+        name: "existing.db",
+        config: { path: "/tmp/existing.db" },
+      },
+      {
+        name: "fresh.db",
+        config: { path: "/tmp/fresh.db" },
+      },
+    ]
+
+    const persistence = createPersistence([
+      makeConnection({
+        config: {
+          path: "/tmp/existing.db",
+        },
+        id: "conn-existing",
+        name: "Existing",
+        protocol: "bunsqlite",
+      }),
+    ])
+
+    const engine = await SqlVisor.create({
+      adapters: [fakeAdapter],
+      persistence,
+      queryClient: createQueryClient(),
+      registry: new AdapterRegistry([fakeAdapter]),
+    })
+
+    await engine.refreshConnectionSuggestions()
+
+    expect(fakeAdapter.findConnectionsCalls).toBeGreaterThanOrEqual(1)
+    expect(engine.getState().connectionSuggestions.data).toEqual([
+      {
+        config: { path: "/tmp/fresh.db" },
+        id: expect.stringContaining("bunsqlite:fresh.db:"),
+        name: "fresh.db",
+        protocol: "bunsqlite",
+      },
+    ])
+
+    await engine.addConnection({
+      config: {
+        path: "/tmp/fresh.db",
+      },
+      name: "Fresh",
+      protocol: "bunsqlite",
+    })
+    await waitFor(() => (engine.getState().connectionSuggestions.data?.length ?? 0) === 0)
+
+    const freshConnectionId = engine
+      .getState()
+      .connections.data?.find((connection) => connection.config.path === "/tmp/fresh.db")
+      ?.id
+    expect(freshConnectionId).toBeDefined()
+
+    await engine.deleteConnection(freshConnectionId!)
+    await waitFor(() => (engine.getState().connectionSuggestions.data?.length ?? 0) === 1)
+
+    expect(engine.getState().connectionSuggestions.data?.[0]).toEqual({
+      config: { path: "/tmp/fresh.db" },
+      id: expect.stringContaining("bunsqlite:fresh.db:"),
+      name: "fresh.db",
+      protocol: "bunsqlite",
     })
   })
 
@@ -401,6 +477,55 @@ describe("SqlVisor", () => {
     })
   })
 
+  test("deletes connections, clears loaded object state, and advances sidebar selection", async () => {
+    const fakeAdapter = new FakeBunAdapter()
+    fakeAdapter.objects = [{ name: "main", type: "database" }]
+    const first = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      createdAt: 2,
+      id: "conn-1",
+      name: "First",
+      protocol: "bunsqlite",
+    })
+    const second = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      createdAt: 1,
+      id: "conn-2",
+      name: "Second",
+      protocol: "bunsqlite",
+    })
+    const persistence = createPersistence([first, second])
+
+    const engine = await SqlVisor.create({
+      persistence,
+      queryClient: createQueryClient(),
+      registry: new AdapterRegistry([fakeAdapter]),
+    })
+
+    await engine.loadConnectionObjects(first.id)
+    expect(engine.getState().objectsByConnectionId[first.id]?.data).toEqual(fakeAdapter.objects)
+
+    await engine.deleteConnection(first.id)
+    await waitFor(() => engine.getState().selectedConnectionId === second.id)
+
+    expect(engine.getState().connections.data?.map((connection) => connection.id)).toEqual([second.id])
+    expect(engine.getState().selectedConnectionId).toBe(second.id)
+    expect(engine.getState().settings.sidebarState.lastSelectedConnectionId).toBe(second.id)
+    expect(engine.getState().objectsByConnectionId[first.id]).toBeUndefined()
+    expect(await persistence.persist.connections.get({ id: first.id, type: "connection" })).toBeUndefined()
+    expect(await persistence.persist.settings.get({ id: "sidebarState", type: "settings" })).toMatchObject({
+      id: "sidebarState",
+      settings: {
+        lastSelectedConnectionId: second.id,
+      },
+      type: "settings",
+    })
+  })
+
   test("updates state, notifies listeners, and loads connection objects", async () => {
     const fakeAdapter = new FakeBunAdapter()
     fakeAdapter.objects = [
@@ -410,6 +535,7 @@ describe("SqlVisor", () => {
       { database: "main", name: "active_users", schema: undefined, type: "view" },
       { database: "main", name: "latest_users", schema: undefined, type: "matview" },
       {
+        name: "users_name_idx",
         on: { database: "main", name: "users", schema: undefined, type: "table" },
         type: "index",
       },
@@ -811,7 +937,9 @@ where
     expect(updated.updatedAt!).toBeGreaterThan(initialSavedQuery.createdAt)
     expect(engine.getState().editor.savedQueryId).toBe(initialSavedQuery.id)
     expect(engine.getState().savedQueries[0]).toEqual(updated)
-    expect(await persistence.persist.savedQueries.get({ id: initialSavedQuery.id, type: "savedQuery" })).toEqual(updated)
+    expect(await persistence.persist.savedQueries.get({ id: initialSavedQuery.id, type: "savedQuery" })).toEqual(
+      updated,
+    )
   })
 
   test("restores a saved query and loads its latest execution into the detail view", async () => {
@@ -1241,6 +1369,7 @@ where
       { database: "main", name: "active_users", schema: undefined, type: "view" },
       { database: "main", name: "latest_users", schema: undefined, type: "matview" },
       {
+        name: "users_name_idx",
         on: { database: "main", name: "users", schema: undefined, type: "table" },
         type: "index",
       },

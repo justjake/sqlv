@@ -1,3 +1,5 @@
+import { useCallback, useState } from "react"
+import type { ConnectionSuggestionsState, DiscoveredConnectionSuggestion } from "../../lib/SqlVisor"
 import type { ObjectInfo, QueryableObjectInfo } from "../../lib/types/objects"
 import { Focusable } from "../focus"
 import { Shortcut } from "../Shortcut"
@@ -7,7 +9,8 @@ import { useSqlVisor, useSqlVisorState } from "../useSqlVisor"
 import { TreeView, type TreeNode } from "./TreeView"
 
 type SidebarProps = {
-  onAddConnection: () => void
+  onAddConnection: (initialSuggestion?: DiscoveredConnectionSuggestion) => void
+  onDeleteConnection?: (connectionId: string) => void | Promise<void>
   onToggleSettings?: () => void
   addConnectionEnabled?: boolean
   settingsEnabled?: boolean
@@ -19,6 +22,7 @@ export function Sidebar(props: SidebarProps) {
   const {
     addConnectionEnabled = true,
     onAddConnection,
+    onDeleteConnection,
     onToggleSettings = () => undefined,
     settingsEnabled = true,
   } = props
@@ -26,10 +30,22 @@ export function Sidebar(props: SidebarProps) {
   const state = useSqlVisorState()
   const connections = state.connections.data ?? []
   const iconStyle = resolveIconStyle(state.settings.appearance.useNerdFont)
+  const [focusedConnectionId, setFocusedConnectionId] = useState<string | undefined>()
+  const refreshConnectionId = focusedConnectionId
+
+  const handleRefresh = useCallback(() => {
+    if (!refreshConnectionId) {
+      return
+    }
+
+    void engine.loadConnectionObjects(refreshConnectionId).catch(() => undefined)
+  }, [engine, refreshConnectionId])
 
   const treeNodes: TreeNode[] = connections.map((connection) => {
     const connectionObjectsState = state.objectsByConnectionId[connection.id]
     const hasConnectionObjectsState = Object.hasOwn(state.objectsByConnectionId, connection.id)
+    const connectionChildren = connectionObjectsState ? objectNodes(connection.id, connectionObjectsState) : undefined
+    const collapsedDatabase = collapseSingleDatabaseNode(connectionChildren)
 
     return {
       key: connection.id,
@@ -39,9 +55,14 @@ export function Sidebar(props: SidebarProps) {
       expanded: connection.id === state.selectedConnectionId || hasConnectionObjectsState,
       name: connection.name,
       accessory: connection.protocol,
-      children: connectionObjectsState ? objectNodes(connection.id, connectionObjectsState) : undefined,
+      inlineAccessory: collapsedDatabase?.name,
+      inlineAccessoryIcon: collapsedDatabase ? "database" : undefined,
+      inlineAccessorySeparator: collapsedDatabase ? true : undefined,
+      children: collapsedDatabase?.children ?? connectionChildren,
     }
   })
+  const suggestionSection = connectionSuggestionSection(state.connectionSuggestions)
+  const sidebarNodes = suggestionSection ? [...treeNodes, suggestionSection] : treeNodes
 
   return (
     <Focusable
@@ -55,23 +76,39 @@ export function Sidebar(props: SidebarProps) {
       navigable
       position="relative"
     >
-      <box flexDirection="row" gap={1} paddingBottom={1}>
-        <Shortcut global keys="ctrl+n" label="Add Conn" enabled={addConnectionEnabled} onKey={onAddConnection} />
+      <box columnGap={1} flexDirection="row" flexWrap="wrap" paddingBottom={1} rowGap={0}>
+        <Shortcut global keys="ctrl+n" label="Add Conn" enabled={addConnectionEnabled} onKey={() => onAddConnection()} />
         <Shortcut global keys="ctrl+," label="Settings" enabled={settingsEnabled} onKey={onToggleSettings} />
+        <Shortcut keys="r" label="Refresh" enabled={!!refreshConnectionId} onKey={handleRefresh} />
       </box>
       {state.connections.fetchStatus === "fetching" && connections.length === 0 && <Text>Loading connections...</Text>}
       {state.connections.status === "error" && connections.length === 0 && (
         <Text>{state.connections.error?.message}</Text>
       )}
-      {state.connections.status === "success" && treeNodes.length === 0 && (
+      {state.connections.status === "success" && sidebarNodes.length === 0 && (
         <Text>No connections yet. Use the public API or add one next.</Text>
       )}
       <IconProvider style={iconStyle}>
         <TreeView
           focusableProps={{ navigable: false }}
-          nodes={treeNodes}
+          nodes={sidebarNodes}
+          onBackspace={(_idx, node) => {
+            if (node.kind === "connection" && node.connectionId) {
+              void onDeleteConnection?.(node.connectionId)
+            }
+          }}
+          onFocus={(_idx, node) => {
+            setFocusedConnectionId((current) => (current === node.connectionId ? current : node.connectionId))
+          }}
           onExpand={(_idx, node) => onOpenNode(engine, node)}
-          onSelect={(_idx, node) => onSelectNode(engine, node)}
+          onSelect={(_idx, node) => {
+            if (node.suggestion) {
+              onAddConnection(node.suggestion)
+              return
+            }
+
+            onSelectNode(engine, node)
+          }}
         />
       </IconProvider>
     </Focusable>
@@ -95,18 +132,23 @@ export function objectNodes(
   state: ReturnType<typeof useSqlVisorState>["objectsByConnectionId"][string] | undefined,
 ): TreeNode[] {
   if (!state || (state.status === "pending" && !state.data)) {
-    return [{ key: `${connectionId}.idle`, kind: "placeholder", name: "(loading objects...)" }]
+    return [{ key: `${connectionId}.idle`, kind: "placeholder", connectionId, name: "(loading objects...)" }]
   }
   if (state.fetchStatus === "fetching" && !state.data) {
-    return [{ key: `${connectionId}.loading`, kind: "placeholder", name: "(loading objects...)" }]
+    return [{ key: `${connectionId}.loading`, kind: "placeholder", connectionId, name: "(loading objects...)" }]
   }
   if (state.status === "error" && !state.data?.length) {
     return [
-      { key: `${connectionId}.error`, kind: "placeholder", name: state.error?.message ?? "(failed to load objects)" },
+      {
+        key: `${connectionId}.error`,
+        kind: "placeholder",
+        connectionId,
+        name: state.error?.message ?? "(failed to load objects)",
+      },
     ]
   }
   if (state.status !== "success") {
-    return [{ key: `${connectionId}.pending`, kind: "placeholder", name: "(loading objects...)" }]
+    return [{ key: `${connectionId}.pending`, kind: "placeholder", connectionId, name: "(loading objects...)" }]
   }
   const objects = state.data ?? []
   if (objects.length === 0) {
@@ -130,23 +172,24 @@ export function objectNodes(
     roots.push(entry.node)
   }
 
+  sortObjectTreeNodes(roots)
   return roots.map(finalizeObjectTreeNode)
 }
 
 export function objectLabel(object: ObjectInfo): string {
   switch (object.type) {
     case "database":
-      return `db ${object.name}`
+      return object.name
     case "schema":
       return `schema ${object.name}`
     case "table":
-      return `table ${object.name}`
+      return object.name
     case "view":
       return `view ${object.name}`
     case "matview":
       return `matview ${object.name}`
     case "index":
-      return `index on ${object.on.name}`
+      return object.name
     case "trigger":
       return `trigger on ${object.on.name}`
   }
@@ -174,6 +217,8 @@ function createObjectTreeEntry(connectionId: string, object: ObjectInfo, index: 
       key: nodeId,
       connectionId,
       kind: object.type,
+      accessory: objectAccessory(object),
+      automatic: object.automatic,
       name: objectLabel(object),
       ...(defaultExpanded === undefined ? {} : { expanded: defaultExpanded }),
       children: [],
@@ -229,7 +274,7 @@ function objectNodeId(object: ObjectInfo, index: number): string {
     case "matview":
       return queryableNodeId(object)
     case "index":
-      return `index:${queryableNodeId(object.on)}:${index}`
+      return `index:${queryableNodeId(object.on)}:${object.name}:${index}`
     case "trigger":
       return `trigger:${queryableNodeId(object.on)}:${index}`
   }
@@ -260,4 +305,66 @@ function schemaNodeId(database: string | undefined, name: string): string {
 
 function queryableNodeId(object: QueryableObjectInfo): string {
   return `${object.type}:${object.database ?? MISSING_OBJECT_PARENT_KEY}:${object.schema ?? MISSING_OBJECT_PARENT_KEY}:${object.name}`
+}
+
+function objectAccessory(object: ObjectInfo): string | undefined {
+  switch (object.type) {
+    case "database":
+      return "db"
+    case "table":
+      return "tbl"
+    case "index":
+      return "idx"
+    case "schema":
+    case "view":
+    case "matview":
+    case "trigger":
+      return undefined
+  }
+}
+
+function sortObjectTreeNodes(nodes: MutableObjectTreeNode[]) {
+  nodes.sort((a, b) => Number(a.automatic === true) - Number(b.automatic === true))
+
+  for (const node of nodes) {
+    if (node.children.length > 0) {
+      sortObjectTreeNodes(node.children)
+    }
+  }
+}
+
+function collapseSingleDatabaseNode(nodes: TreeNode[] | undefined): TreeNode | undefined {
+  if (nodes?.length !== 1) {
+    return undefined
+  }
+
+  const [singleNode] = nodes
+  return singleNode?.kind === "database" ? singleNode : undefined
+}
+
+function connectionSuggestionSection(state: ConnectionSuggestionsState): TreeNode | undefined {
+  const children =
+    state.status === "error"
+      ? [{ key: "error", kind: "placeholder", name: state.error?.message ?? "(failed to scan suggestions)" }]
+      : state.fetchStatus === "fetching" && (state.data?.length ?? 0) === 0
+        ? [{ key: "loading", kind: "placeholder", name: "(scanning...)" }]
+        : (state.data ?? []).map((suggestion) => ({
+            key: suggestion.id,
+            kind: "connectionSuggestion",
+            name: suggestion.name,
+            accessory: suggestion.protocol,
+            suggestion,
+          }))
+
+  if (children.length === 0) {
+    return undefined
+  }
+
+  return {
+    key: "suggestions",
+    automatic: true,
+    children,
+    expanded: true,
+    name: "Suggestions",
+  }
 }

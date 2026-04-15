@@ -1,8 +1,8 @@
-import type { ReactNode } from "react"
+import type { ReactElement, ReactNode } from "react"
 import { useIsFocusNavigationActive, useIsFocusWithin } from "../focus"
 import { useShortcut } from "./keybind"
 import { PromptModal } from "./PromptModal"
-import { useResolvable } from "./resolvable"
+import { useResolvable, type ResolvableBrand } from "./resolvable"
 import { Text } from "./Text"
 import { useTheme } from "./theme"
 
@@ -18,8 +18,10 @@ export type ConfirmModalProps = {
   yes?: ReactNode
 }
 
-export function ConfirmModal(props: ConfirmModalProps) {
+export function ConfirmModal(props: ConfirmModalProps): ReactElement & ResolvableBrand<boolean> {
   const resolvable = useResolvable<boolean>()
+  const noAction = resolveConfirmAction(props.no, "no", "n")
+  const yesAction = resolveConfirmAction(props.yes, "Yes", "y")
   const onYes = props.onYes ?? resolvable.resolveAs(true)
   const onNo = props.onNo ?? resolvable.resolveAs(false)
 
@@ -28,31 +30,39 @@ export function ConfirmModal(props: ConfirmModalProps) {
       focusableId={CONFIRM_MODAL_FOCUS_ID}
       footer={
         <>
-          <ConfirmModalButton defaulted={props.default === "no"} hotkey="n" label={props.no ?? "no"} onPress={onNo} />
+          <ConfirmModalButton defaulted={props.default === "no"} hotkeyIndex={noAction.hotkeyIndex} label={noAction.label} onPress={onNo} />
           <ConfirmModalButton
             defaulted={props.default === "yes"}
-            hotkey="y"
-            label={props.yes ?? "Yes"}
+            hotkeyIndex={yesAction.hotkeyIndex}
+            label={yesAction.label}
             onPress={onYes}
           />
         </>
       }
       onClose={onNo}
       title={props.title}
-      trapEscLabel={stringLabel(props.no, "No")}
+      trapEscLabel={noAction.stringLabel}
     >
-      <ConfirmModalBody defaultAction={props.default} onNo={onNo} onYes={onYes}>
+      <ConfirmModalBody
+        defaultAction={props.default}
+        noHotkey={noAction.hotkey}
+        onNo={onNo}
+        onYes={onYes}
+        yesHotkey={yesAction.hotkey}
+      >
         {props.children}
       </ConfirmModalBody>
     </PromptModal>,
-  )
+  ) as ReactElement & ResolvableBrand<boolean>
 }
 
 function ConfirmModalBody(props: {
   children: ReactNode
   defaultAction: ConfirmModalProps["default"]
+  noHotkey: string
   onNo?: () => void
   onYes?: () => void
+  yesHotkey: string
 }) {
   const focusedWithin = useIsFocusWithin([CONFIRM_MODAL_FOCUS_ID])
   const navigationActive = useIsFocusNavigationActive()
@@ -60,7 +70,7 @@ function ConfirmModalBody(props: {
 
   useShortcut({
     enabled: enabled && !!props.onYes,
-    keys: { or: ["y", "command+enter", "command+return"] },
+    keys: { or: [props.yesHotkey, "command+enter", "command+return"] },
     onKey(event) {
       event.preventDefault()
       event.stopPropagation()
@@ -70,7 +80,7 @@ function ConfirmModalBody(props: {
 
   useShortcut({
     enabled: enabled && !!props.onNo,
-    keys: { or: ["n", "command+."] },
+    keys: { or: [props.noHotkey, "command+."] },
     onKey(event) {
       event.preventDefault()
       event.stopPropagation()
@@ -117,7 +127,7 @@ function ConfirmModalBody(props: {
 
 function ConfirmModalButton(props: {
   defaulted: boolean
-  hotkey: "n" | "y"
+  hotkeyIndex?: number
   label: ReactNode
   onPress?: () => void
 }) {
@@ -125,23 +135,24 @@ function ConfirmModalButton(props: {
 
   return (
     <box
+      alignItems="center"
       backgroundColor={props.defaulted ? theme.focusBg : undefined}
-      border
-      borderColor={props.defaulted ? theme.focusBg : theme.borderColor}
-      borderStyle="single"
+      flexBasis={0}
+      flexGrow={1}
+      justifyContent="center"
       onMouseUp={props.onPress}
-      paddingLeft={2}
-      paddingRight={2}
+      paddingLeft={1}
+      paddingRight={1}
     >
       {renderActionLabel({
         defaulted: props.defaulted,
-        hotkey: props.hotkey,
+        hotkeyIndex: props.hotkeyIndex,
         label: props.label,
       })}
     </box>
   )
 
-  function renderActionLabel(input: { defaulted: boolean; hotkey: "n" | "y"; label: ReactNode }) {
+  function renderActionLabel(input: { defaulted: boolean; hotkeyIndex?: number; label: ReactNode }) {
     if (typeof input.label === "string" || typeof input.label === "number") {
       const text = String(input.label)
 
@@ -153,11 +164,12 @@ function ConfirmModalButton(props: {
         )
       }
 
-      if (text[0]?.toLowerCase() === input.hotkey) {
+      if (input.hotkeyIndex !== undefined && input.hotkeyIndex >= 0 && input.hotkeyIndex < text.length) {
         return (
           <Text wrapMode="none">
-            <span fg={theme.focusPrimaryFg}>{text[0]}</span>
-            {text.slice(1)}
+            {text.slice(0, input.hotkeyIndex)}
+            <span fg={theme.focusPrimaryFg}>{text[input.hotkeyIndex]}</span>
+            {text.slice(input.hotkeyIndex + 1)}
           </Text>
         )
       }
@@ -169,10 +181,36 @@ function ConfirmModalButton(props: {
   }
 }
 
-function stringLabel(value: ReactNode | undefined, fallback: string) {
-  if (typeof value === "string" || typeof value === "number") {
-    return String(value)
+type ConfirmAction = {
+  hotkey: string
+  hotkeyIndex?: number
+  label: ReactNode
+  stringLabel: string
+}
+
+function resolveConfirmAction(value: ReactNode | undefined, fallbackLabel: string, fallbackHotkey: string): ConfirmAction {
+  const label = value ?? fallbackLabel
+  const stringLabel = typeof label === "string" || typeof label === "number" ? String(label) : fallbackLabel
+  const hotkeyMatch = typeof label === "string" || typeof label === "number" ? findHotkeyInText(stringLabel) : undefined
+
+  return {
+    hotkey: hotkeyMatch?.key ?? fallbackHotkey,
+    hotkeyIndex: hotkeyMatch?.index,
+    label,
+    stringLabel,
+  }
+}
+
+function findHotkeyInText(text: string): { index: number; key: string } | undefined {
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (char && /[a-z0-9]/i.test(char)) {
+      return {
+        index,
+        key: char.toLowerCase(),
+      }
+    }
   }
 
-  return fallback
+  return undefined
 }

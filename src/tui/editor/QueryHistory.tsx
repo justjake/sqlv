@@ -569,14 +569,14 @@ function formatElapsed(entry: QueryExecution): string {
 function truncateSql(sql: string, max: number): string {
   const oneLine = sql.replace(/\s+/g, " ").trim()
   if (oneLine.length <= max) return oneLine
-  return oneLine.slice(0, max) + "..."
+  return oneLine.slice(0, max) + "…"
 }
 
 function truncateText(value: string, max: number): string {
   if (value.length <= max) {
     return value
   }
-  return value.slice(0, max) + "..."
+  return value.slice(0, max) + "…"
 }
 
 function finderLabel(row: QueryFinderMatch): string {

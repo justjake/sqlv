@@ -5,6 +5,10 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 // ── Semantic color tokens ───────────────────────────────────────────────────
 
 type Theme = {
+  /** Default background for neutral app surfaces and modal panels. */
+  backgroundBg: string
+  /** Backdrop for modal overlays. */
+  modalBackdropBg: string
   /** Foreground for ordinary body text and input text. */
   primaryFg: string
   /** Foreground for focus-accented indicators such as selected radio dots. */
@@ -56,8 +60,11 @@ type Theme = {
 const FORM_FIELD_BACKGROUND_ALPHA = 0x38
 const FORM_FIELD_BACKGROUND_ACTIVE_ALPHA = 0x5a
 const FOCUS_NAV_HALO_ALPHA = 0x24
+const MODAL_BACKDROP_ALPHA = 0x96
 
 const DARK: Theme = {
+  backgroundBg: "#151515",
+  modalBackdropBg: withHexAlpha("#151515", MODAL_BACKDROP_ALPHA),
   primaryFg: "#d0d0d0",
   focusPrimaryFg: "#639ee4", // base0D (blue)
   formFieldLabelActiveFg: "#ffffff",
@@ -82,6 +89,8 @@ const DARK: Theme = {
 }
 
 const LIGHT: Theme = {
+  backgroundBg: "#ffffff",
+  modalBackdropBg: withHexAlpha("#ffffff", MODAL_BACKDROP_ALPHA),
   primaryFg: "#303030",
   focusPrimaryFg: "#4271ae",
   formFieldLabelActiveFg: "#111111",
@@ -110,7 +119,11 @@ const LIGHT: Theme = {
 function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
   const p = palette.palette
   if (mode === "light") {
+    const backgroundBg = palette.defaultBackground ?? p[7] ?? LIGHT.backgroundBg
+
     return {
+      backgroundBg,
+      modalBackdropBg: withHexAlpha(backgroundBg, MODAL_BACKDROP_ALPHA),
       primaryFg: palette.defaultForeground ?? p[0] ?? LIGHT.primaryFg,
       focusPrimaryFg: p[4] ?? LIGHT.focusPrimaryFg, // ANSI blue
       formFieldLabelActiveFg: p[0] ?? LIGHT.formFieldLabelActiveFg,
@@ -137,7 +150,11 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
       errorFg: p[1] ?? LIGHT.errorFg,
     }
   }
+  const backgroundBg = palette.defaultBackground ?? p[0] ?? DARK.backgroundBg
+
   return {
+    backgroundBg,
+    modalBackdropBg: withHexAlpha(backgroundBg, MODAL_BACKDROP_ALPHA),
     primaryFg: palette.defaultForeground ?? p[7] ?? DARK.primaryFg,
     focusPrimaryFg: p[4] ?? DARK.focusPrimaryFg, // ANSI blue
     formFieldLabelActiveFg: "#ffffff",
