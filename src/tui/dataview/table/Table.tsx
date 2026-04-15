@@ -103,7 +103,7 @@ export type TableProps<T> = {
    * - `false` — no borders at all.
    * - `BorderConfig` — full control over each edge and separator.
    *
-   * Default: column dividers + header separator (no outer border).
+   * Default: column dividers only (no outer border or header separator).
    */
   border?: BorderConfig | boolean | "outer" | "header"
   /** Border character set. Defaults to `singleBorder`. */
@@ -124,7 +124,7 @@ export type TableProps<T> = {
 
 // ── Internals ──────────────────────────────────────────────────────────────
 
-const DEFAULT_BORDER: BorderConfig = { columns: true, header: true }
+const DEFAULT_BORDER: BorderConfig = { columns: true }
 
 function normalizeBorder(input: TableProps<any>["border"]): BorderConfig {
   if (input === undefined) return DEFAULT_BORDER

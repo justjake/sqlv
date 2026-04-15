@@ -33,6 +33,7 @@ type TursoFeatures = {}
 export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatures> {
   readonly protocol = "turso"
   readonly treeSitterGrammar = "sql"
+  readonly sqlFormatterLanguage = "sqlite"
 
   describeConfig(config: TursoConfig): string {
     let desc = config.path

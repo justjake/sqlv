@@ -47,6 +47,7 @@ describe("database adapters", () => {
     const adapter = new BunSqlAdapter()
 
     expect(adapter.treeSitterGrammar).toBe("sql")
+    expect(adapter.sqlFormatterLanguage).toBe("sqlite")
     expect(
       adapter.describeConfig({
         create: false,
@@ -90,6 +91,7 @@ describe("database adapters", () => {
     const adapter = new TursoAdapter()
 
     expect(adapter.treeSitterGrammar).toBe("sql")
+    expect(adapter.sqlFormatterLanguage).toBe("sqlite")
     expect(
       adapter.describeConfig({
         encryption: {

@@ -143,11 +143,10 @@ describe("ResultsTable", () => {
       { height: 8, width: 40 },
     )
 
-    const [header, separator, firstRow, secondRow] = ui.captureCharFrame().split("\n")
+    const [header, firstRow, secondRow] = ui.captureCharFrame().split("\n")
     expect(header).toContain("id")
     expect(header).toContain("name")
     expect(header).not.toContain("Ada")
-    expect(separator).toContain("─")
     expect(firstRow).toContain("1")
     expect(firstRow).toContain("Ada")
     expect(secondRow).toContain("2")

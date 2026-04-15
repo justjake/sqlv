@@ -150,4 +150,58 @@ describe("TreeView", () => {
     await dispatchInput(ui, () => ui.mockInput.pressEnter())
     expect(selected).toEqual(["Sibling"])
   })
+
+  test("supports vim-style tree navigation shortcuts", async () => {
+    const nodes = [
+      {
+        expanded: true,
+        children: [{ key: "child", name: "Child" }],
+        expandable: true,
+        key: "root",
+        name: "Root",
+      },
+    ]
+
+    const ui = await render(
+      <TreeViewHarness
+        initialPath={["sidebar-tree"]}
+        nodes={nodes}
+      />,
+      { height: 10, width: 80 },
+    )
+
+    await settleDeferredRender(ui)
+    expect(focusedPathLine(ui)).toContain("sidebar-tree/row-root")
+    expect(ui.captureCharFrame()).toContain("Child")
+
+    await dispatchInput(ui, () => ui.mockInput.pressKey("j"))
+    expect(focusedPathLine(ui)).toContain("sidebar-tree/row-root.child")
+
+    await dispatchInput(ui, () => ui.mockInput.pressKey("k"))
+    expect(focusedPathLine(ui)).toContain("sidebar-tree/row-root")
+  })
+
+  test("keeps tree rows single-line when labels are long", async () => {
+    const nodes = [
+      {
+        expanded: true,
+        children: [{ key: "child", name: "A child with another longish label" }],
+        expandable: true,
+        key: "root",
+        name: "A root with a fairly long label",
+      },
+    ]
+
+    const ui = await render(
+      <TreeView nodes={nodes} />,
+      { height: 6, width: 30 },
+    )
+
+    const [rootLine, childLine, thirdLine] = ui.captureCharFrame().split("\n")
+    expect(rootLine?.startsWith(" ▼ ")).toBe(true)
+    expect(childLine?.startsWith("   └ ")).toBe(true)
+    expect(rootLine).not.toContain("label")
+    expect(childLine).not.toContain("label")
+    expect(thirdLine?.trim()).toBe("")
+  })
 })

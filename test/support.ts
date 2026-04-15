@@ -189,6 +189,7 @@ type EngineMethodOverrides = {
   cancelQuery?: (query: QueryRef) => void
   cancelRunningQueries?: () => void
   closeEditorSuggestionMenu?: () => void
+  formatEditorQuery?: () => boolean
   focusEditorSuggestionMenuItem?: (input: EditorSuggestionMenuItemFocusInput) => void
   getQueryState?: (query: QueryRef) => QueryState<QueryExecution>
   openEditorSuggestionMenu?: (input: OpenEditorSuggestionMenuInput) => void
@@ -222,6 +223,7 @@ export function createEngineStub(
     cancelQuery: QueryRef[]
     cancelRunningQueries: number
     closeEditorSuggestionMenu: number
+    formatEditorQuery: number
     focusEditorSuggestionMenuItem: EditorSuggestionMenuItemFocusInput[]
     openEditorSuggestionMenu: OpenEditorSuggestionMenuInput[]
     requestEditorAnalysis: Array<RequestEditorAnalysisInput | undefined>
@@ -240,6 +242,7 @@ export function createEngineStub(
     cancelQuery: [],
     cancelRunningQueries: 0,
     closeEditorSuggestionMenu: 0,
+    formatEditorQuery: 0,
     focusEditorSuggestionMenuItem: [],
     openEditorSuggestionMenu: [],
     requestEditorAnalysis: [],
@@ -630,6 +633,43 @@ export function createEngineStub(
       }
       notify()
     },
+    formatEditorQuery() {
+      calls.formatEditorQuery += 1
+      if (overrides.formatEditorQuery) {
+        return overrides.formatEditorQuery()
+      }
+
+      if (!state.editor.text.trim()) {
+        return false
+      }
+
+      const formattedText = state.editor.text
+        .replace(/\s+/g, " ")
+        .replace(/\s*,\s*/g, ", ")
+        .replace(/\s*=\s*/g, " = ")
+        .trim()
+
+      if (formattedText === state.editor.text) {
+        return false
+      }
+
+      state = {
+        ...state,
+        editor: {
+          ...state.editor,
+          cursorOffset: Math.min(state.editor.cursorOffset, formattedText.length),
+          suggestionMenu: {
+            items: [],
+            open: false,
+            query: "",
+            status: "closed",
+          },
+          text: formattedText,
+        },
+      }
+      notify()
+      return true
+    },
     focusEditorSuggestionMenuItem(input: EditorSuggestionMenuItemFocusInput) {
       calls.focusEditorSuggestionMenuItem.push(input)
       if (overrides.focusEditorSuggestionMenuItem) {
@@ -723,6 +763,7 @@ export function createEngineStub(
     | "cancelRunningQueries"
     | "cancelActiveQueries"
     | "closeEditorSuggestionMenu"
+    | "formatEditorQuery"
     | "focusEditorSuggestionMenuItem"
     | "getQueryState"
     | "getState"

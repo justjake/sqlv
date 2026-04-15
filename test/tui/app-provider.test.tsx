@@ -1,8 +1,14 @@
 import { testRender } from "@opentui/react/test-utils"
 import { afterEach, describe, expect, test } from "bun:test"
 import { act, useEffect, type ReactNode } from "react"
+import {
+  RESULTS_TABLE_FOCUS_ID,
+  RESULTS_TABLE_GRID_AREA_ID,
+  resultsTableCellFocusId,
+  resultsTableRowFocusId,
+} from "../../src/tui/dataview/ResultsTable"
 import { FocusProvider, focusPathSignature, useFocusNavigationState, useFocusTree } from "../../src/tui/focus"
-import { App, QUERY_INSPECTOR_FOCUS_ID, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID, recentQueryFocusId } from "../../src/tui/index"
+import { App, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID, recentQueryFocusId } from "../../src/tui/index"
 import { ADD_CONNECTION_AREA_ID } from "../../src/tui/connection/AddConnectionPane"
 import { onOpenNode, onSelectNode, Sidebar } from "../../src/tui/sidebar/Sidebar"
 import { KeybindProvider } from "../../src/tui/ui/keybind"
@@ -205,6 +211,55 @@ describe("SqlVisor provider and app", () => {
     expect(addConnectionCount).toBe(1)
   })
 
+  test("keeps loaded connection branches expanded when another connection is selected", async () => {
+    const first = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      id: "conn-first",
+      name: "Bun Memory",
+      protocol: "bunsqlite",
+    })
+    const second = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      id: "conn-second",
+      name: "Second Memory",
+      protocol: "bunsqlite",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [first, second],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      objectsByConnectionId: {
+        [first.id]: createQueryState({
+          data: [{ database: "main", name: "users", schema: undefined, type: "table" }],
+          dataUpdateCount: 1,
+          status: "success",
+        }),
+        [second.id]: createQueryState({
+          data: [{ database: "main", name: "orders", schema: undefined, type: "table" }],
+          dataUpdateCount: 1,
+          status: "success",
+        }),
+      },
+      selectedConnectionId: second.id,
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <Sidebar onAddConnection={() => undefined} />
+      </SqlVisorProvider>,
+      { height: 20, width: 100 },
+    )
+
+    expect(ui.captureCharFrame()).toContain("table users")
+    expect(ui.captureCharFrame()).toContain("table orders")
+  })
+
   test("renders row detail views in the app", async () => {
     const connection = makeConnection({
       config: {
@@ -236,7 +291,7 @@ describe("SqlVisor provider and app", () => {
     expect(ui.captureCharFrame()).toContain("Ada")
   })
 
-  test("renders fetching state and restores a filtered history query into the editor and inspector", async () => {
+  test("renders fetching state and restores a filtered history query into the editor and detail view", async () => {
     const connection = makeConnection({
       config: {
         path: ":memory:",
@@ -548,7 +603,7 @@ describe("SqlVisor provider and app", () => {
     expect(ui.captureCharFrame()).toContain("No query run selected")
   })
 
-  test("shows recent queries, caps finished rows at two, and moves focus to the inspector on enter", async () => {
+  test("shows recent queries, caps finished rows at two, and keeps focus on the list for non-interactive detail states", async () => {
     const connection = makeConnection({
       config: {
         path: ":memory:",
@@ -676,11 +731,108 @@ describe("SqlVisor provider and app", () => {
       }
     })
 
-    expect(focusedPath).toBe(focusPathSignature([QUERY_INSPECTOR_FOCUS_ID]) ?? "")
+    expect(focusedPath).toBe(
+      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(failedFinished.id)]) ?? "",
+    )
     expect(frameAfterInspect).not.toContain("Inspector")
     expect(frameAfterInspect).toContain("Query failed")
     expect(frameAfterInspect).toContain("query failed")
     expect(frameAfterInspect).toContain("select 2")
+  })
+
+  test("moves focus into the results table when selecting a query with rows", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      name: "Mem",
+      protocol: "bunsqlite",
+    })
+    const finishedQuery = makeQueryExecution({
+      connectionId: connection.id,
+      id: "history-1",
+      rows: [{ id: 1 }],
+      sql: "select 1;",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      history: [finishedQuery],
+      selectedConnectionId: connection.id,
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <App />
+        <FocusController
+          path={[RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(finishedQuery.id)]}
+        />
+        <FocusProbe />
+      </SqlVisorProvider>,
+      { height: 18, width: 60 },
+    )
+
+    await act(async () => {
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    await act(async () => {
+      ui.mockInput.pressEnter()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(
+      focusPathSignature([RESULTS_TABLE_FOCUS_ID, RESULTS_TABLE_GRID_AREA_ID, resultsTableRowFocusId(0), resultsTableCellFocusId(0)]) ?? "",
+    )
+    expect(ui.captureCharFrame()).toContain("1")
+  })
+
+  test("does not duplicate selected row metadata in the detail pane", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      name: "Mem",
+      protocol: "bunsqlite",
+    })
+    const finishedQuery = makeQueryExecution({
+      connectionId: connection.id,
+      id: "history-1",
+      rows: [{ id: 1 }],
+      sql: "select 1;",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      history: [finishedQuery],
+      selectedConnectionId: connection.id,
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <App />
+      </SqlVisorProvider>,
+      { height: 12, width: 80 },
+    )
+
+    await act(async () => {
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    const frame = ui.captureCharFrame()
+    expect(frame).not.toContain("Succeeded")
+    expect(frame.match(/0ms/g)?.length ?? 0).toBe(1)
+    expect(frame).toContain("1 row")
+    expect(frame).toContain("id")
+    expect(frame).toContain("1")
   })
 
   test("renders the connection form from adapter specs", async () => {
@@ -713,8 +865,64 @@ describe("SqlVisor provider and app", () => {
     })
 
     expect(ui.captureCharFrame()).toContain("Add Connection")
+    expect(ui.captureCharFrame()).toContain("esc esc")
     expect(ui.captureCharFrame()).toContain("[bunsqlite]")
     expect(ui.captureCharFrame()).toContain(":memory:")
+  })
+
+  test("allows clearing a seeded default field value in the add-connection modal", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      protocol: "bunsqlite",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      selectedConnectionId: connection.id,
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <App />
+      </SqlVisorProvider>,
+      { height: 24, width: 100 },
+    )
+
+    await act(async () => {
+      ui.mockInput.pressKey("n", { ctrl: true })
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    await act(async () => {
+      ui.mockInput.pressTab()
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    for (let index = 0; index < ":memory:".length; index += 1) {
+      await act(async () => {
+        ui.mockInput.pressBackspace()
+        await ui.renderOnce()
+        await ui.renderOnce()
+      })
+    }
+
+    const clearedFrame = ui.captureCharFrame()
+    expect(clearedFrame).not.toContain("Path :memory:")
+
+    await act(async () => {
+      await ui.mockInput.typeText("tmp.db")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(ui.captureCharFrame()).toContain("Path tmp.db")
   })
 
   test("uses escape-driven focus navigation inside the add-connection modal", async () => {
@@ -756,6 +964,7 @@ describe("SqlVisor provider and app", () => {
 
     expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID]) ?? "")
     expect(ui.captureCharFrame()).toContain("Add Connection")
+    expect(ui.captureCharFrame()).toContain("esc esc")
 
     await act(async () => {
       ui.mockInput.pressEscape()
@@ -764,7 +973,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(ui.captureCharFrame()).toContain("Esc Close")
+    expect(ui.captureCharFrame()).toContain("Add Connection")
 
     await act(async () => {
       ui.mockInput.pressEscape()

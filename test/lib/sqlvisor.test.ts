@@ -16,6 +16,7 @@ import { makeConnection, makeQueryExecution, makeSavedQuery } from "../support"
 class FakeBunAdapter implements Adapter<{ path: string }, unknown, {}> {
   readonly protocol = "bunsqlite"
   readonly treeSitterGrammar = "sql"
+  readonly sqlFormatterLanguage = "sqlite"
   features = {}
   connectCalls = 0
   fetchObjectsCalls = 0
@@ -324,6 +325,51 @@ describe("SqlVisor", () => {
     })
     expect(notifications).toBeGreaterThanOrEqual(4)
     expect(fakeAdapter.fetchObjectsCalls).toBeGreaterThanOrEqual(1)
+  })
+
+  test("formats the editor query using the selected adapter dialect", async () => {
+    const engine = await SqlVisor.create({
+      persistence: createPersistence(),
+      queryClient: createQueryClient(),
+      registry: new AdapterRegistry([new FakeBunAdapter()]),
+    })
+
+    engine.openEditorSuggestionMenu(
+      createSuggestionMenuInput({
+        cursorOffset: "select * from users where id = 1".length,
+        documentText: "select * from users where id = 1",
+        replacementRange: { end: "select * from users where id = 1".length, start: "select * from ".length },
+        scope: {
+          connectionId: "conn-1",
+          kind: "selected-connection",
+        },
+        trigger: {
+          kind: "identifier",
+          query: "users",
+        },
+      }),
+    )
+    await waitFor(() => engine.getState().editor.suggestionMenu.status === "ready")
+
+    engine.setEditorState({
+      cursorOffset: "select * from users where id = 1".length,
+      text: "select * from users where id = 1",
+    })
+
+    expect(engine.formatEditorQuery()).toBe(true)
+    expect(engine.getState().editor.text).toBe(`select
+  *
+from
+  users
+where
+  id = 1`)
+    expect(engine.getState().editor.cursorOffset).toBe("select * from users where id = 1".length)
+    expect(engine.getState().editor.suggestionMenu).toEqual({
+      items: [],
+      open: false,
+      query: "",
+      status: "closed",
+    })
   })
 
   test("requests editor analysis, records a system flow, and stores the latest result", async () => {

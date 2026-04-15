@@ -3,6 +3,7 @@ import { BunSqlAdapter } from "./adapters/BunSqlAdapter"
 import { sqlite } from "./adapters/sqlite"
 import { TursoAdapter } from "./adapters/TursoAdapter"
 import { createLocalPersistence, type LocalPersistence, type PersistenceStore } from "./createLocalPersistence"
+import { formatQueryText } from "./formatQuery"
 import { AdapterRegistry, type AnyAdapter, type Protocol, type ProtocolConfig } from "./interface/Adapter"
 import { QueryExecutionError, QueryRunnerImpl } from "./QueryRunnerImpl"
 import { KnownObjectsSuggestionProvider } from "./suggestions/KnownObjectsSuggestionProvider"
@@ -374,6 +375,31 @@ export class SqlVisor {
         savedQueryId: patch.savedQueryId === undefined ? this.#state.editor.savedQueryId : (patch.savedQueryId ?? undefined),
       },
     })
+  }
+
+  formatEditorQuery(): boolean {
+    const text = this.#state.editor.text
+    if (!text.trim()) {
+      return false
+    }
+
+    let formattedText: string
+    try {
+      formattedText = formatQueryText(text, this.#currentEditorFormatterLanguage())
+    } catch {
+      return false
+    }
+
+    if (formattedText === text) {
+      return false
+    }
+
+    this.closeEditorSuggestionMenu()
+    this.setEditorState({
+      cursorOffset: clampCursorOffset(this.#state.editor.cursorOffset, formattedText.length),
+      text: formattedText,
+    })
+    return true
   }
 
   async saveQueryAsNew(input: SaveQueryAsNewInput): Promise<SavedQuery> {
@@ -1170,6 +1196,15 @@ export class SqlVisor {
     return this.#state.connections.data?.find((connection) => connection.id === this.#state.selectedConnectionId)?.protocol
   }
 
+  #currentEditorFormatterLanguage(): string | undefined {
+    const protocol = this.#currentEditorProtocol()
+    if (!protocol) {
+      return undefined
+    }
+
+    return this.registry.get(protocol).sqlFormatterLanguage
+  }
+
   #resolveEditorTreeSitterGrammar(state: Pick<SqlVisorState, "connections" | "selectedConnectionId">): string | undefined {
     const connection = state.connections.data?.find((candidate) => candidate.id === state.selectedConnectionId)
     if (!connection) {
@@ -1214,6 +1249,10 @@ function createQueryClient(): QueryClient {
       },
     },
   })
+}
+
+function clampCursorOffset(value: number, max: number): number {
+  return Math.min(Math.max(value, 0), max)
 }
 
 function createSyntheticQueryExecution(args: {

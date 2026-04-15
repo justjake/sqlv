@@ -215,13 +215,13 @@ function QueryHistoryBody(props: QueryHistoryProps & {
       <box flexDirection="row" flexShrink={0} flexWrap="wrap" gap={1}>
         <Shortcut keys="ctrl+r" label="Back" enabled={shortcutsEnabled} onKey={onBack} />
         <Shortcut
-          keys="up"
+          keys={["up", "k"]}
           label="Prev"
           enabled={shortcutsEnabled && filteredEntries.length > 0}
           onKey={() => focusRow(Math.max(0, currentIndex - 1))}
         />
         <Shortcut
-          keys="down"
+          keys={["down", "j"]}
           label="Next"
           enabled={shortcutsEnabled && filteredEntries.length > 0}
           onKey={() => focusRow(Math.min(filteredEntries.length - 1, currentIndex + 1))}

@@ -5,8 +5,8 @@
  * - packages/core/src/lib/keymapping.ts
  *
  * `ShortcutKeys` models the keys we can represent in sqlv's shortcut/chord
- * syntax today. That excludes delimiter characters like bare `+`, even
- * though OpenTUI can emit them as key names at runtime.
+ * syntax today. Delimiter characters like bare `+` use a spelled alias in
+ * the input grammar, for example `plus`.
  *
  * Public canonical spellings:
  * - `esc` over `escape`
@@ -79,8 +79,8 @@ export const shortcutNormalizedSymbolKeyNames = [
   "~",
 ] as const
 
-// Bare `+` is a modifier separator in the shortcut string grammar, so it
-// cannot be expressed directly even though OpenTUI can emit it as a key name.
+// Bare `+` is a modifier separator in the shortcut string grammar, so its
+// spelled alias `plus` is used in shortcut inputs.
 export const shortcutInputSymbolKeyNames = [
   "!",
   '"',
@@ -114,6 +114,8 @@ export const shortcutInputSymbolKeyNames = [
   "}",
   "~",
 ] as const
+
+export const shortcutAliasKeyNames = ["plus"] as const
 
 export const shortcutNamedKeyNames = [
   "backspace",
@@ -240,6 +242,7 @@ export const shortcutBareKeyNames = [
   ...shortcutLetterKeyNames,
   ...shortcutDigitKeyNames,
   ...shortcutInputSymbolKeyNames,
+  ...shortcutAliasKeyNames,
   ...shortcutNamedKeyNames,
 ] as const
 
@@ -258,43 +261,44 @@ export type ShortcutNormalizedKeyName =
 
 export type ShortcutBareKeyName = (typeof shortcutBareKeyNames)[number]
 
-/** Validates the modifier prefix within a single chord step like `ctrl+shift`. */
-type ValidateShortcutModifierChain<T extends string> = Lowercase<T> extends ShortcutModifierName
+/** Type-level modifier chain within a single chord step like `ctrl+shift`. */
+type ShortcutModifierChainLiteral<T extends string> = Lowercase<T> extends ShortcutModifierName
   ? T
   : T extends `${infer Head}+${infer Tail}`
     ? Lowercase<Head> extends ShortcutModifierName
-      ? ValidateShortcutModifierChain<Tail> extends never
+      ? ShortcutModifierChainLiteral<Tail> extends never
         ? never
         : T
       : never
     : never
 
-/** Validates one chord step like `ctrl+w` within a leader chord such as `ctrl+w h`. */
-type ValidateShortcutChordStep<T extends string> = Lowercase<T> extends ShortcutBareKeyName
+/** Type-level single chord step like `ctrl+w` within a leader chord such as `ctrl+w h`. */
+type ShortcutChordStepLiteral<T extends string> = Lowercase<T> extends ShortcutBareKeyName
   ? T
   : T extends `${infer Prefix}+${infer Key}`
-    ? ValidateShortcutModifierChain<Prefix> extends never
+    ? ShortcutModifierChainLiteral<Prefix> extends never
       ? never
       : Lowercase<Key> extends ShortcutBareKeyName
         ? T
         : never
     : never
 
-/** Validates a full shortcut string, including multi-step leader chords separated by spaces. */
-type ValidateShortcutChord<T extends string> = T extends `${infer Head} ${infer Tail}`
-  ? ValidateShortcutChordStep<Head> extends never
+/** Type-level full shortcut string, including multi-step leader chords separated by spaces. */
+type ShortcutChordLiteral<T extends string> = T extends `${infer Head} ${infer Tail}`
+  ? ShortcutChordStepLiteral<Head> extends never
     ? never
-    : ValidateShortcutChord<Tail> extends never
+    : ShortcutChordLiteral<Tail> extends never
       ? never
       : T
-  : ValidateShortcutChordStep<T>
+  : ShortcutChordStepLiteral<T>
 
 /** Public shortcut/chord string type. Example: `ctrl+x` or leader chord `ctrl+w h`. */
-export type ShortcutKeys<T extends string> = ValidateShortcutChord<T> extends never ? never : T
+export type ShortcutKeys<T extends string> = ShortcutChordLiteral<T> extends never ? never : T
 
 export const shortcutKeyAliases = {
   enter: "return",
   escape: "esc",
+  plus: "+",
   kp0: "0",
   kp1: "1",
   kp2: "2",

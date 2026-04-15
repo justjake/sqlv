@@ -11,7 +11,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react"
-import { focusPathKey, type FocusPath } from "../../lib/focus"
+import { focusPathKey, type FocusDirection, type FocusPath } from "../../lib/focus"
 import { useFocusNavigationRestoreController, useFocusPath, useFocusTree } from "../focus"
 import { normalizeShortcutKeyName, type ShortcutKeys } from "./shortcutKeys"
 
@@ -27,13 +27,16 @@ export type KeyStep = {
   option?: boolean
 }
 
-/** Does a concrete key event match a chord step? Undefined fields are wildcards. */
+export type ShortcutKeyInput<TKey extends string = string> =
+  | ShortcutKeys<TKey>
+  | readonly ShortcutKeys<TKey>[]
+
+/** `option` is accepted in shortcut syntax for display, but matching relies on `meta` because many terminals never set `event.option`. */
 export function stepMatches(step: KeyStep, event: KeyEvent): boolean {
   if (step.name !== undefined && !keyNameMatches(step.name, event.name)) return false
   if (!!step.ctrl !== !!event.ctrl) return false
   if (!!step.shift !== !!event.shift) return false
   if (!!step.meta !== !!event.meta) return false
-  if (!!step.option !== !!event.option) return false
   return true
 }
 
@@ -53,13 +56,27 @@ function sequenceEquals(a: KeyStep[], b: KeyStep[]): boolean {
     if (!!sa.ctrl !== !!sb.ctrl) return false
     if (!!sa.shift !== !!sb.shift) return false
     if (!!sa.meta !== !!sb.meta) return false
-    if (!!sa.option !== !!sb.option) return false
   }
   return true
 }
 
 function eventToStep(e: KeyEvent): KeyStep {
   return { name: e.name, ctrl: e.ctrl, shift: e.shift, meta: e.meta, option: e.option }
+}
+
+function shortcutKeyInputs(input: string | readonly string[]): readonly string[] {
+  if (typeof input === "string") {
+    return [input]
+  }
+  return input
+}
+
+function shortcutKeyInputSignature(input: string | readonly string[] | undefined): string | undefined {
+  if (input === undefined) {
+    return undefined
+  }
+
+  return shortcutKeyInputs(input).join("\u0000")
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +105,7 @@ export function parseKeys(input: string): KeyStep[] {
             step.meta = true
             break
           case "option":
+            step.meta = true
             step.option = true
             break
           default:
@@ -99,22 +117,34 @@ export function parseKeys(input: string): KeyStep[] {
     })
 }
 
+export function parseKeyAlternatives<TKey extends string>(input: ShortcutKeyInput<TKey>): KeyStep[][]
+export function parseKeyAlternatives(input: string | readonly string[]): KeyStep[][]
+export function parseKeyAlternatives(input: string | readonly string[]): KeyStep[][] {
+  return shortcutKeyInputs(input).map((item) => parseKeys(item))
+}
+
 export function labelizeSequence(seq: KeyStep[]): string {
   return seq
     .map((step) => {
       let s = ""
       if (step.ctrl) s += "^"
       if (step.shift) s += "⬆"
-      if (step.meta) s += "alt+"
       if (step.option) s += "⌥"
+      else if (step.meta) s += "alt+"
       if (step.name) s += labelizeKeyName(step.name)
       return s
     })
     .join(" ")
 }
 
+export function labelizeSequences(sequences: readonly KeyStep[][]): string {
+  return sequences.map((sequence) => labelizeSequence(sequence)).join(" / ")
+}
+
 function labelizeKeyName(name: string): string {
   switch (name) {
+    case "plus":
+      return "+"
     case "up":
       return "↑"
     case "down":
@@ -126,6 +156,38 @@ function labelizeKeyName(name: string): string {
     default:
       return name
   }
+}
+
+function isPlainNavigationLetterKey(event: KeyEvent): boolean {
+  return !event.ctrl && !event.shift && !event.meta && !event.option
+}
+
+function focusNavigationDirectionForKey(event: KeyEvent): FocusDirection | undefined {
+  switch (normalizeShortcutKeyName(event.name)) {
+    case "up":
+      return "up"
+    case "down":
+      return "down"
+    case "left":
+      return "left"
+    case "right":
+      return "right"
+    case "h":
+      return isPlainNavigationLetterKey(event) ? "left" : undefined
+    case "j":
+      return isPlainNavigationLetterKey(event) ? "down" : undefined
+    case "k":
+      return isPlainNavigationLetterKey(event) ? "up" : undefined
+    case "l":
+      return isPlainNavigationLetterKey(event) ? "right" : undefined
+    default:
+      return undefined
+  }
+}
+
+function isFocusNavigationActivationKey(event: KeyEvent): boolean {
+  const name = normalizeShortcutKeyName(event.name)
+  return name === "return" || name === "space"
 }
 
 // ---------------------------------------------------------------------------
@@ -302,23 +364,21 @@ export function KeybindProvider({ chordTimeout = 2000, children }: KeybindProvid
         key.preventDefault()
         key.stopPropagation()
 
-        switch (key.name) {
-          case "escape":
-            setSkipFocusRestoreOnExit(false)
-            tree.handleEscape()
-            break
-          case "up":
-          case "down":
-          case "left":
-          case "right":
-            tree.moveFocusNavigation(key.name)
-            break
-          case "enter":
-          case "return":
-          case "space":
-            setSkipFocusRestoreOnExit(true)
-            tree.activateHighlightedFocusable()
-            break
+        if (normalizeShortcutKeyName(key.name) === "esc") {
+          setSkipFocusRestoreOnExit(false)
+          tree.handleEscape()
+          return
+        }
+
+        const direction = focusNavigationDirectionForKey(key)
+        if (direction) {
+          tree.moveFocusNavigation(direction)
+          return
+        }
+
+        if (isFocusNavigationActivationKey(key)) {
+          setSkipFocusRestoreOnExit(true)
+          tree.activateHighlightedFocusable()
         }
         return
       }
@@ -520,8 +580,8 @@ export function KeybindProvider({ chordTimeout = 2000, children }: KeybindProvid
 // ---------------------------------------------------------------------------
 
 export type UseShortcutOptions = {
-  /** Key sequence as a string, e.g. "ctrl+w h" or "ctrl+x". */
-  keys: string
+  /** Key sequence, or alternative sequences, e.g. `"ctrl+w h"` or `["up", "k"]`. */
+  keys: string | readonly string[]
   /** Additional predicate applied after sequence matching. */
   detect?: (key: KeyEvent) => boolean
   enabled?: boolean
@@ -530,7 +590,7 @@ export type UseShortcutOptions = {
 
 export type UseKeybindHandlerOptions = Omit<UseShortcutOptions, "keys"> & {
   /** Optional key sequence. Omit to receive all scoped keypresses. */
-  keys?: string
+  keys?: string | readonly string[]
 }
 
 /**
@@ -541,27 +601,30 @@ export type UseKeybindHandlerOptions = Omit<UseShortcutOptions, "keys"> & {
  * outward through focused ancestors before falling back to global
  * shortcuts.
  *
- * Returns the parsed sequence for display purposes.
+ * Returns the parsed sequences for display purposes.
  */
 export function useShortcut<TKey extends string>(
-  options: Omit<UseShortcutOptions, "keys"> & { keys: ShortcutKeys<TKey> },
-): { sequence: KeyStep[] }
-export function useShortcut(options: UseShortcutOptions): { sequence: KeyStep[] }
-export function useShortcut(options: UseShortcutOptions): { sequence: KeyStep[] } {
-  const sequence = useMemo(() => parseKeys(options.keys), [options.keys])
+  options: Omit<UseShortcutOptions, "keys"> & { keys: ShortcutKeyInput<TKey> },
+): { sequence: KeyStep[]; sequences: KeyStep[][] }
+export function useShortcut(options: UseShortcutOptions): { sequence: KeyStep[]; sequences: KeyStep[][] }
+export function useShortcut(options: UseShortcutOptions): { sequence: KeyStep[]; sequences: KeyStep[][] } {
+  const keySignature = shortcutKeyInputSignature(options.keys)
+  const sequences = useMemo(() => parseKeyAlternatives(options.keys), [keySignature])
   useKeybindHandler(options)
 
-  return { sequence }
+  return { sequence: sequences[0] ?? [], sequences }
 }
 
 export function useKeybindHandler<TKey extends string>(
-  options: Omit<UseKeybindHandlerOptions, "keys"> & { keys: ShortcutKeys<TKey> },
+  options: Omit<UseKeybindHandlerOptions, "keys"> & { keys?: ShortcutKeyInput<TKey> },
 ): void
 export function useKeybindHandler(options: UseKeybindHandlerOptions): void
 export function useKeybindHandler(options: UseKeybindHandlerOptions): void {
   const ctx = useKeybind()
   const scopePath = useFocusPath()
-  const sequence = useMemo(() => (options.keys ? parseKeys(options.keys) : undefined), [options.keys])
+  const hasKeys = options.keys !== undefined
+  const keySignature = shortcutKeyInputSignature(options.keys)
+  const sequences = useMemo(() => (options.keys ? parseKeyAlternatives(options.keys) : undefined), [keySignature])
 
   const callbackRef = useRef(options.onKey)
   callbackRef.current = options.onKey
@@ -571,14 +634,26 @@ export function useKeybindHandler(options: UseKeybindHandlerOptions): void {
   detectRef.current = options.detect
 
   useLayoutEffect(() => {
-    if (sequence) {
-      return ctx.registerShortcut({
-        callbackRef,
-        detectRef,
-        enabledRef,
-        scopePath,
-        sequence,
-      })
+    if (hasKeys) {
+      if (!sequences || sequences.length === 0) {
+        return
+      }
+
+      const unregisters = sequences.map((sequence) =>
+        ctx.registerShortcut({
+          callbackRef,
+          detectRef,
+          enabledRef,
+          scopePath,
+          sequence,
+        }),
+      )
+
+      return () => {
+        for (let index = unregisters.length - 1; index >= 0; index -= 1) {
+          unregisters[index]!()
+        }
+      }
     }
 
     return ctx.registerKeyHandler({
@@ -587,7 +662,7 @@ export function useKeybindHandler(options: UseKeybindHandlerOptions): void {
       enabledRef,
       scopePath,
     })
-  }, [ctx, scopePath, sequence])
+  }, [ctx, hasKeys, scopePath, sequences])
 }
 
 function collectScopeKeys(path: FocusPath | undefined): Array<string | undefined> {

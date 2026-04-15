@@ -1,5 +1,5 @@
 import { createCliRenderer, type MouseEvent } from "@opentui/core"
-import { createRoot, useTerminalDimensions } from "@opentui/react"
+import { createRoot, flushSync, useTerminalDimensions } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { sameFocusPath } from "../lib/focus"
 import { SqlVisor, type ActiveQuery, type DetailView, type QueryExecution } from "../index"
@@ -23,11 +23,12 @@ import {
 import { Separator } from "./Separator"
 import { Sidebar } from "./sidebar/Sidebar"
 import { KeybindProvider, useKeybindHandler, useShortcut } from "./ui/keybind"
+import { Modal } from "./ui/Modal"
 import { Text } from "./ui/Text"
 import { ThemeProvider, useTheme } from "./ui/theme"
 import { SqlVisorProvider, useSqlVisor, useSqlVisorState } from "./useSqlVisor"
 
-type TopRightPane = "editor" | "history" | "add-connection"
+type TopRightPane = "editor" | "history"
 type DragState = { type: "sidebar" | "editor"; lastPos: number }
 type SaveQueryDialogState = {
   error?: string
@@ -66,13 +67,13 @@ const EMPTY_RECENT_QUERY_ROW_COUNT = 3
 
 export const RECENT_QUERY_FOCUS_ID = "recent-query-view"
 export const RECENT_QUERY_AREA_ID = "recent-query-list"
-export const QUERY_INSPECTOR_FOCUS_ID = "query-inspector"
 
 export function App() {
   const engine = useSqlVisor()
   const state = useSqlVisorState()
   const tree = useFocusTree()
   const [pane, setPane] = useState<TopRightPane>("editor")
+  const [addConnectionOpen, setAddConnectionOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(30)
   const [editorHeight, setEditorHeight] = useState(12)
   const [selectedRecentQueryId, setSelectedRecentQueryId] = useState<string | null | undefined>()
@@ -81,6 +82,7 @@ export function App() {
   const { width: termWidth, height: termHeight } = useTerminalDimensions()
   const dragRef = useRef<DragState | null>(null)
   const pendingEditorFocusRef = useRef(false)
+  const addConnectionReturnFocusRef = useRef<readonly string[] | undefined>(undefined)
   const [dragging, setDragging] = useState<"sidebar" | "editor" | null>(null)
   const connections = state.connections.data ?? []
   const currentSavedQuery = state.editor.savedQueryId
@@ -166,6 +168,32 @@ export function App() {
     setPane("editor")
   }, [])
 
+  const handleOpenAddConnection = useCallback(() => {
+    const currentPath = tree.getNavigationState().focusedPath
+    addConnectionReturnFocusRef.current = currentPath ? [...currentPath] : undefined
+    setAddConnectionOpen(true)
+  }, [tree])
+
+  const handleCloseAddConnection = useCallback(() => {
+    const returnFocus = addConnectionReturnFocusRef.current
+    addConnectionReturnFocusRef.current = undefined
+    flushSync(() => {
+      setAddConnectionOpen(false)
+    })
+    if (returnFocus) {
+      tree.focusPath(returnFocus)
+    }
+  }, [tree])
+
+  const handleAddConnectionSaved = useCallback(() => {
+    addConnectionReturnFocusRef.current = undefined
+    flushSync(() => {
+      setPane("editor")
+      setAddConnectionOpen(false)
+    })
+    tree.focusPath([QUERY_EDITOR_FOCUS_ID])
+  }, [tree])
+
   const handleOpenSaveDialog = useCallback(() => {
     setSaveDialog({
       error: undefined,
@@ -211,12 +239,13 @@ export function App() {
 
   const handleActivateRecentQuery = useCallback(
     (query: RecentQuery) => {
-      setSelectedRecentQueryId(query.queryId)
-      if (query.status === "success" && (query.execution?.rows.length ?? 0) > 0) {
-        tree.focusPath([QUERY_INSPECTOR_FOCUS_ID, RESULTS_TABLE_FOCUS_ID])
-        return
+      const hasRows = query.status === "success" && (query.execution?.rows.length ?? 0) > 0
+      flushSync(() => {
+        setSelectedRecentQueryId(query.queryId)
+      })
+      if (hasRows) {
+        tree.focusPath([RESULTS_TABLE_FOCUS_ID])
       }
-      tree.focusPath([QUERY_INSPECTOR_FOCUS_ID])
     },
     [tree],
   )
@@ -257,7 +286,7 @@ export function App() {
       position="relative"
     >
       <box flexDirection="column" flexBasis={sidebarWidth}>
-        <Sidebar onAddConnection={() => setPane("add-connection")} />
+        <Sidebar onAddConnection={handleOpenAddConnection} />
       </box>
 
       <Separator
@@ -276,13 +305,14 @@ export function App() {
               analysisConnectionId={state.selectedConnectionId}
               autoFocus
               editor={state.editor}
-              onAddConnection={() => setPane("add-connection")}
+              onAddConnection={handleOpenAddConnection}
               onApplySuggestionMenuItem={() => engine.applyEditorSuggestionMenuItem()}
               onCancelAnalysis={handleCancelEditorAnalysis}
               onCloseSuggestionMenu={() => engine.closeEditorSuggestionMenu()}
               onEditorChange={(patch) => engine.setEditorState(patch)}
               onExecute={handleExecute}
               onFocusSuggestionMenuItem={(input) => engine.focusEditorSuggestionMenuItem(input)}
+              onFormatQuery={() => engine.formatEditorQuery()}
               onHistory={() => setPane("history")}
               onOpenSuggestionMenu={(input) => engine.openEditorSuggestionMenu(input)}
               onRequestAnalysis={handleRequestEditorAnalysis}
@@ -304,9 +334,6 @@ export function App() {
               width={detailPaneWidth}
             />
           )}
-          {pane === "add-connection" && (
-            <AddConnectionPane onBack={() => setPane("editor")} onSaved={() => setPane("editor")} />
-          )}
         </box>
 
         <Separator
@@ -326,8 +353,7 @@ export function App() {
             selectedQueryId={selectedRecentQuery?.queryId}
             width={detailPaneWidth}
           />
-          <QueryInspectorPanel
-            connections={connections}
+          <QueryDetailPanel
             detailView={state.detailView}
             selectedQuery={selectedRecentQuery}
             width={detailPaneWidth}
@@ -346,8 +372,32 @@ export function App() {
           termWidth={termWidth}
         />
       )}
+      {addConnectionOpen && (
+        <AddConnectionModal
+          onClose={handleCloseAddConnection}
+          onSaved={handleAddConnectionSaved}
+          termHeight={termHeight}
+          termWidth={termWidth}
+        />
+      )}
       <FocusNavigationHint />
     </box>
+  )
+}
+
+function AddConnectionModal(props: {
+  onClose: () => void
+  onSaved: () => void
+  termHeight: number
+  termWidth: number
+}) {
+  const topPadding = Math.max(1, Math.floor(props.termHeight / 4))
+  const dialogHeight = Math.max(12, Math.min(24, props.termHeight - topPadding - 1))
+
+  return (
+    <Modal height={dialogHeight} onClose={props.onClose} size="medium">
+      <AddConnectionPane onBack={props.onClose} onSaved={props.onSaved} />
+    </Modal>
   )
 }
 
@@ -526,25 +576,35 @@ function RecentQueryViewBody(props: {
   useKeybindHandler({
     enabled: !navigationActive && focusedWithin && queries.length > 0,
     onKey(key) {
-    switch (key.name) {
-      case "up":
-        key.preventDefault()
-        key.stopPropagation()
-        focusRow(Math.max(0, currentIndex - 1))
-        return
-      case "down":
-        key.preventDefault()
-        key.stopPropagation()
-        focusRow(Math.min(queries.length - 1, currentIndex + 1))
-        return
-      case "enter":
-      case "return":
-        key.preventDefault()
-        key.stopPropagation()
-        if (currentQuery) {
-          onActivate(currentQuery)
-        }
-    }
+      const plainVimMove = !key.ctrl && !key.shift && !key.meta && !key.option
+      switch (key.name) {
+        case "up":
+        case "k":
+          if (key.name === "k" && !plainVimMove) {
+            return
+          }
+          key.preventDefault()
+          key.stopPropagation()
+          focusRow(Math.max(0, currentIndex - 1))
+          return
+        case "down":
+        case "j":
+          if (key.name === "j" && !plainVimMove) {
+            return
+          }
+          key.preventDefault()
+          key.stopPropagation()
+          focusRow(Math.min(queries.length - 1, currentIndex + 1))
+          return
+        case "enter":
+        case "return":
+          key.preventDefault()
+          key.stopPropagation()
+          if (currentQuery) {
+            onActivate(currentQuery)
+          }
+          return
+      }
     },
   })
 
@@ -568,75 +628,24 @@ function RecentQueryViewBody(props: {
   )
 }
 
-function QueryInspectorPanel(props: {
+function QueryDetailPanel(props: {
   detailView: DetailView
   selectedQuery: RecentQuery | undefined
-  connections: Connection<any>[]
   width?: number
 }) {
-  return (
-    <Focusable
-      flexDirection="column"
-      flexGrow={1}
-      focusSelf
-      focusable
-      focusableId={QUERY_INSPECTOR_FOCUS_ID}
-      position="relative"
-    >
-      <box flexDirection="column" flexGrow={1} position="relative">
-        <QueryInspectorSurface
-          connections={props.connections}
-          detailView={props.detailView}
-          selectedQuery={props.selectedQuery}
-          width={props.width}
-        />
-        <FocusHalo />
-      </box>
-    </Focusable>
-  )
+  return <QueryDetailSurface detailView={props.detailView} selectedQuery={props.selectedQuery} width={props.width} />
 }
 
-function QueryInspectorSurface(props: {
+function QueryDetailSurface(props: {
   detailView: DetailView
   selectedQuery: RecentQuery | undefined
-  connections: Connection<any>[]
   width?: number
 }) {
-  const { detailView, selectedQuery, connections, width } = props
+  const { detailView, selectedQuery, width } = props
   const theme = useTheme()
-  const focusedWithin = useIsFocusWithin([QUERY_INSPECTOR_FOCUS_ID])
-  const navigationActive = useIsFocusNavigationActive()
-  const [now, setNow] = useState(Date.now)
-  const chromeBg = navigationActive && focusedWithin ? theme.focusNavBg : (focusedWithin ? theme.focusBg : theme.inputBg)
-
-  useEffect(() => {
-    if (!selectedQuery?.isActive) {
-      return
-    }
-    const interval = setInterval(() => setNow(Date.now()), 100)
-    return () => clearInterval(interval)
-  }, [selectedQuery?.isActive])
 
   if (selectedQuery) {
-    const connectionName = connections.find((connection) => connection.id === selectedQuery.connectionId)?.name ?? "Unknown connection"
-    return (
-      <box flexDirection="column" flexGrow={1}>
-        <box backgroundColor={chromeBg} flexDirection="column" paddingLeft={1} paddingRight={1}>
-          <box flexDirection="row" gap={1}>
-            <Text fg={recentQueryStatusColor(selectedQuery, theme)}>{recentQueryStatusGlyph(selectedQuery)}</Text>
-            <Text fg={theme.mutedFg}>{recentQueryStatusText(selectedQuery)}</Text>
-            <Text flexGrow={1} flexShrink={1} wrapMode="none" truncate>
-              {connectionName}
-            </Text>
-            <Text fg={theme.mutedFg} wrapMode="none" truncate>
-              {formatTime(selectedQuery.startedAt)} | {formatRecentQueryElapsed(selectedQuery, now)}
-            </Text>
-          </box>
-          <Text wrapMode="none" truncate>{truncateSql(selectedQuery.text, Math.max(72, (width ?? 72) * 2))}</Text>
-        </box>
-        {renderSelectedQueryDetail(selectedQuery, theme, width)}
-      </box>
-    )
+    return renderSelectedQueryDetail(selectedQuery, theme, width)
   }
 
   return renderFallbackDetailView(detailView, theme, width)
@@ -650,6 +659,9 @@ function renderSelectedQueryDetail(query: RecentQuery, theme: ReturnType<typeof 
       }
       return (
         <box flexDirection="column" flexGrow={1}>
+          <QueryDetailLabelRow
+            label={formatResultDividerLabel(query.execution?.rows.length ?? 0)}
+          />
           <ResultsTable rows={query.execution?.rows ?? []} width={width} />
         </box>
       )
@@ -670,6 +682,7 @@ function renderFallbackDetailView(detailView: DetailView, theme: ReturnType<type
       }
       return (
         <box flexDirection="column" flexGrow={1}>
+          <QueryDetailLabelRow label={formatResultDividerLabel(detailView.rows.length)} />
           <ResultsTable rows={detailView.rows} width={width} />
         </box>
       )
@@ -685,6 +698,18 @@ function renderCenteredState(theme: ReturnType<typeof useTheme>, title: string, 
     <box alignItems="center" flexDirection="column" flexGrow={1} justifyContent="center" paddingLeft={1} paddingRight={1}>
       <Text fg={theme.mutedFg}>{title}</Text>
       {message && <Text fg={theme.mutedFg} wrapMode="word">{message}</Text>}
+    </box>
+  )
+}
+
+function QueryDetailLabelRow(props: {
+  label: string
+}) {
+  const theme = useTheme()
+  return (
+    <box alignItems="center" flexDirection="row" flexShrink={0}>
+      <box flexGrow={1} />
+      <Text fg={theme.mutedFg} wrapMode="none">{props.label}</Text>
     </box>
   )
 }
@@ -755,19 +780,6 @@ function recentQueryStatusGlyph(query: RecentQuery): string {
   }
 }
 
-function recentQueryStatusText(query: RecentQuery): string {
-  switch (query.status) {
-    case "pending":
-      return "Running"
-    case "success":
-      return "Succeeded"
-    case "error":
-      return "Failed"
-    case "cancelled":
-      return "Cancelled"
-  }
-}
-
 function recentQueryStatusColor(query: RecentQuery, theme: ReturnType<typeof useTheme>): string {
   switch (query.status) {
     case "pending":
@@ -819,6 +831,10 @@ function formatElapsed(ms: number): string {
   const m = Math.floor(ms / 60_000)
   const s = Math.floor((ms % 60_000) / 1000)
   return `${m}m ${s}s`
+}
+
+function formatResultDividerLabel(rowCount: number): string {
+  return rowCount === 1 ? "1 row" : `${rowCount} rows`
 }
 
 function truncateSql(sql: string, max: number): string {

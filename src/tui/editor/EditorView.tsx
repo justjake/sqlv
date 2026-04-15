@@ -39,6 +39,7 @@ export type EditorProps = {
   onApplySuggestionMenuItem?: () => void
   onAddConnection?: () => void
   onExecute?: (sql: string) => void
+  onFormatQuery?: () => void
   onHistory?: () => void
   onSaveAsNew?: () => void
   onSaveChanges?: () => void
@@ -62,7 +63,7 @@ type EditorAnalysisOverlay = {
 }
 
 export function EditorView(props: EditorProps) {
-  const { analysisConnectionId, autoFocus, editor, onAddConnection, onApplySuggestionMenuItem, onCancelAnalysis, onCloseSuggestionMenu, onEditorChange, onExecute, onFocusSuggestionMenuItem, onHistory, onOpenSuggestionMenu, onRequestAnalysis, onSaveAsNew, onSaveChanges, savedQuery } = props
+  const { analysisConnectionId, autoFocus, editor, onAddConnection, onApplySuggestionMenuItem, onCancelAnalysis, onCloseSuggestionMenu, onEditorChange, onExecute, onFocusSuggestionMenuItem, onFormatQuery, onHistory, onOpenSuggestionMenu, onRequestAnalysis, onSaveAsNew, onSaveChanges, savedQuery } = props
   const textareaRef = useRef<TextareaRenderable>(null)
 
   const handleExecute = useCallback(() => {
@@ -124,6 +125,7 @@ export function EditorView(props: EditorProps) {
         onCloseSuggestionMenu={onCloseSuggestionMenu}
         onEditorChange={onEditorChange}
         onFocusSuggestionMenuItem={onFocusSuggestionMenuItem}
+        onFormatQuery={onFormatQuery}
         onHistory={onHistory}
         onOpenSuggestionMenu={onOpenSuggestionMenu}
         onSaveAsNew={onSaveAsNew}
@@ -146,6 +148,7 @@ function EditorSurface(props: {
   onFocusSuggestionMenuItem?: (input: EditorSuggestionMenuItemFocusInput) => void
   onApplySuggestionMenuItem?: () => void
   onHistory?: () => void
+  onFormatQuery?: () => void
   onAddConnection?: () => void
   onSaveAsNew?: () => void
   onSaveChanges?: () => void
@@ -431,7 +434,8 @@ function EditorSurface(props: {
 
   const flyoutLayout = computeSuggestionMenuLayout(props.editor.suggestionMenu, containerRef.current, props.textareaRef.current)
   const analysisOverlay = getEditorAnalysisOverlay(visibleAnalysis, props.editor.text, props.textareaRef.current, focused)
-  const canSave = !!props.editor.text.trim()
+  const canFormat = !!props.editor.text.trim()
+  const canSave = canFormat
 
   return (
     <box
@@ -444,6 +448,7 @@ function EditorSurface(props: {
         <Shortcut keys="ctrl+x" label="Execute" enabled={focused} onKey={props.handleExecute} />
         <Shortcut keys="ctrl+d" label="Clear" enabled={focused} onKey={handleClear} />
         <Shortcut keys="ctrl+r" label="History" enabled={focused} onKey={props.onHistory} />
+        {props.onFormatQuery && <Shortcut keys="option+f" label="Format" enabled={focused && canFormat} onKey={props.onFormatQuery} />}
         {props.onSaveChanges && props.savedQuery && (
           <Shortcut keys="ctrl+s" label="Save Changes" enabled={focused && canSave} onKey={props.onSaveChanges} />
         )}

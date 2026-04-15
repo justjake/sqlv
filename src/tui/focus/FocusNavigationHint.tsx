@@ -20,10 +20,10 @@ export function FocusNavigationHint() {
       paddingRight={1}
       position="absolute"
       right={1}
-      zIndex={100}
+      zIndex={300}
     >
       <Text>
-        ↑↓←→ Move  Enter Focus  Space Focus
+        ↑↓←→/hjkl Move  Enter Focus  Space Focus
         {state.escLabel ? `  Esc ${state.escLabel}` : "  Esc Cancel"}
       </Text>
     </box>

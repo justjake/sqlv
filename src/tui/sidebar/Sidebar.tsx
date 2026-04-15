@@ -19,7 +19,7 @@ export function Sidebar(props: SidebarProps) {
     kind: "connection",
     connectionId: connection.id,
     expandable: true,
-    expanded: connection.id === state.selectedConnectionId,
+    expanded: connection.id === state.selectedConnectionId || !!state.objectsByConnectionId[connection.id],
     name: `${connection.name} (${connection.protocol})`,
     children:
       connection.id === state.selectedConnectionId || state.objectsByConnectionId[connection.id]

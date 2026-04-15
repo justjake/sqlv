@@ -25,6 +25,7 @@ type BunSqlFeatures = {}
 export class BunSqlAdapter implements Adapter<BunSqlConfig, SqliteArg, BunSqlFeatures> {
   readonly protocol = "bunsqlite"
   readonly treeSitterGrammar = "sql"
+  readonly sqlFormatterLanguage = "sqlite"
 
   describeConfig(config: BunSqlConfig): string {
     let desc = config.path || ":memory:"

@@ -76,12 +76,14 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
   const spec = adapter?.getConnectionSpec()
   const visibleFields = spec?.fields.filter((field) => field.visible?.(values) ?? true) ?? []
   const focusFields: FocusField[] = useMemo(
-    () => [
-      { kind: "protocol", key: "protocol" },
-      { kind: "name", key: "name" },
-      ...visibleFields.map((field): FocusField => ({ kind: "field", field, key: field.key })),
-    ],
-    [visibleFields],
+    () => adapters.length === 0
+      ? []
+      : [
+          { kind: "protocol", key: "protocol" },
+          { kind: "name", key: "name" },
+          ...visibleFields.map((field): FocusField => ({ kind: "field", field, key: field.key })),
+        ],
+    [adapters.length, visibleFields],
   )
 
   useEffect(() => {
@@ -95,12 +97,24 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
 
   if (!adapters.length) {
     return (
-      <box flexDirection="column" gap={1} padding={1}>
-        <box flexDirection="row" gap={1}>
-          <Shortcut keys="ctrl+c" label="Back" enabled onKey={onBack} />
-        </box>
-        <Text>No connection forms are available for the registered adapters.</Text>
-      </box>
+      <Focusable
+        childrenNavigable={false}
+        delegatesFocus
+        flexDirection="column"
+        flexGrow={1}
+        height="100%"
+        focusSelf
+        focusable
+        focusableId={ADD_CONNECTION_AREA_ID}
+        onTrapEsc={onBack}
+        trap
+        trapEscLabel="Close"
+        width="100%"
+      >
+        <AddConnectionChrome onClose={onBack}>
+          <Text>No connection forms are available for the registered adapters.</Text>
+        </AddConnectionChrome>
+      </Focusable>
     )
   }
 
@@ -182,6 +196,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
       delegatesFocus
       flexDirection="column"
       flexGrow={1}
+      height="100%"
       focusSelf
       focusable
       focusableId={ADD_CONNECTION_AREA_ID}
@@ -189,6 +204,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
       scrollRef={scrollRef}
       trap
       trapEscLabel="Close"
+      width="100%"
     >
       <AddConnectionPaneBody
         adapters={adapters}
@@ -255,14 +271,12 @@ function AddConnectionPaneBody(props: {
   }
 
   return (
-    <box flexDirection="column" flexGrow={1}>
+    <AddConnectionChrome onClose={onBack}>
       <box flexDirection="row" gap={1}>
         <Shortcut keys="ctrl+s" label="Save" enabled={!saving} onKey={onSave} />
-        <Shortcut keys="ctrl+c" label="Cancel" enabled={!saving} onKey={onBack} />
       </box>
 
       <scrollbox ref={scrollRef} flexGrow={1} contentOptions={{ flexDirection: "column", gap: 1 }}>
-        <Text>Add Connection</Text>
         {formError && <Text>{formError}</Text>}
 
         <ProtocolPickerField
@@ -321,7 +335,7 @@ function AddConnectionPaneBody(props: {
                   onChange={(value) => onSetStringField(field.key, value)}
                   onNext={navigateNext}
                   onPrev={navigatePrev}
-                  placeholder={field.placeholder}
+                  placeholder={textFieldPlaceholder(field)}
                   remembered={remembered}
                   value={stringField(values, field.key, field.defaultValue ?? "")}
                 />
@@ -344,6 +358,26 @@ function AddConnectionPaneBody(props: {
           }
         })}
       </scrollbox>
+    </AddConnectionChrome>
+  )
+}
+
+function AddConnectionChrome(props: {
+  children: ReactNode
+  onClose: () => void
+}) {
+  const theme = useTheme()
+
+  return (
+    <box flexDirection="column" flexGrow={1} gap={1} height="100%" paddingBottom={1} paddingLeft={2} paddingRight={2} width="100%">
+      <box flexDirection="row" justifyContent="space-between">
+        <Text>Add Connection</Text>
+        <box flexDirection="row" gap={1} onMouseUp={props.onClose}>
+          <Text>esc</Text>
+          <Text fg={theme.mutedFg}>esc</Text>
+        </box>
+      </box>
+      {props.children}
     </box>
   )
 }
@@ -689,7 +723,7 @@ function validateDraft(spec: ConnectionSpec<any>, draft: ConnectionSpecDraft): R
     if (
       (field.kind === "text" || field.kind === "path" || field.kind === "secret") &&
       field.required &&
-      !stringField(draft.values, field.key, "").length
+      !stringField(draft.values, field.key, "").trim().length
     ) {
       errors[field.key] = `${field.label} is required.`
     }
@@ -729,10 +763,9 @@ function booleanField(values: ConnectionFormValues, key: string, defaultValue: b
 
 function stringField(values: ConnectionFormValues, key: string, defaultValue: string): string {
   const value = values[key]
-  if (typeof value !== "string") {
-    return defaultValue
-  }
+  return typeof value === "string" ? value : defaultValue
+}
 
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : defaultValue
+function textFieldPlaceholder(field: Extract<ConnectionField, { kind: "text" | "path" | "secret" }>): string | undefined {
+  return field.defaultValue === undefined || field.defaultValue === "" ? field.placeholder : undefined
 }

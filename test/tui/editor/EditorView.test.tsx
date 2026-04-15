@@ -7,7 +7,7 @@ import { editorCursorLineColors } from "../../../src/tui/editor/syntaxHighlighti
 import { loadSqliteExampleErrorCase } from "../../sqlite/exampleErrors"
 import { createTuiRenderHarness } from "../testUtils"
 
-const { render, settleDeferredRender } = createTuiRenderHarness()
+const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()
 
 function createEditorState(patch: Partial<EditorState> = {}): EditorState {
   return {
@@ -59,7 +59,7 @@ describe("EditorView", () => {
       )
     }
 
-    const ui = await render(<Harness />, { height: 12, width: 80 })
+    const ui = await render(<Harness />, { height: 12, kittyKeyboard: true, width: 80 })
 
     await act(async () => {
       await ui.mockInput.typeText("select 1")
@@ -81,6 +81,50 @@ describe("EditorView", () => {
     expect(executions).toEqual(["select 1"])
     expect(historyCount).toBe(1)
     expect(saveAsNewCount).toBe(0)
+  })
+
+  test("formats the editor query with option+f", async () => {
+    let formatCount = 0
+
+    function Harness() {
+      const [editor, setEditor] = useState<EditorState>(
+        createEditorState({
+          cursorOffset: "select * from users".length,
+          text: "select * from users",
+        }),
+      )
+
+      return (
+        <EditorView
+          autoFocus
+          editor={editor}
+          onEditorChange={(patch) => {
+            setEditor((current) => ({
+              ...current,
+              ...patch,
+            }))
+          }}
+          onFormatQuery={() => {
+            formatCount += 1
+            setEditor((current) => ({
+              ...current,
+              cursorOffset: "select\n  *\nfrom\n  users".length,
+              text: "select\n  *\nfrom\n  users",
+            }))
+          }}
+        />
+      )
+    }
+
+    const ui = await render(<Harness />, { height: 12, kittyKeyboard: true, width: 80 })
+
+    expect(ui.captureCharFrame()).toContain("Format")
+
+    await dispatchInput(ui, () => ui.mockInput.pressKey("f", { meta: true }))
+
+    expect(formatCount).toBe(1)
+    expect(ui.captureCharFrame()).toContain("from")
+    expect(ui.captureCharFrame()).toMatch(/\n\s*2\s+\*/m)
   })
 
   test("opens mention suggestions, moves focus, and applies the selected item", async () => {

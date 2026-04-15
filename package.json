@@ -18,7 +18,8 @@
     "@opentui/react": "^0.1.97",
     "@tanstack/query-core": "5.99.0",
     "@tursodatabase/database": "0.6.0-pre.17",
-    "react": "^19.2.4"
+    "react": "^19.2.4",
+    "sql-formatter": "^15.7.3"
   },
   "devDependencies": {
     "@types/bun": "latest",

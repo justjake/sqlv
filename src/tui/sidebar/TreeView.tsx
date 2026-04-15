@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react"
+import type { BoxRenderable } from "@opentui/core"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { sameFocusPath } from "../../lib/focus"
 import {
   Focusable,
@@ -129,18 +130,28 @@ function TreeViewBody(props: TreeProps) {
       return
     }
 
+    toggleRow(row, currentIndex)
+  }
+
+  function toggleRow(row: VisibleTreeNode, rowIndex: number) {
     if (row.isExpandable) {
       setRowExpanded(row, !row.isExpanded)
       return
     }
 
-    onSelect?.(currentIndex, row.node)
+    onSelect?.(rowIndex, row.node)
+  }
+
+  function toggleDisclosure(row: VisibleTreeNode) {
+    const rowIndex = rows.findIndex((candidate) => candidate.rowKey === row.rowKey)
+    tree.focusPath(treeRowPath(row.rowKey), "mouse")
+    toggleRow(row, rowIndex >= 0 ? rowIndex : currentIndex)
   }
 
   const shortcutsEnabled = !navigationActive && !inChordRef.current && focusedWithin && rows.length > 0
 
   useShortcut({
-    keys: "up",
+    keys: ["up", "k"],
     enabled: shortcutsEnabled,
     onKey(key) {
       key.preventDefault()
@@ -150,7 +161,7 @@ function TreeViewBody(props: TreeProps) {
   })
 
   useShortcut({
-    keys: "down",
+    keys: ["down", "j"],
     enabled: shortcutsEnabled,
     onKey(key) {
       key.preventDefault()
@@ -160,7 +171,7 @@ function TreeViewBody(props: TreeProps) {
   })
 
   useShortcut({
-    keys: "left",
+    keys: ["left", "h"],
     enabled: shortcutsEnabled,
     onKey(key) {
       if (currentRow?.isExpandable && currentRow.isExpanded) {
@@ -178,7 +189,7 @@ function TreeViewBody(props: TreeProps) {
   })
 
   useShortcut({
-    keys: "right",
+    keys: ["right", "l"],
     enabled: shortcutsEnabled,
     onKey(key) {
       if (currentRow?.isExpandable && !currentRow.isExpanded) {
@@ -223,44 +234,80 @@ function TreeViewBody(props: TreeProps) {
         const focused = sameFocusPath(path, focusedRowPath)
         const remembered = !focusedWithin && sameFocusPath(path, rememberedRowPath)
         return (
-          <Focusable
+          <TreeRow
             key={row.rowKey}
-            focusable
-            focusableId={rowFocusId(row.rowKey)}
-            navigable={false}
+            row={row}
+            onToggleDisclosure={row.isExpandable ? () => toggleDisclosure(row) : undefined}
           >
-            <TreeNodeView focused={focused} remembered={remembered} {...row} />
-          </Focusable>
+            <TreeNodeView {...row} focused={focused} remembered={remembered} />
+          </TreeRow>
         )
       })}
     </box>
   )
 }
 
-function TreeNodeView(props: VisibleTreeNode & { focused: boolean; remembered: boolean }) {
-  const { focused, isExpanded, isExpandable, isLast, level, node, parentIsLastPath, remembered } = props
-  const theme = useTheme()
-
-  let guides = ""
-  for (let i = 0; i < level; i += 1) {
-    guides += parentIsLastPath[i] ? "  " : `${GUIDE_PIPE} `
-  }
-
-  let marker: string
-  if (isExpandable && isExpanded) {
-    marker = EXPAND_OPEN
-  } else if (isExpandable) {
-    marker = EXPAND_CLOSED
-  } else if (isLast) {
-    marker = GUIDE_CORNER
-  } else {
-    marker = GUIDE_BRANCH
-  }
+function TreeRow(props: {
+  row: VisibleTreeNode
+  onToggleDisclosure?: () => void
+  children: ReactNode
+}) {
+  const { children, onToggleDisclosure, row } = props
+  const rowRef = useRef<BoxRenderable>(null)
+  const disclosureOffset = treeDisclosureOffset(row.level)
 
   return (
-    <box backgroundColor={focused ? theme.focusBg : (remembered ? theme.inputBg : undefined)} flexDirection="row">
-      <Text fg={theme.mutedFg}>{` ${guides}${marker} `}</Text>
-      <Text fg={theme.primaryFg}>{node.name}</Text>
+    <box
+      ref={rowRef}
+      onMouseUp={(event) => {
+        if (!onToggleDisclosure || !rowRef.current) {
+          return
+        }
+
+        const localX = event.x - rowRef.current.x
+        if (localX < disclosureOffset || localX > disclosureOffset + 1) {
+          return
+        }
+
+        event.preventDefault()
+        event.stopPropagation()
+        onToggleDisclosure()
+      }}
+      width="100%"
+    >
+      <Focusable
+        focusable
+        focusableId={rowFocusId(row.rowKey)}
+        navigable={false}
+      >
+        <box width="100%">
+          {children}
+        </box>
+      </Focusable>
+    </box>
+  )
+}
+
+function TreeNodeView(props: VisibleTreeNode & {
+  focused: boolean
+  remembered: boolean
+}) {
+  const { focused, node, remembered } = props
+  const theme = useTheme()
+  const prefix = treePrefix(props)
+
+  return (
+    <box
+      backgroundColor={focused ? theme.focusBg : (remembered ? theme.inputBg : undefined)}
+      flexDirection="row"
+      width="100%"
+    >
+      <box flexGrow={0} flexShrink={0} width={prefix.length}>
+        <Text fg={theme.mutedFg} wrapMode="none">{prefix}</Text>
+      </box>
+      <box flexGrow={1} width="100%">
+        <Text fg={theme.primaryFg} wrapMode="none">{node.name}</Text>
+      </box>
     </box>
   )
 }
@@ -271,6 +318,35 @@ function treeRowPath(rowKey: string): readonly [string, string] {
 
 function rowFocusId(rowKey: string): string {
   return `row-${rowKey}`
+}
+
+function treePrefix(row: VisibleTreeNode): string {
+  return ` ${treeGuides(row.level, row.parentIsLastPath)}${treeMarker(row)} `
+}
+
+function treeGuides(level: number, parentIsLastPath: readonly boolean[]): string {
+  let guides = ""
+  for (let i = 0; i < level; i += 1) {
+    guides += parentIsLastPath[i] ? "  " : `${GUIDE_PIPE} `
+  }
+  return guides
+}
+
+function treeMarker(row: Pick<VisibleTreeNode, "isExpandable" | "isExpanded" | "isLast">): string {
+  if (row.isExpandable && row.isExpanded) {
+    return EXPAND_OPEN
+  }
+  if (row.isExpandable) {
+    return EXPAND_CLOSED
+  }
+  if (row.isLast) {
+    return GUIDE_CORNER
+  }
+  return GUIDE_BRANCH
+}
+
+function treeDisclosureOffset(level: number): number {
+  return 1 + level * 2
 }
 
 function isExpandableNode(node: TreeNode): boolean {
