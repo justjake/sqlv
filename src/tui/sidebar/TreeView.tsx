@@ -1,5 +1,4 @@
-import { useKeyboard } from "@opentui/react"
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { sameFocusPath } from "../../lib/focus"
 import {
   Focusable,
@@ -9,7 +8,8 @@ import {
   useRememberedDescendantPath,
   useFocusTree,
 } from "../focus"
-import { useKeybind } from "../ui/keybind"
+import { useKeybind, useShortcut } from "../ui/keybind"
+import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 
 export type TreeNode = {
@@ -18,6 +18,7 @@ export type TreeNode = {
   kind?: string
   connectionId?: string
   expandable?: boolean
+  expanded?: boolean
   children?: TreeNode[]
 }
 
@@ -29,10 +30,17 @@ type FlatTreeNode = {
   parentIsLastPath: boolean[]
 }
 
+type VisibleTreeNode = FlatTreeNode & {
+  parentRowKey?: string
+  isExpandable: boolean
+  isExpanded: boolean
+}
+
 type TreeProps = {
   nodes: TreeNode[]
   onFocus?: (idx: number, node: TreeNode) => void
-  onEnter?: (idx: number, node: TreeNode) => void
+  onExpand?: (idx: number, node: TreeNode) => void
+  onSelect?: (idx: number, node: TreeNode) => void
 }
 
 export const SIDEBAR_TREE_AREA_ID = "sidebar-tree"
@@ -59,14 +67,17 @@ export function TreeView(props: TreeProps) {
 }
 
 function TreeViewBody(props: TreeProps) {
-  const { nodes, onFocus, onEnter } = props
+  const { nodes, onExpand, onFocus, onSelect } = props
   const { inChordRef } = useKeybind()
   const tree = useFocusTree()
-  const rows = useMemo(() => flattenTree(nodes), [nodes])
+  const [expansionOverrides, setExpansionOverrides] = useState<Record<string, boolean>>({})
+  const expansionState = useMemo(() => resolveExpansionState(nodes, expansionOverrides), [nodes, expansionOverrides])
+  const rows = useMemo(() => flattenVisibleTree(nodes, expansionState.expandedRowKeys), [expansionState.expandedRowKeys, nodes])
   const focusedWithin = useIsFocusWithin([SIDEBAR_TREE_AREA_ID])
   const navigationActive = useIsFocusNavigationActive()
   const focusedRowPath = useFocusedDescendantPath()
   const rememberedRowPath = useRememberedDescendantPath()
+  const theme = useTheme()
 
   const focusedIndex = rows.findIndex((row) => sameFocusPath(focusedRowPath, treeRowPath(row.rowKey)))
   const currentIndex = focusedIndex >= 0 ? focusedIndex : 0
@@ -79,6 +90,10 @@ function TreeViewBody(props: TreeProps) {
     }
   }, [currentIndex, currentRow, onFocus])
 
+  useEffect(() => {
+    setExpansionOverrides((current) => pruneExpansionOverrides(current, expansionState.allRowKeys))
+  }, [expansionState.allRowKeySignature, expansionState.allRowKeys])
+
   function focusRow(nextIndex: number) {
     const row = rows[nextIndex]
     if (!row) {
@@ -87,27 +102,111 @@ function TreeViewBody(props: TreeProps) {
     tree.focusPath(treeRowPath(row.rowKey))
   }
 
-  useKeyboard((key) => {
-    if (navigationActive || inChordRef.current || !focusedWithin || rows.length === 0) {
+  function setRowExpanded(row: VisibleTreeNode, expanded: boolean) {
+    if (!row.isExpandable || row.isExpanded === expanded) {
       return
     }
 
-    switch (key.name) {
-      case "up":
-        focusRow(Math.max(0, currentIndex - 1))
-        return
-      case "down":
-        focusRow(Math.min(rows.length - 1, currentIndex + 1))
-        return
-      case "enter":
-      case "return": {
-        const node = currentRow?.node
-        if (!node) {
-          return
-        }
-        onEnter?.(currentIndex, node)
+    setExpansionOverrides((current) => {
+      if (current[row.rowKey] === expanded) {
+        return current
       }
+      return {
+        ...current,
+        [row.rowKey]: expanded,
+      }
+    })
+
+    if (expanded) {
+      const rowIndex = rows.findIndex((candidate) => candidate.rowKey === row.rowKey)
+      onExpand?.(rowIndex >= 0 ? rowIndex : currentIndex, row.node)
     }
+  }
+
+  function toggleCurrentRow() {
+    const row = currentRow
+    if (!row) {
+      return
+    }
+
+    if (row.isExpandable) {
+      setRowExpanded(row, !row.isExpanded)
+      return
+    }
+
+    onSelect?.(currentIndex, row.node)
+  }
+
+  const shortcutsEnabled = !navigationActive && !inChordRef.current && focusedWithin && rows.length > 0
+
+  useShortcut({
+    keys: "up",
+    enabled: shortcutsEnabled,
+    onKey(key) {
+      key.preventDefault()
+      key.stopPropagation()
+      focusRow(Math.max(0, currentIndex - 1))
+    },
+  })
+
+  useShortcut({
+    keys: "down",
+    enabled: shortcutsEnabled,
+    onKey(key) {
+      key.preventDefault()
+      key.stopPropagation()
+      focusRow(Math.min(rows.length - 1, currentIndex + 1))
+    },
+  })
+
+  useShortcut({
+    keys: "left",
+    enabled: shortcutsEnabled,
+    onKey(key) {
+      if (currentRow?.isExpandable && currentRow.isExpanded) {
+        key.preventDefault()
+        key.stopPropagation()
+        setRowExpanded(currentRow, false)
+        return
+      }
+      if (currentRow?.parentRowKey) {
+        key.preventDefault()
+        key.stopPropagation()
+        tree.focusPath(treeRowPath(currentRow.parentRowKey))
+      }
+    },
+  })
+
+  useShortcut({
+    keys: "right",
+    enabled: shortcutsEnabled,
+    onKey(key) {
+      if (currentRow?.isExpandable && !currentRow.isExpanded) {
+        key.preventDefault()
+        key.stopPropagation()
+        setRowExpanded(currentRow, true)
+      }
+    },
+  })
+
+  useShortcut({
+    keys: "enter",
+    enabled: shortcutsEnabled,
+    onKey(key) {
+      key.preventDefault()
+      key.stopPropagation()
+      toggleCurrentRow()
+    },
+  })
+
+  useShortcut({
+    keys: "space",
+    enabled: shortcutsEnabled,
+    onKey(key) {
+      key.preventDefault()
+      key.stopPropagation()
+      toggleCurrentRow()
+    },
   })
 
   return (
@@ -115,7 +214,7 @@ function TreeViewBody(props: TreeProps) {
       {rows.length === 0 && (
         <Focusable focusable focusableId="empty" navigable={false}>
           <box paddingLeft={1}>
-            <text>No objects yet.</text>
+            <Text fg={theme.primaryFg}>No objects yet.</Text>
           </box>
         </Focusable>
       )}
@@ -138,11 +237,9 @@ function TreeViewBody(props: TreeProps) {
   )
 }
 
-function TreeNodeView(props: FlatTreeNode & { focused: boolean; remembered: boolean }) {
-  const { node, focused, isLast, level, parentIsLastPath, remembered } = props
+function TreeNodeView(props: VisibleTreeNode & { focused: boolean; remembered: boolean }) {
+  const { focused, isExpanded, isExpandable, isLast, level, node, parentIsLastPath, remembered } = props
   const theme = useTheme()
-  const isExpanded = node.expandable && node.children !== undefined
-  const isCollapsed = node.expandable && node.children === undefined
 
   let guides = ""
   for (let i = 0; i < level; i += 1) {
@@ -150,9 +247,9 @@ function TreeNodeView(props: FlatTreeNode & { focused: boolean; remembered: bool
   }
 
   let marker: string
-  if (isExpanded) {
+  if (isExpandable && isExpanded) {
     marker = EXPAND_OPEN
-  } else if (isCollapsed) {
+  } else if (isExpandable) {
     marker = EXPAND_CLOSED
   } else if (isLast) {
     marker = GUIDE_CORNER
@@ -162,8 +259,8 @@ function TreeNodeView(props: FlatTreeNode & { focused: boolean; remembered: bool
 
   return (
     <box backgroundColor={focused ? theme.focusBg : (remembered ? theme.inputBg : undefined)} flexDirection="row">
-      <text fg={theme.mutedFg}>{` ${guides}${marker} `}</text>
-      <text>{node.name}</text>
+      <Text fg={theme.mutedFg}>{` ${guides}${marker} `}</Text>
+      <Text fg={theme.primaryFg}>{node.name}</Text>
     </box>
   )
 }
@@ -174,6 +271,99 @@ function treeRowPath(rowKey: string): readonly [string, string] {
 
 function rowFocusId(rowKey: string): string {
   return `row-${rowKey}`
+}
+
+function isExpandableNode(node: TreeNode): boolean {
+  return node.expandable === true || !!node.children?.length
+}
+
+function resolveExpansionState(
+  nodes: TreeNode[],
+  expansionOverrides: Record<string, boolean>,
+): {
+  allRowKeys: Set<string>
+  allRowKeySignature: string
+  expandedRowKeys: Set<string>
+} {
+  const allRowKeys = new Set<string>()
+  const expandedRowKeys = new Set<string>()
+
+  function visit(children: TreeNode[], parentPath = "") {
+    for (const node of children) {
+      const rowKey = parentPath ? `${parentPath}.${node.key}` : node.key
+      allRowKeys.add(rowKey)
+
+      if (isExpandableNode(node) && (expansionOverrides[rowKey] ?? node.expanded ?? false)) {
+        expandedRowKeys.add(rowKey)
+      }
+
+      if (node.children?.length) {
+        visit(node.children, rowKey)
+      }
+    }
+  }
+
+  visit(nodes)
+
+  return {
+    allRowKeys,
+    allRowKeySignature: [...allRowKeys].sort().join("\n"),
+    expandedRowKeys,
+  }
+}
+
+function pruneExpansionOverrides(
+  expansionOverrides: Record<string, boolean>,
+  allRowKeys: Set<string>,
+): Record<string, boolean> {
+  let changed = false
+  const next: Record<string, boolean> = {}
+
+  for (const [rowKey, expanded] of Object.entries(expansionOverrides)) {
+    if (!allRowKeys.has(rowKey)) {
+      changed = true
+      continue
+    }
+    next[rowKey] = expanded
+  }
+
+  return changed ? next : expansionOverrides
+}
+
+function flattenVisibleTree(
+  nodes: TreeNode[],
+  expandedRowKeys: ReadonlySet<string>,
+  parentPath = "",
+  level = 0,
+  parentIsLastPath: boolean[] = [],
+  parentRowKey?: string,
+): VisibleTreeNode[] {
+  const flat: VisibleTreeNode[] = []
+
+  for (let i = 0; i < nodes.length; i += 1) {
+    const node = nodes[i]!
+    const isLast = i === nodes.length - 1
+    const rowKey = parentPath ? `${parentPath}.${node.key}` : node.key
+    const isExpandable = isExpandableNode(node)
+    const isExpanded = isExpandable && expandedRowKeys.has(rowKey)
+
+    flat.push({
+      node,
+      rowKey,
+      parentRowKey,
+      level,
+      isLast,
+      isExpandable,
+      isExpanded,
+      parentIsLastPath,
+    })
+
+    if (isExpanded && node.children?.length) {
+      flat.push(...flattenVisibleTree(node.children, expandedRowKeys, rowKey, level + 1, [...parentIsLastPath, isLast], rowKey))
+    }
+  }
+
+  return flat
 }
 
 export function flattenTree(

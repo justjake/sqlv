@@ -111,7 +111,9 @@ Read these before making substantial focus changes:
 
 ### OpenTUI-Specific Rules
 
-- Focus navigation key handling is intentionally installed at the renderer level, not only through local `useKeyboard()` handlers.
+- TUI keyboard dispatch is centralized in `KeybindProvider` via a renderer-level `prependListener("keypress", ...)`.
+- App code should use `useShortcut()` for declarative bindings and `useKeybindHandler()` for complex scoped keymaps; do not add new raw `useKeyboard()` or leaf-level `prependListener()` hacks for pane-local behavior.
+- Focus navigation is a fallback inside that central router, not a separate per-widget keyboard system.
 - While focus navigation is active, the currently focused renderable may be blurred so arrow keys and `Esc` stop mutating the active widget.
 - Widget-local arrow/enter/escape behavior must stand down when focus navigation is active.
 - Structural focusable registration now happens in `useInsertionEffect`; the provider calls `flushPendingChanges()` in layout so subscriber notification only happens when observable focus state actually changes.

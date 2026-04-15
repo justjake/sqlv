@@ -6,6 +6,7 @@ export {
   FocusPathProvider,
   focusPathSignature,
   useFocusNavigationState,
+  useFocusNavigationRestoreController,
   useFocusParentPath,
   useFocusPath,
   useFocusTree,

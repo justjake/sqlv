@@ -1,18 +1,22 @@
 import type { KeyEvent, Renderable } from "@opentui/core"
-import { useKeyboard, useRenderer } from "@opentui/react"
+import { useRenderer } from "@opentui/react"
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useSyncExternalStore,
   type ReactNode,
 } from "react"
+import { focusPathKey, type FocusPath } from "../../lib/focus"
+import { useFocusNavigationRestoreController, useFocusPath, useFocusTree } from "../focus"
+import { normalizeShortcutKeyName, type ShortcutKeys } from "./shortcutKeys"
 
 // ---------------------------------------------------------------------------
-// Key step: one keypress in a sequence
+// Chord step: one keypress within a shortcut/leader chord sequence
 // ---------------------------------------------------------------------------
 
 export type KeyStep = {
@@ -23,7 +27,7 @@ export type KeyStep = {
   option?: boolean
 }
 
-/** Does a concrete key event match a step? Undefined fields are wildcards. */
+/** Does a concrete key event match a chord step? Undefined fields are wildcards. */
 export function stepMatches(step: KeyStep, event: KeyEvent): boolean {
   if (step.name !== undefined && !keyNameMatches(step.name, event.name)) return false
   if (!!step.ctrl !== !!event.ctrl) return false
@@ -34,11 +38,7 @@ export function stepMatches(step: KeyStep, event: KeyEvent): boolean {
 }
 
 function keyNameMatches(expected: string, actual: string | undefined): boolean {
-  if (expected === actual) {
-    return true
-  }
-
-  return (expected === "enter" && actual === "return") || (expected === "return" && actual === "enter")
+  return normalizeShortcutKeyName(expected) === normalizeShortcutKeyName(actual)
 }
 
 function sequenceEquals(a: KeyStep[], b: KeyStep[]): boolean {
@@ -46,7 +46,10 @@ function sequenceEquals(a: KeyStep[], b: KeyStep[]): boolean {
   for (let i = 0; i < a.length; i++) {
     const sa = a[i]!
     const sb = b[i]!
-    if (sa.name !== sb.name) return false
+    if (sa.name !== undefined || sb.name !== undefined) {
+      if (sa.name === undefined || sb.name === undefined) return false
+      if (!keyNameMatches(sa.name, sb.name)) return false
+    }
     if (!!sa.ctrl !== !!sb.ctrl) return false
     if (!!sa.shift !== !!sb.shift) return false
     if (!!sa.meta !== !!sb.meta) return false
@@ -60,9 +63,11 @@ function eventToStep(e: KeyEvent): KeyStep {
 }
 
 // ---------------------------------------------------------------------------
-// Parse "ctrl+w h" → KeyStep[]
+// Parse leader chords like "ctrl+w h" into chord steps
 // ---------------------------------------------------------------------------
 
+export function parseKeys<TKey extends string>(input: ShortcutKeys<TKey>): KeyStep[]
+export function parseKeys(input: string): KeyStep[]
 export function parseKeys(input: string): KeyStep[] {
   return input
     .trim()
@@ -127,15 +132,34 @@ function labelizeKeyName(name: string): string {
 // Provider internals
 // ---------------------------------------------------------------------------
 
-type ChordEntry = {
+type ShortcutEntry = {
+  detectRef: React.RefObject<((key: KeyEvent) => boolean) | undefined>
+  scopeKey: string | undefined
   sequence: KeyStep[]
   callbackRef: React.RefObject<((key: KeyEvent) => void) | undefined>
   enabledRef: React.RefObject<boolean>
 }
 
+type ShortcutRegistration = Omit<ShortcutEntry, "scopeKey"> & {
+  scopePath: FocusPath | undefined
+}
+
+type KeybindHandlerEntry = {
+  detectRef: React.RefObject<((key: KeyEvent) => boolean) | undefined>
+  scopeKey: string | undefined
+  callbackRef: React.RefObject<((key: KeyEvent) => void) | undefined>
+  enabledRef: React.RefObject<boolean>
+}
+
+type KeybindHandlerRegistration = Omit<KeybindHandlerEntry, "scopeKey"> & {
+  scopePath: FocusPath | undefined
+}
+
 type KeybindContextValue = {
-  /** Register a multi-step chord. Returns an unregister function. */
-  registerChord: (entry: ChordEntry) => () => void
+  /** Register a scoped shortcut. Returns an unregister function. */
+  registerShortcut: (entry: ShortcutRegistration) => () => void
+  /** Register a scoped raw key handler. Returns an unregister function. */
+  registerKeyHandler: (entry: KeybindHandlerRegistration) => () => void
   /** Synchronous ref — true while waiting for the next chord key. */
   inChordRef: { readonly current: boolean }
   /** Reactive flag for renders. */
@@ -161,16 +185,24 @@ type KeybindProviderProps = {
 }
 
 /**
- * Manages multi-step keyboard chords.
+ * Owns TUI keyboard dispatch.
  *
- * When a keypress matches the first step of a registered chord the
- * currently-focused renderable is blurred so subsequent keys aren't
- * swallowed by a textarea. Focus is restored when the chord completes,
- * times out, or no registered chord matches the next key.
+ * Shortcuts register declaratively with a scope path inferred from the
+ * nearest focusable. The provider routes keypresses by focus ancestry,
+ * and falls back to focus-navigation behavior for bare `Esc` and the
+ * focus-navigation key set when navigation mode is active.
+ *
+ * Multi-step chords still blur the currently-focused renderable while
+ * the chord is in progress so subsequent keys are not swallowed by a
+ * textarea. Focus is restored when the chord completes, times out, or
+ * no registered chord matches the next key.
  */
 export function KeybindProvider({ chordTimeout = 2000, children }: KeybindProviderProps) {
+  const tree = useFocusTree()
+  const setSkipFocusRestoreOnExit = useFocusNavigationRestoreController()
   const renderer = useRenderer()
-  const registry = useRef(new Map<symbol, ChordEntry>())
+  const shortcutRegistry = useRef<ShortcutEntry[]>([])
+  const keyHandlerRegistry = useRef<KeybindHandlerEntry[]>([])
   const prefix = useRef<KeyStep[]>([])
   const savedFocus = useRef<Renderable | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -206,11 +238,15 @@ export function KeybindProvider({ chordTimeout = 2000, children }: KeybindProvid
   }
 
   function resetChord() {
+    resetChordWithOptions({ restoreFocus: true })
+  }
+
+  function resetChordWithOptions(options: { restoreFocus: boolean }) {
     resetTimer()
     prefix.current = []
     const prev = savedFocus.current
     savedFocus.current = null
-    if (prev && !prev.isDestroyed && !renderer.currentFocusedRenderable) {
+    if (options.restoreFocus && prev && !prev.isDestroyed && !renderer.currentFocusedRenderable) {
       prev.focus()
     }
     inChordRef.current = false
@@ -224,62 +260,256 @@ export function KeybindProvider({ chordTimeout = 2000, children }: KeybindProvid
     }
   }
 
-  const registerChord = useCallback((entry: ChordEntry) => {
-    const id = Symbol()
-    registry.current.set(id, entry)
-    return () => { registry.current.delete(id) }
+  const registerShortcut = useCallback((entry: ShortcutRegistration) => {
+    const registeredEntry: ShortcutEntry = {
+      ...entry,
+      scopeKey: focusPathKey(entry.scopePath),
+    }
+
+    shortcutRegistry.current.push(registeredEntry)
+    return () => {
+      const index = shortcutRegistry.current.indexOf(registeredEntry)
+      if (index >= 0) {
+        shortcutRegistry.current.splice(index, 1)
+      }
+    }
   }, [])
 
-  // Provider's keyboard handler — registered first (highest in tree).
-  useKeyboard((key) => {
-    const step = eventToStep(key)
+  const registerKeyHandler = useCallback((entry: KeybindHandlerRegistration) => {
+    const registeredEntry: KeybindHandlerEntry = {
+      ...entry,
+      scopeKey: focusPathKey(entry.scopePath),
+    }
 
-    if (inChordRef.current) {
-      // Mid-chord: try to advance
-      const candidate = [...prefix.current, step]
+    keyHandlerRegistry.current.push(registeredEntry)
+    return () => {
+      const index = keyHandlerRegistry.current.indexOf(registeredEntry)
+      if (index >= 0) {
+        keyHandlerRegistry.current.splice(index, 1)
+      }
+    }
+  }, [])
 
-      // Check for a complete match
-      for (const entry of registry.current.values()) {
-        if (!entry.enabledRef.current) continue
-        if (sequenceEquals(entry.sequence, candidate)) {
-          entry.callbackRef.current?.(key)
+  useEffect(() => {
+    const handleKeyPress = (key: KeyEvent) => {
+      const state = tree.getNavigationState()
+
+      if (state.active) {
+        if (inChordRef.current) {
+          resetChordWithOptions({ restoreFocus: false })
+        }
+
+        key.preventDefault()
+        key.stopPropagation()
+
+        switch (key.name) {
+          case "escape":
+            setSkipFocusRestoreOnExit(false)
+            tree.handleEscape()
+            break
+          case "up":
+          case "down":
+          case "left":
+          case "right":
+            tree.moveFocusNavigation(key.name)
+            break
+          case "enter":
+          case "return":
+          case "space":
+            setSkipFocusRestoreOnExit(true)
+            tree.activateHighlightedFocusable()
+            break
+        }
+        return
+      }
+
+      const scopeKeys = collectScopeKeys(state.focusedPath)
+      const step = eventToStep(key)
+
+      if (inChordRef.current) {
+        const candidate = [...prefix.current, step]
+        const completeMatches = collectMatchingEntriesForScopes(scopeKeys, (entry) => {
+          if (entry.sequence.length < 2) {
+            return false
+          }
+          if (!sequenceEquals(entry.sequence, candidate)) {
+            return false
+          }
+          if (entry.detectRef.current && !entry.detectRef.current(key)) {
+            return false
+          }
+          return true
+        })
+
+        if (completeMatches.length > 0) {
+          for (const entry of completeMatches) {
+            entry.callbackRef.current?.(key)
+            if (key.propagationStopped) {
+              break
+            }
+          }
           setImmediate(() => resetChord())
+          return
+        }
+
+        if (hasChordPrefixForScopes(scopeKeys, candidate)) {
+          key.preventDefault()
+          key.stopPropagation()
+          advanceChord(step)
+        } else {
+          key.preventDefault()
+          key.stopPropagation()
+          resetChord()
+        }
+        return
+      }
+
+      if (hasChordPrefixForScopes(scopeKeys, [step])) {
+        key.preventDefault()
+        key.stopPropagation()
+        enterChord(step)
+        return
+      }
+
+      const singleStepMatches = collectMatchingEntriesForScopes(scopeKeys, (entry) => {
+        if (entry.sequence.length !== 1) {
+          return false
+        }
+        if (!stepMatches(entry.sequence[0]!, key)) {
+          return false
+        }
+        if (entry.detectRef.current && !entry.detectRef.current(key)) {
+          return false
+        }
+        return true
+      })
+
+      for (const entry of singleStepMatches) {
+        entry.callbackRef.current?.(key)
+        if (key.propagationStopped) {
           return
         }
       }
 
-      // Check for a partial match (candidate is a prefix of some sequence)
-      let hasPartial = false
-      for (const entry of registry.current.values()) {
-        if (!entry.enabledRef.current) continue
-        const seq = entry.sequence
-        if (candidate.length < seq.length && sequenceEquals(candidate, seq.slice(0, candidate.length))) {
-          hasPartial = true
-          break
+      const rawKeyHandlerMatches = collectMatchingKeyHandlersForScopes(scopeKeys, key)
+      for (const entry of rawKeyHandlerMatches) {
+        entry.callbackRef.current?.(key)
+        if (key.propagationStopped) {
+          return
         }
       }
 
-      if (hasPartial) {
-        advanceChord(step)
-      } else {
-        resetChord()
+      if (key.name === "escape" && !key.defaultPrevented) {
+        key.preventDefault()
+        key.stopPropagation()
+        setSkipFocusRestoreOnExit(false)
+        tree.handleEscape()
       }
-      return
     }
 
-    // Not in chord: does this key start any registered chord?
-    for (const entry of registry.current.values()) {
-      if (!entry.enabledRef.current) continue
-      if (entry.sequence.length >= 2 && stepMatches(entry.sequence[0]!, key)) {
-        enterChord(step)
-        return
+    renderer.keyInput.prependListener("keypress", handleKeyPress)
+    return () => {
+      renderer.keyInput.off("keypress", handleKeyPress)
+    }
+  }, [renderer, setSkipFocusRestoreOnExit, tree])
+
+  function collectMatchingEntriesForScopes(
+    scopeKeys: Array<string | undefined>,
+    matches: (entry: ShortcutEntry) => boolean,
+  ): ShortcutEntry[] {
+    const matched: ShortcutEntry[] = []
+
+    for (const scopeKey of scopeKeys) {
+      const match = findNewestMatchingEntry(scopeKey, matches)
+      if (match) {
+        matched.push(match)
       }
     }
-    // Single-step shortcuts are handled by their own useKeyboard hooks.
-  })
+
+    return matched
+  }
+
+  function findNewestMatchingEntry(
+    scopeKey: string | undefined,
+    matches: (entry: ShortcutEntry) => boolean,
+  ): ShortcutEntry | undefined {
+    for (let index = shortcutRegistry.current.length - 1; index >= 0; index -= 1) {
+      const entry = shortcutRegistry.current[index]!
+      if (!entry.enabledRef.current) {
+        continue
+      }
+      if (entry.scopeKey !== scopeKey) {
+        continue
+      }
+      if (matches(entry)) {
+        return entry
+      }
+    }
+
+    return undefined
+  }
+
+  function hasChordPrefixForScopes(
+    scopeKeys: Array<string | undefined>,
+    candidate: KeyStep[],
+  ): boolean {
+    for (const scopeKey of scopeKeys) {
+      for (let index = shortcutRegistry.current.length - 1; index >= 0; index -= 1) {
+        const entry = shortcutRegistry.current[index]!
+        if (!entry.enabledRef.current) {
+          continue
+        }
+        if (entry.scopeKey !== scopeKey || entry.sequence.length <= candidate.length) {
+          continue
+        }
+        if (sequenceEquals(candidate, entry.sequence.slice(0, candidate.length))) {
+          return true
+        }
+      }
+    }
+
+    return false
+  }
+
+  function collectMatchingKeyHandlersForScopes(
+    scopeKeys: Array<string | undefined>,
+    key: KeyEvent,
+  ): KeybindHandlerEntry[] {
+    const matched: KeybindHandlerEntry[] = []
+
+    for (const scopeKey of scopeKeys) {
+      const match = findNewestMatchingKeyHandler(scopeKey, key)
+      if (match) {
+        matched.push(match)
+      }
+    }
+
+    return matched
+  }
+
+  function findNewestMatchingKeyHandler(
+    scopeKey: string | undefined,
+    key: KeyEvent,
+  ): KeybindHandlerEntry | undefined {
+    for (let index = keyHandlerRegistry.current.length - 1; index >= 0; index -= 1) {
+      const entry = keyHandlerRegistry.current[index]!
+      if (!entry.enabledRef.current) {
+        continue
+      }
+      if (entry.scopeKey !== scopeKey) {
+        continue
+      }
+      if (entry.detectRef.current && !entry.detectRef.current(key)) {
+        continue
+      }
+      return entry
+    }
+
+    return undefined
+  }
 
   return (
-    <KeybindContext.Provider value={{ registerChord, inChordRef, inChord }}>
+    <KeybindContext.Provider value={{ registerShortcut, registerKeyHandler, inChordRef, inChord }}>
       {children}
     </KeybindContext.Provider>
   )
@@ -292,27 +522,46 @@ export function KeybindProvider({ chordTimeout = 2000, children }: KeybindProvid
 export type UseShortcutOptions = {
   /** Key sequence as a string, e.g. "ctrl+w h" or "ctrl+x". */
   keys: string
-  /** Additional predicate applied after sequence matching (single-step only). */
+  /** Additional predicate applied after sequence matching. */
   detect?: (key: KeyEvent) => boolean
   enabled?: boolean
   onKey?: (key: KeyEvent) => void
 }
 
+export type UseKeybindHandlerOptions = Omit<UseShortcutOptions, "keys"> & {
+  /** Optional key sequence. Omit to receive all scoped keypresses. */
+  keys?: string
+}
+
 /**
  * Keyboard shortcut hook.
  *
- * - Single-step (`keys="ctrl+x"` or field props): fires via a local
- *   `useKeyboard` handler, automatically suppressed during chords.
- * - Multi-step (`keys="ctrl+w h"`): registered with the provider's
- *   chord engine. The provider blurs focus while waiting for the
- *   next key and restores it on completion or timeout.
+ * Registered shortcuts are dispatched by the provider's central input
+ * router. Routing is scoped to the nearest focus path and bubbles
+ * outward through focused ancestors before falling back to global
+ * shortcuts.
  *
  * Returns the parsed sequence for display purposes.
  */
+export function useShortcut<TKey extends string>(
+  options: Omit<UseShortcutOptions, "keys"> & { keys: ShortcutKeys<TKey> },
+): { sequence: KeyStep[] }
+export function useShortcut(options: UseShortcutOptions): { sequence: KeyStep[] }
 export function useShortcut(options: UseShortcutOptions): { sequence: KeyStep[] } {
-  const ctx = useKeybind()
   const sequence = useMemo(() => parseKeys(options.keys), [options.keys])
-  const isChord = sequence.length >= 2
+  useKeybindHandler(options)
+
+  return { sequence }
+}
+
+export function useKeybindHandler<TKey extends string>(
+  options: Omit<UseKeybindHandlerOptions, "keys"> & { keys: ShortcutKeys<TKey> },
+): void
+export function useKeybindHandler(options: UseKeybindHandlerOptions): void
+export function useKeybindHandler(options: UseKeybindHandlerOptions): void {
+  const ctx = useKeybind()
+  const scopePath = useFocusPath()
+  const sequence = useMemo(() => (options.keys ? parseKeys(options.keys) : undefined), [options.keys])
 
   const callbackRef = useRef(options.onKey)
   callbackRef.current = options.onKey
@@ -321,21 +570,35 @@ export function useShortcut(options: UseShortcutOptions): { sequence: KeyStep[] 
   const detectRef = useRef(options.detect)
   detectRef.current = options.detect
 
-  // Multi-step: register chord with provider
-  useEffect(() => {
-    if (!isChord) return
-    return ctx.registerChord({ sequence, callbackRef, enabledRef })
-  }, [ctx, sequence, isChord])
+  useLayoutEffect(() => {
+    if (sequence) {
+      return ctx.registerShortcut({
+        callbackRef,
+        detectRef,
+        enabledRef,
+        scopePath,
+        sequence,
+      })
+    }
 
-  // Single-step: match locally, suppressed during chords
-  useKeyboard((key) => {
-    if (isChord) return
-    if (!enabledRef.current) return
-    if (ctx.inChordRef.current) return
-    if (!stepMatches(sequence[0]!, key)) return
-    if (detectRef.current && !detectRef.current(key)) return
-    callbackRef.current?.(key)
-  })
+    return ctx.registerKeyHandler({
+      callbackRef,
+      detectRef,
+      enabledRef,
+      scopePath,
+    })
+  }, [ctx, scopePath, sequence])
+}
 
-  return { sequence }
+function collectScopeKeys(path: FocusPath | undefined): Array<string | undefined> {
+  const scopeKeys: Array<string | undefined> = []
+
+  if (path) {
+    for (let length = path.length; length >= 1; length -= 1) {
+      scopeKeys.push(focusPathKey(path.slice(0, length)))
+    }
+  }
+
+  scopeKeys.push(undefined)
+  return scopeKeys
 }

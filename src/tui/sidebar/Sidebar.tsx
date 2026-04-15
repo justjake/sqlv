@@ -1,5 +1,6 @@
 import type { ObjectInfo } from "../../lib/types/objects"
 import { Shortcut } from "../Shortcut"
+import { Text } from "../ui/Text"
 import { useSqlVisor, useSqlVisorState } from "../useSqlVisor"
 import { TreeView, type TreeNode } from "./TreeView"
 
@@ -18,9 +19,10 @@ export function Sidebar(props: SidebarProps) {
     kind: "connection",
     connectionId: connection.id,
     expandable: true,
+    expanded: connection.id === state.selectedConnectionId,
     name: `${connection.name} (${connection.protocol})`,
     children:
-      connection.id === state.selectedConnectionId
+      connection.id === state.selectedConnectionId || state.objectsByConnectionId[connection.id]
         ? objectNodes(connection.id, state.objectsByConnectionId[connection.id])
         : undefined,
   }))
@@ -30,20 +32,30 @@ export function Sidebar(props: SidebarProps) {
       <box flexDirection="row" gap={1} paddingBottom={1}>
         <Shortcut keys="ctrl+n" label="Add Conn" enabled onKey={onAddConnection} />
       </box>
-      {state.connections.fetchStatus === "fetching" && connections.length === 0 && <text>Loading connections...</text>}
+      {state.connections.fetchStatus === "fetching" && connections.length === 0 && <Text>Loading connections...</Text>}
       {state.connections.status === "error" && connections.length === 0 && (
-        <text>{state.connections.error?.message}</text>
+        <Text>{state.connections.error?.message}</Text>
       )}
       {state.connections.status === "success" && treeNodes.length === 0 && (
-        <text>No connections yet. Use the public API or add one next.</text>
+        <Text>No connections yet. Use the public API or add one next.</Text>
       )}
-      <TreeView nodes={treeNodes} onEnter={(_idx, node) => onEnterNode(engine, node)} />
+      <TreeView
+        nodes={treeNodes}
+        onExpand={(_idx, node) => onOpenNode(engine, node)}
+        onSelect={(_idx, node) => onSelectNode(engine, node)}
+      />
     </box>
   )
 }
 
-export function onEnterNode(engine: ReturnType<typeof useSqlVisor>, node: TreeNode) {
-  if (node.kind === "connection" && node.connectionId) {
+export function onOpenNode(engine: ReturnType<typeof useSqlVisor>, node: TreeNode) {
+  if (node.connectionId) {
+    engine.selectConnection(node.connectionId)
+  }
+}
+
+export function onSelectNode(engine: ReturnType<typeof useSqlVisor>, node: TreeNode) {
+  if (node.connectionId) {
     engine.selectConnection(node.connectionId)
   }
 }
@@ -68,6 +80,7 @@ export function objectNodes(
   }
   return state.data.map((object, index) => ({
     key: `${connectionId}.${object.type}.${index}`,
+    connectionId,
     kind: object.type,
     name: objectLabel(object),
   }))

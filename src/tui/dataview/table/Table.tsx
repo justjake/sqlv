@@ -1,6 +1,7 @@
 import type { BoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
 import { Fragment, type ReactNode, useMemo, useRef, useState } from "react"
+import { Text } from "../../ui/Text"
 
 // ── Border Characters ──────────────────────────────────────────────────────
 
@@ -250,11 +251,11 @@ function TableRow(props: {
   const { widths, border, chars, borderColor, backgroundColor, cells } = props
   const elements: ReactNode[] = []
 
-  if (border.left) elements.push(<text key="bl" fg={borderColor}>{chars.left}</text>)
+  if (border.left) elements.push(<Text key="bl" fg={borderColor}>{chars.left}</Text>)
 
   for (let i = 0; i < cells.length; i++) {
     if (i > 0 && border.columns)
-      elements.push(<text key={`sep${i}`} fg={borderColor}>{chars.left}</text>)
+      elements.push(<Text key={`sep${i}`} fg={borderColor}>{chars.left}</Text>)
     elements.push(
       <box key={`c${i}`} width={widths[i]} flexGrow={0} flexShrink={0}>
         {cells[i]}
@@ -262,7 +263,7 @@ function TableRow(props: {
     )
   }
 
-  if (border.right) elements.push(<text key="br" fg={borderColor}>{chars.right}</text>)
+  if (border.right) elements.push(<Text key="br" fg={borderColor}>{chars.right}</Text>)
 
   return <box flexDirection="row" backgroundColor={backgroundColor}>{elements}</box>
 }
@@ -313,7 +314,7 @@ export function Table<T>(rawProps: TableProps<T>) {
         const col = columns[name]!
         return col.Header
           ? col.Header({ column: name, columnIndex: i, columnWidth: widths[i] ?? 0 })
-          : <text key={name} wrapMode="none" truncate>{" " + name}</text>
+          : <Text key={name} wrapMode="none" truncate>{" " + name}</Text>
       })
     : null
 
@@ -324,7 +325,7 @@ export function Table<T>(rawProps: TableProps<T>) {
       width={rawProps.width ?? "100%"}
       onSizeChange={handleSizeChange}
     >
-      {lines.top && <text fg={borderColor}>{lines.top}</text>}
+      {lines.top && <Text fg={borderColor}>{lines.top}</Text>}
 
       {headerCells && (
         <TableRow
@@ -336,7 +337,7 @@ export function Table<T>(rawProps: TableProps<T>) {
           cells={headerCells}
         />
       )}
-      {showHeader && lines.headerSep && <text fg={borderColor}>{lines.headerSep}</text>}
+      {showHeader && lines.headerSep && <Text fg={borderColor}>{lines.headerSep}</Text>}
 
       {rows.map((row, rowIndex) => {
         const key = getRowKey?.(row, rowIndex) ?? String(rowIndex)
@@ -359,13 +360,13 @@ export function Table<T>(rawProps: TableProps<T>) {
         )
         return (
           <Fragment key={key}>
-            {rowIndex > 0 && lines.rowSep && <text fg={borderColor}>{lines.rowSep}</text>}
+            {rowIndex > 0 && lines.rowSep && <Text fg={borderColor}>{lines.rowSep}</Text>}
             {wrapRow ? wrapRow({ row, rowIndex, children: rowContent }) : rowContent}
           </Fragment>
         )
       })}
 
-      {lines.bottom && <text fg={borderColor}>{lines.bottom}</text>}
+      {lines.bottom && <Text fg={borderColor}>{lines.bottom}</Text>}
     </box>
   )
 }

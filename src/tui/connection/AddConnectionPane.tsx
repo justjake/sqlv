@@ -1,5 +1,4 @@
 import type { InputRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard } from "@opentui/react"
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { sameFocusPath } from "../../lib/focus"
 import type {
@@ -19,6 +18,8 @@ import {
   useRememberedDescendantPath,
 } from "../focus"
 import { Shortcut } from "../Shortcut"
+import { useKeybindHandler } from "../ui/keybind"
+import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 import { useSqlVisor, useSqlVisorState } from "../useSqlVisor"
 
@@ -98,7 +99,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
         <box flexDirection="row" gap={1}>
           <Shortcut keys="ctrl+c" label="Back" enabled onKey={onBack} />
         </box>
-        <text>No connection forms are available for the registered adapters.</text>
+        <Text>No connection forms are available for the registered adapters.</Text>
       </box>
     )
   }
@@ -261,8 +262,8 @@ function AddConnectionPaneBody(props: {
       </box>
 
       <scrollbox ref={scrollRef} flexGrow={1} contentOptions={{ flexDirection: "column", gap: 1 }}>
-        <text>Add Connection</text>
-        {formError && <text>{formError}</text>}
+        <Text>Add Connection</Text>
+        {formError && <Text>{formError}</Text>}
 
         <ProtocolPickerField
           adapters={adapters}
@@ -371,24 +372,26 @@ function ProtocolPickerBody(
   const { onPrev, onNext, adapters, protocol, onCycle, remembered } = props
   const focused = useIsFocused()
 
-  useKeyboard((event) => {
-    if (!focused) return
-    if (handleFieldNav(event, onPrev, onNext)) return
-    if (event.name === "right" || event.name === "enter" || event.name === "return") {
-      event.preventDefault()
-      event.stopPropagation()
-      onCycle(1)
-    } else if (event.name === "left") {
-      event.preventDefault()
-      event.stopPropagation()
-      onCycle(-1)
-    }
+  useKeybindHandler({
+    enabled: focused,
+    onKey(event) {
+      if (handleFieldNav(event, onPrev, onNext)) return
+      if (event.name === "right" || event.name === "enter" || event.name === "return") {
+        event.preventDefault()
+        event.stopPropagation()
+        onCycle(1)
+      } else if (event.name === "left") {
+        event.preventDefault()
+        event.stopPropagation()
+        onCycle(-1)
+      }
+    },
   })
 
   return (
     <FieldContainer focused={focused} remembered={remembered}>
-      <text>Protocol</text>
-      <text>{adapters.map((adapter) => protocolLabel(adapter, protocol)).join("  ")}</text>
+      <Text>Protocol</Text>
+      <Text>{adapters.map((adapter) => protocolLabel(adapter, protocol)).join("  ")}</Text>
     </FieldContainer>
   )
 }
@@ -447,28 +450,34 @@ function TextInputFieldBody(props: {
 }) {
   const focused = useIsFocused()
 
-  useKeyboard((event) => {
-    if (!focused) return
-    handleFieldNav(event, props.onPrev, props.onNext)
+  useKeybindHandler({
+    enabled: focused,
+    onKey(event) {
+      handleFieldNav(event, props.onPrev, props.onNext)
+    },
   })
 
   return (
     <FieldContainer focused={focused} remembered={props.remembered}>
       <box flexDirection="row">
-        <text>{props.label} </text>
+        <Text>{props.label} </Text>
         <box backgroundColor={props.theme.inputBg} flexGrow={1}>
           <input
+            cursorColor={props.theme.primaryFg}
             ref={props.inputRef}
             focused={focused}
+            focusedTextColor={props.theme.primaryFg}
             flexGrow={1}
             onInput={props.onChange}
             placeholder={props.placeholder}
+            placeholderColor={props.theme.mutedFg}
+            textColor={props.theme.primaryFg}
             value={props.value}
           />
         </box>
       </box>
-      {props.description && <text opacity={0.5}>{props.description}</text>}
-      {props.error && <text>{props.error}</text>}
+      {props.description && <Text opacity={0.5}>{props.description}</Text>}
+      {props.error && <Text>{props.error}</Text>}
     </FieldContainer>
   )
 }
@@ -502,26 +511,28 @@ function BooleanFieldBody(
   const { checked, description, error, label, onChange, onNext, onPrev, remembered } = props
   const focused = useIsFocused()
 
-  useKeyboard((event) => {
-    if (!focused) return
-    if (handleFieldNav(event, onPrev, onNext)) return
-    if (event.name === "space" || event.name === "enter" || event.name === "return") {
-      event.preventDefault()
-      event.stopPropagation()
-      onChange(!checked)
-    }
+  useKeybindHandler({
+    enabled: focused,
+    onKey(event) {
+      if (handleFieldNav(event, onPrev, onNext)) return
+      if (event.name === "space" || event.name === "enter" || event.name === "return") {
+        event.preventDefault()
+        event.stopPropagation()
+        onChange(!checked)
+      }
+    },
   })
 
   return (
     <FieldContainer focused={focused} remembered={remembered}>
       <box flexDirection="row" justifyContent="space-between" onMouseUp={() => onChange(!checked)}>
-        <text>
+        <Text>
           {checked ? "◉" : "○"} {label}
-        </text>
-        {focused && <text opacity={0.5}>space toggle</text>}
+        </Text>
+        {focused && <Text opacity={0.5}>space toggle</Text>}
       </box>
-      {description && <text opacity={0.5}>{description}</text>}
-      {error && <text>{error}</text>}
+      {description && <Text opacity={0.5}>{description}</Text>}
+      {error && <Text>{error}</Text>}
     </FieldContainer>
   )
 }
@@ -555,18 +566,20 @@ function SelectFieldBody(
   const { description, error, field, onChange, onNext, onPrev, remembered, value } = props
   const focused = useIsFocused()
 
-  useKeyboard((event) => {
-    if (!focused) return
-    if (handleFieldNav(event, onPrev, onNext)) return
-    if (event.name === "right" || event.name === "enter" || event.name === "return") {
-      event.preventDefault()
-      event.stopPropagation()
-      cycleOption(1)
-    } else if (event.name === "left") {
-      event.preventDefault()
-      event.stopPropagation()
-      cycleOption(-1)
-    }
+  useKeybindHandler({
+    enabled: focused,
+    onKey(event) {
+      if (handleFieldNav(event, onPrev, onNext)) return
+      if (event.name === "right" || event.name === "enter" || event.name === "return") {
+        event.preventDefault()
+        event.stopPropagation()
+        cycleOption(1)
+      } else if (event.name === "left") {
+        event.preventDefault()
+        event.stopPropagation()
+        cycleOption(-1)
+      }
+    },
   })
 
   function cycleOption(step: number) {
@@ -580,10 +593,10 @@ function SelectFieldBody(
 
   return (
     <FieldContainer focused={focused} remembered={remembered}>
-      <text>{field.label}</text>
-      <text>{displayLabel}</text>
-      {description && <text opacity={0.5}>{description}</text>}
-      {error && <text>{error}</text>}
+      <Text>{field.label}</Text>
+      <Text>{displayLabel}</Text>
+      {description && <Text opacity={0.5}>{description}</Text>}
+      {error && <Text>{error}</Text>}
     </FieldContainer>
   )
 }

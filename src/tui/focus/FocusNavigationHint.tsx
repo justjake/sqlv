@@ -1,3 +1,4 @@
+import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 import { useFocusNavigationState } from "./context"
 
@@ -21,10 +22,10 @@ export function FocusNavigationHint() {
       right={1}
       zIndex={100}
     >
-      <text>
+      <Text>
         ↑↓←→ Move  Enter Focus  Space Focus
         {state.escLabel ? `  Esc ${state.escLabel}` : "  Esc Cancel"}
-      </text>
+      </Text>
     </box>
   )
 }

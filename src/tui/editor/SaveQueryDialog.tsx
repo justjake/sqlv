@@ -1,8 +1,9 @@
 import type { InputRenderable } from "@opentui/core"
-import { useKeyboard } from "@opentui/react"
 import { useEffect, useRef, useState } from "react"
 import { FocusHalo, Focusable, useIsFocusWithin } from "../focus"
 import { Shortcut } from "../Shortcut"
+import { useKeybindHandler } from "../ui/keybind"
+import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 
 export const SAVE_QUERY_DIALOG_FOCUS_ID = "save-query-dialog"
@@ -29,11 +30,9 @@ export function SaveQueryDialog(props: SaveQueryDialogProps) {
     setName(initialName ?? "")
   }, [initialName])
 
-  useKeyboard((event) => {
-    if (!focusedWithin || saving) {
-      return
-    }
-
+  useKeybindHandler({
+    enabled: focusedWithin && !saving,
+    onKey(event) {
     switch (event.name) {
       case "enter":
       case "return":
@@ -49,6 +48,7 @@ export function SaveQueryDialog(props: SaveQueryDialogProps) {
         event.stopPropagation()
         onCancel()
     }
+    },
   })
 
   return (
@@ -78,24 +78,28 @@ export function SaveQueryDialog(props: SaveQueryDialogProps) {
         width="100%"
       >
         <box flexDirection="row" gap={1}>
-          <Shortcut keys="enter" label="Save" enabled={saveEnabled} onKey={() => void onSave(name)} />
-          <Shortcut keys="escape" label="Cancel" enabled={!saving} onKey={onCancel} />
+          <Shortcut keys="return" label="Save" enabled={saveEnabled} onKey={() => void onSave(name)} />
+          <Shortcut keys="esc" label="Cancel" enabled={!saving} onKey={onCancel} />
         </box>
-        <text>{title}</text>
+        <Text>{title}</Text>
         <box flexDirection="row">
-          <text>Name </text>
+          <Text>Name </Text>
           <box backgroundColor={focusedWithin ? theme.focusBg : theme.shortcutBg} flexGrow={1}>
             <input
+              cursorColor={theme.primaryFg}
               ref={inputRef}
               focused={focusedWithin}
+              focusedTextColor={theme.primaryFg}
               flexGrow={1}
               onInput={setName}
               placeholder="Query name"
+              placeholderColor={theme.mutedFg}
+              textColor={theme.primaryFg}
               value={name}
             />
           </box>
         </box>
-        {error && <text fg={theme.errorFg}>{error}</text>}
+        {error && <Text fg={theme.errorFg}>{error}</Text>}
         <FocusHalo />
       </box>
     </Focusable>

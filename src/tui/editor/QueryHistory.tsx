@@ -15,6 +15,7 @@ import {
 } from "../focus"
 import { Shortcut } from "../Shortcut"
 import { QueryListTable, type TableColumn } from "../dataview/table"
+import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 
 type QueryHistoryProps = {
@@ -144,17 +145,17 @@ function QueryHistoryBody(props: QueryHistoryProps & {
       status: {
         width: { absolute: 2 },
         Cell: ({ row }) => (
-          <text fg={finderStatusColor(row, theme)} wrapMode="none" truncate>
+          <Text fg={finderStatusColor(row, theme)} wrapMode="none" truncate>
             {finderStatusGlyph(row)}
-          </text>
+          </Text>
         ),
       },
       label: {
         width: { absolute: 12 },
         Cell: ({ row }) => (
-          <text fg={row.kind === "saved" ? theme.mutedFg : undefined} wrapMode="none" truncate>
+          <Text fg={row.kind === "saved" ? theme.mutedFg : undefined} wrapMode="none" truncate>
             {finderLabel(row)}
-          </text>
+          </Text>
         ),
       },
       primary: {
@@ -162,33 +163,33 @@ function QueryHistoryBody(props: QueryHistoryProps & {
         Cell: ({ row }) =>
           row.kind === "saved" ? (
             <box flexDirection="row" gap={1}>
-              <text fg={theme.successFg} wrapMode="none" truncate>
+              <Text fg={theme.successFg} wrapMode="none" truncate>
                 {truncateText(row.savedQuery.name, 22)}
-              </text>
-              <text flexGrow={1} flexShrink={1} fg={theme.mutedFg} wrapMode="none" truncate>
+              </Text>
+              <Text flexGrow={1} flexShrink={1} fg={theme.mutedFg} wrapMode="none" truncate>
                 {truncateSql(row.savedQuery.text, 100)}
-              </text>
+              </Text>
             </box>
           ) : (
-            <text fg={row.entry.initiator === "system" ? theme.mutedFg : undefined} wrapMode="none" truncate>
+            <Text fg={row.entry.initiator === "system" ? theme.mutedFg : undefined} wrapMode="none" truncate>
               {truncateSql(row.entry.sql.source, 100)}
-            </text>
+            </Text>
           ),
       },
       meta: {
         width: { absolute: 10 },
         Cell: ({ row }) => (
-          <text fg={theme.mutedFg} wrapMode="none" truncate>
+          <Text fg={theme.mutedFg} wrapMode="none" truncate>
             {row.kind === "saved" ? (row.savedQuery.protocol ?? "") : formatElapsed(row.entry)}
-          </text>
+          </Text>
         ),
       },
       detail: {
         width: { grow: 2 },
         Cell: ({ row }) => (
-          <text fg={theme.mutedFg} wrapMode="none" truncate>
+          <Text fg={theme.mutedFg} wrapMode="none" truncate>
             {row.kind === "saved" ? (row.lastExecution ? formatTime(row.lastExecution.createdAt) : "") : row.connectionName}
-          </text>
+          </Text>
         ),
       },
     }),
@@ -226,7 +227,7 @@ function QueryHistoryBody(props: QueryHistoryProps & {
           onKey={() => focusRow(Math.min(filteredEntries.length - 1, currentIndex + 1))}
         />
         <Shortcut
-          keys="enter"
+          keys="return"
           label="Open"
           enabled={canRestore}
           onKey={() => {
@@ -246,19 +247,23 @@ function QueryHistoryBody(props: QueryHistoryProps & {
           enabled={shortcutsEnabled}
           onKey={onToggleShowSystemQueries}
         />
-        <Shortcut keys="escape" label="Back" enabled={shortcutsEnabled} onKey={onBack} />
-        <text opacity={0.6}>{matchLabel}</text>
-        <text opacity={0.6}>{showSystemQueries ? "[x] Show system queries" : "[ ] Show system queries"}</text>
+        <Shortcut keys="esc" label="Back" enabled={shortcutsEnabled} onKey={onBack} />
+        <Text opacity={0.6}>{matchLabel}</Text>
+        <Text opacity={0.6}>{showSystemQueries ? "[x] Show system queries" : "[ ] Show system queries"}</Text>
       </box>
       <Focusable focusable focusableId={QUERY_HISTORY_FILTER_ID} navigable={false}>
         <box flexDirection="row" flexShrink={0} height={1} paddingLeft={1} paddingRight={1}>
-          <text>Filter </text>
+          <Text>Filter </Text>
           <box backgroundColor={theme.inputBg} flexGrow={1} height={1}>
             <input
+              cursorColor={theme.primaryFg}
               ref={filterInputRef}
               flexGrow={1}
               focused={focusedWithin && !navigationActive}
+              focusedTextColor={theme.primaryFg}
               placeholder="Type query name, SQL, or connection"
+              placeholderColor={theme.mutedFg}
+              textColor={theme.primaryFg}
               value={filterText}
             />
           </box>
@@ -273,12 +278,12 @@ function QueryHistoryBody(props: QueryHistoryProps & {
         <scrollbox ref={scrollRef} flexGrow={1} contentOptions={{ flexDirection: "column" }}>
           {totalVisibleItemCount === 0 && (
             <box paddingLeft={1} paddingRight={1}>
-              <text>No previous or saved queries yet.</text>
+              <Text>No previous or saved queries yet.</Text>
             </box>
           )}
           {totalVisibleItemCount > 0 && filteredEntries.length === 0 && (
             <box paddingLeft={1} paddingRight={1}>
-              <text>No matches for "{filterText.trim()}".</text>
+              <Text>No matches for "{filterText.trim()}".</Text>
             </box>
           )}
           {filteredEntries.length > 0 && (

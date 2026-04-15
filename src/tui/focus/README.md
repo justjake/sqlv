@@ -32,13 +32,16 @@ If focus navigation relied only on ordinary widget-local keyboard handlers:
 - focus navigation would only work when the "right" subtree happened to be focused
 - modal escape handling would become inconsistent
 
-So the binding installs a top-priority global handler in [`context.tsx`](./context.tsx) using `renderer.keyInput.prependListener("keypress", ...)`.
+So the TUI layer installs one top-priority global handler in [`../ui/keybind.tsx`](../ui/keybind.tsx) using `renderer.keyInput.prependListener("keypress", ...)`.
+
+That handler is intentionally shared by shortcuts and focus navigation. `useShortcut()` no longer installs flat `useKeyboard()` listeners in leaf components; it registers declarative shortcut metadata, and the router dispatches by focus ancestry using the focus tree. For complex local keymaps that do not map cleanly to a single shortcut chord, the TUI layer uses `useKeybindHandler()` so those widgets still participate in the same scoped router instead of subscribing to `useKeyboard()` directly.
 
 That makes focus navigation a renderer-level concern:
 
 - `Esc` always reaches the focus system before focused widgets see it
 - once navigation is active, arrows / `Enter` / `Space` are intercepted before focused widgets see them
 - the focus tree becomes the single authority for directional traversal
+- pane-scoped shortcuts like `Esc` can run before the focus-navigation fallback without local `prependListener()` hacks
 
 This is one of the most important OpenTUI-specific design choices in the adapter.
 

@@ -5,6 +5,8 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 // ── Semantic color tokens ───────────────────────────────────────────────────
 
 type Theme = {
+  /** Foreground for ordinary body text and input text. */
+  primaryFg: string
   /** Background for focused/selected rows (tree nodes, history items, form fields). */
   focusBg: string
   /** Background for the highlighted target while focus navigation mode is active. */
@@ -38,6 +40,7 @@ type Theme = {
 // Light values are reasonable counterparts for a light-background terminal.
 
 const DARK: Theme = {
+  primaryFg: "#d0d0d0",
   focusBg: "#639ee4", // base0D (blue)
   focusNavBg: "#8ab6ef",
   focusNavBorder: "#d0d0d0",
@@ -54,6 +57,7 @@ const DARK: Theme = {
 }
 
 const LIGHT: Theme = {
+  primaryFg: "#303030",
   focusBg: "#4271ae",
   focusNavBg: "#6f95c7",
   focusNavBorder: "#303030",
@@ -75,6 +79,7 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
   const p = palette.palette
   if (mode === "light") {
     return {
+      primaryFg: palette.defaultForeground ?? p[0] ?? LIGHT.primaryFg,
       focusBg: p[4] ?? LIGHT.focusBg, // ANSI blue
       focusNavBg: p[12] ?? brighten(p[4] ?? LIGHT.focusBg, 0.2),
       focusNavBorder: p[0] ?? LIGHT.focusNavBorder,
@@ -91,6 +96,7 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
     }
   }
   return {
+    primaryFg: palette.defaultForeground ?? p[7] ?? DARK.primaryFg,
     focusBg: p[4] ?? DARK.focusBg, // ANSI blue
     focusNavBg: p[12] ?? brighten(p[4] ?? DARK.focusBg, 0.18),
     focusNavBorder: p[7] ?? DARK.focusNavBorder,

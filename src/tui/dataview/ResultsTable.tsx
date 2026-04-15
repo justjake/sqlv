@@ -1,5 +1,5 @@
 import type { BoxRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard, useTerminalDimensions } from "@opentui/react"
+import { useTerminalDimensions } from "@opentui/react"
 import { useMemo, useRef, useState, type ReactNode } from "react"
 import {
   FocusHalo,
@@ -11,7 +11,8 @@ import {
   useRememberedDescendantPath,
   useFocusTree,
 } from "../focus"
-import { useKeybind } from "../ui/keybind"
+import { useKeybindHandler } from "../ui/keybind"
+import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 import { Table, type TableColumn } from "./table"
 
@@ -54,7 +55,6 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
   const { rows, width } = props
   const theme = useTheme()
   const tree = useFocusTree()
-  const { inChordRef } = useKeybind()
   const { width: terminalWidth } = useTerminalDimensions()
   const containerRef = useRef<BoxRenderable>(null)
   const scrollRef = useRef<ScrollBoxRenderable>(null)
@@ -119,17 +119,6 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
     () => resolveFocusedCellCoordinates(rememberedCellPath, rowIndexById, columnIndexById),
     [columnIndexById, rememberedCellPath, rowIndexById],
   )
-  const focusedWithinRef = useRef(focusedWithin)
-  const navigationActiveRef = useRef(navigationActive)
-  const activeCellRef = useRef(activeCell)
-  const rowCountRef = useRef(rows.length)
-  const columnCountRef = useRef(columnKeys.length)
-
-  focusedWithinRef.current = focusedWithin
-  navigationActiveRef.current = navigationActive
-  activeCellRef.current = activeCell
-  rowCountRef.current = rows.length
-  columnCountRef.current = columnKeys.length
 
   function focusCell(coords: CellCoordinates): boolean {
     if (cellCount === 0) {
@@ -143,26 +132,19 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
   const focusCellRef = useRef(focusCell)
   focusCellRef.current = focusCell
 
-  useKeyboard((key: KeyEvent) => {
-    if (
-      navigationActiveRef.current ||
-      inChordRef.current ||
-      !focusedWithinRef.current ||
-      rowCountRef.current === 0 ||
-      columnCountRef.current === 0
-    ) {
-      return
-    }
+  useKeybindHandler({
+    enabled: !navigationActive && focusedWithin && rows.length > 0 && columnKeys.length > 0,
+    onKey(key: KeyEvent) {
+      const current = activeCell ?? { rowIndex: 0, columnIndex: 0 }
+      const next = navigateResultsGrid(key, current, rows.length, columnKeys.length)
+      if (!next) {
+        return
+      }
 
-    const current = activeCellRef.current ?? { rowIndex: 0, columnIndex: 0 }
-    const next = navigateResultsGrid(key, current, rowCountRef.current, columnCountRef.current)
-    if (!next) {
-      return
-    }
-
-    key.preventDefault()
-    key.stopPropagation()
-    void focusCellRef.current(next)
+      key.preventDefault()
+      key.stopPropagation()
+      void focusCellRef.current(next)
+    },
   })
 
   const columns = useMemo(() => {
@@ -171,7 +153,7 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
       const maxContentWidth = Math.max(key.length, ...displayRows.map((row) => row[key]!.length))
       cols[key] = {
         width: shouldScroll ? { absolute: preferredColumnWidths[columnIndex] ?? 1 } : { grow: growWidthForColumn(maxContentWidth) },
-        Header: () => <text wrapMode="none" truncate>{" " + key}</text>,
+        Header: () => <Text wrapMode="none" truncate>{" " + key}</Text>,
         Cell: ({ rowIndex, columnWidth }) => (
           <ResultsCell
             columnIndex={columnIndex}
@@ -185,7 +167,7 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
     return cols
   }, [columnKeys, displayRows, focusedWithin, preferredColumnWidths, rememberedCell, shouldScroll])
 
-  if (rows.length === 0) return <text>No results.</text>
+  if (rows.length === 0) return <Text>No results.</Text>
 
   function handleSizeChange() {
     const nextWidth = containerRef.current?.width
@@ -274,7 +256,7 @@ function ResultsCell(props: {
         position="relative"
         width="100%"
       >
-        <text wrapMode="none" truncate>{" " + value}</text>
+        <Text wrapMode="none" truncate>{" " + value}</Text>
         {showPopout && (
           <box
             backgroundColor={theme.focusHintBg}
@@ -286,7 +268,7 @@ function ResultsCell(props: {
             width="100%"
             zIndex={2}
           >
-            <text wrapMode={resolvePopOutWrapMode(value)}>{" " + value}</text>
+            <Text wrapMode={resolvePopOutWrapMode(value)}>{" " + value}</Text>
           </box>
         )}
       </box>

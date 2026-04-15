@@ -4,8 +4,9 @@ import { act, useEffect, type ReactNode } from "react"
 import { FocusProvider, focusPathSignature, useFocusNavigationState, useFocusTree } from "../../src/tui/focus"
 import { App, QUERY_INSPECTOR_FOCUS_ID, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID, recentQueryFocusId } from "../../src/tui/index"
 import { ADD_CONNECTION_AREA_ID } from "../../src/tui/connection/AddConnectionPane"
-import { onEnterNode, Sidebar } from "../../src/tui/sidebar/Sidebar"
+import { onOpenNode, onSelectNode, Sidebar } from "../../src/tui/sidebar/Sidebar"
 import { KeybindProvider } from "../../src/tui/ui/keybind"
+import { Text } from "../../src/tui/ui/Text"
 import { SqlVisorProvider, useSqlVisor, useSqlVisorState } from "../../src/tui/useSqlVisor"
 import { createEngineStub, createQueryState, makeConnection, makeQueryExecution, makeSavedQuery } from "../support"
 
@@ -55,7 +56,7 @@ describe("SqlVisor provider and app", () => {
   test("requires a SqlVisor provider", async () => {
     function NeedsProvider() {
       useSqlVisor()
-      return <text>missing</text>
+      return <Text>missing</Text>
     }
 
     const ui = await render(<NeedsProvider />, { height: 5, width: 60 })
@@ -70,7 +71,7 @@ describe("SqlVisor provider and app", () => {
     function Consumer() {
       const engine = useSqlVisor()
       const state = useSqlVisorState()
-      return <text>{engine === stub.engine ? `selected:${state.selectedConnectionId}` : "wrong-engine"}</text>
+      return <Text>{engine === stub.engine ? `selected:${state.selectedConnectionId}` : "wrong-engine"}</Text>
     }
 
     const ui = await render(
@@ -186,14 +187,21 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    onEnterNode(stub.engine, {
+    onOpenNode(stub.engine, {
       connectionId: connection.id,
       key: connection.id,
       kind: "connection",
       name: connection.name,
     })
 
-    expect(stub.calls.selectConnection).toEqual([connection.id])
+    onSelectNode(stub.engine, {
+      connectionId: connection.id,
+      key: `${connection.id}.table.0`,
+      kind: "table",
+      name: "table users",
+    })
+
+    expect(stub.calls.selectConnection).toEqual([connection.id, connection.id])
     expect(addConnectionCount).toBe(1)
   })
 
@@ -366,6 +374,64 @@ describe("SqlVisor provider and app", () => {
     expect(stub.calls.restoreQueryExecution).toEqual([restorableEntry.id])
     expect(ui.captureCharFrame()).toContain("select 99 as total from audit_log")
     expect(ui.captureCharFrame()).toContain("99")
+  })
+
+  test("returns focus to the editor when query history closes with escape", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      protocol: "bunsqlite",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      editor: {
+        cursorOffset: "select ".length,
+        text: "select ",
+      },
+      history: [
+        makeQueryExecution({
+          connectionId: connection.id,
+          id: "history-1",
+          sql: "select * from users",
+        }),
+      ],
+      selectedConnectionId: connection.id,
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <App />
+      </SqlVisorProvider>,
+      { height: 20, width: 100 },
+    )
+
+    await act(async () => {
+      ui.mockInput.pressKey("r", { ctrl: true })
+      await ui.renderOnce()
+    })
+    expect(ui.captureCharFrame()).toContain("Filter")
+
+    await act(async () => {
+      ui.mockInput.pressEscape()
+      await Bun.sleep(30)
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(ui.captureCharFrame()).not.toContain("Filter")
+
+    await act(async () => {
+      ui.mockInput.pressKey("x")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(stub.getState().editor.text).toBe("select x")
   })
 
   test("restores saved queries from ctrl-r and clears the detail pane when no execution exists", async () => {

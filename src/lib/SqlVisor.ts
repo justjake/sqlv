@@ -66,6 +66,7 @@ export type EditorState = {
   text: string
   cursorOffset: number
   savedQueryId?: string
+  treeSitterGrammar?: string
   suggestionScopeMode: EditorSuggestionScopeMode
   suggestionMenu: EditorSuggestionMenuState
   analysis: EditorAnalysisState
@@ -227,7 +228,7 @@ export class SqlVisor {
     this.#queryClient = args.queryClient
     this.#queryKeyPrefix = ["sqlvisor", args.session.id]
     this.#suggestionProviders = args.suggestionProviders
-    this.#state = {
+    this.#state = this.#normalizeState({
       sessionId: args.session.id,
       connections: pendingQueryState<Connection<any>[]>(),
       selectedConnectionId: undefined,
@@ -249,7 +250,7 @@ export class SqlVisor {
       queryExecution: pendingQueryState<QueryExecution>(),
       activeQueries: [],
       objectsByConnectionId: {},
-    }
+    })
 
     this.#queryClient.getQueryCache().subscribe(() => {
       this.#syncQueryState()
@@ -1119,22 +1120,37 @@ export class SqlVisor {
   }
 
   #setState(patch: Partial<SqlVisorState>) {
-    this.#state = {
+    this.#state = this.#normalizeState({
       ...this.#state,
       ...patch,
-    }
+    })
     for (const listener of this.#listeners) {
       listener()
     }
   }
 
   #replaceState(patch: Pick<SqlVisorState, "connections" | "queryExecution" | "activeQueries" | "objectsByConnectionId">) {
-    this.#state = {
+    this.#state = this.#normalizeState({
       ...this.#state,
       ...patch,
-    }
+    })
     for (const listener of this.#listeners) {
       listener()
+    }
+  }
+
+  #normalizeState(state: SqlVisorState): SqlVisorState {
+    const treeSitterGrammar = this.#resolveEditorTreeSitterGrammar(state)
+    if (state.editor.treeSitterGrammar === treeSitterGrammar) {
+      return state
+    }
+
+    return {
+      ...state,
+      editor: {
+        ...state.editor,
+        treeSitterGrammar,
+      },
     }
   }
 
@@ -1152,6 +1168,15 @@ export class SqlVisor {
 
   #currentEditorProtocol(): Protocol | undefined {
     return this.#state.connections.data?.find((connection) => connection.id === this.#state.selectedConnectionId)?.protocol
+  }
+
+  #resolveEditorTreeSitterGrammar(state: Pick<SqlVisorState, "connections" | "selectedConnectionId">): string | undefined {
+    const connection = state.connections.data?.find((candidate) => candidate.id === state.selectedConnectionId)
+    if (!connection) {
+      return undefined
+    }
+
+    return this.registry.get(connection.protocol).treeSitterGrammar
   }
 
   #resolveSavedQueryConnectionId(savedQuery: SavedQuery, execution: QueryExecution | undefined): string | undefined {

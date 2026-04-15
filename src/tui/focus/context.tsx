@@ -1,6 +1,7 @@
-import type { KeyEvent, Renderable } from "@opentui/core"
+import type { Renderable } from "@opentui/core"
 import { useRenderer } from "@opentui/react"
 import {
+  useCallback,
   createContext,
   useContext,
   useEffect,
@@ -25,6 +26,9 @@ import {
 const FocusTreeContext = createContext<FocusTree | undefined>(undefined)
 const FocusPathContext = createContext<FocusPath>(ROOT_FOCUS_PATH)
 const CurrentFocusablePathContext = createContext<FocusPath | undefined>(undefined)
+const FocusNavigationRestoreContext = createContext<
+  ((skipRestoreOnExit: boolean) => void) | undefined
+>(undefined)
 
 export function FocusProvider(props: { children: ReactNode }) {
   const tree = useMemo(() => new FocusTree(), [])
@@ -33,48 +37,9 @@ export function FocusProvider(props: { children: ReactNode }) {
   const savedRenderableRef = useRef<Renderable | null>(null)
   const skipRestoreOnExitRef = useRef(false)
   const restoreSequenceRef = useRef(0)
-
-  useEffect(() => {
-    const handleKeyPress = (event: KeyEvent) => {
-      const state = tree.getNavigationState()
-      if (state.active) {
-        event.preventDefault()
-        event.stopPropagation()
-
-        switch (event.name) {
-          case "escape":
-            skipRestoreOnExitRef.current = false
-            tree.handleEscape()
-            break
-          case "up":
-          case "down":
-          case "left":
-          case "right":
-            tree.moveFocusNavigation(event.name)
-            break
-          case "enter":
-          case "return":
-          case "space":
-            skipRestoreOnExitRef.current = true
-            tree.activateHighlightedFocusable()
-            break
-        }
-        return
-      }
-
-      if (event.name === "escape") {
-        event.preventDefault()
-        event.stopPropagation()
-        skipRestoreOnExitRef.current = false
-        tree.handleEscape()
-      }
-    }
-
-    renderer.keyInput.prependListener("keypress", handleKeyPress)
-    return () => {
-      renderer.keyInput.off("keypress", handleKeyPress)
-    }
-  }, [renderer, tree])
+  const setSkipRestoreOnExit = useCallback((skipRestoreOnExit: boolean) => {
+    skipRestoreOnExitRef.current = skipRestoreOnExit
+  }, [])
 
   useEffect(() => {
     return tree.subscribe(() => {
@@ -113,7 +78,13 @@ export function FocusProvider(props: { children: ReactNode }) {
     tree.flushPendingChanges()
   })
 
-  return <FocusTreeContext.Provider value={tree}>{props.children}</FocusTreeContext.Provider>
+  return (
+    <FocusTreeContext.Provider value={tree}>
+      <FocusNavigationRestoreContext.Provider value={setSkipRestoreOnExit}>
+        {props.children}
+      </FocusNavigationRestoreContext.Provider>
+    </FocusTreeContext.Provider>
+  )
 }
 
 export function useFocusTree(): FocusTree {
@@ -122,6 +93,14 @@ export function useFocusTree(): FocusTree {
     throw new Error("FocusProvider not found")
   }
   return tree
+}
+
+export function useFocusNavigationRestoreController(): (skipRestoreOnExit: boolean) => void {
+  const controller = useContext(FocusNavigationRestoreContext)
+  if (!controller) {
+    throw new Error("FocusProvider not found")
+  }
+  return controller
 }
 
 export function useFocusParentPath(): FocusPath {

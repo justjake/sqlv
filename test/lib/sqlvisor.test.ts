@@ -15,6 +15,7 @@ import { makeConnection, makeQueryExecution, makeSavedQuery } from "../support"
 
 class FakeBunAdapter implements Adapter<{ path: string }, unknown, {}> {
   readonly protocol = "bunsqlite"
+  readonly treeSitterGrammar = "sql"
   features = {}
   connectCalls = 0
   fetchObjectsCalls = 0
@@ -248,6 +249,7 @@ describe("SqlVisor", () => {
     expect(registry.has("turso")).toBe(true)
     expect(state.connections.data?.map((connection) => connection.id)).toEqual(["conn-2", "conn-1"])
     expect(state.selectedConnectionId).toBe("conn-2")
+    expect(state.editor.treeSitterGrammar).toBe("sql")
     expect(await persistence.persist.log.get({ id: persistence.session.id, type: "session" })).toEqual(
       persistence.session,
     )
@@ -318,6 +320,7 @@ describe("SqlVisor", () => {
       },
       suggestionScopeMode: "all-connections",
       text: "select 1",
+      treeSitterGrammar: "sql",
     })
     expect(notifications).toBeGreaterThanOrEqual(4)
     expect(fakeAdapter.fetchObjectsCalls).toBeGreaterThanOrEqual(1)
@@ -391,6 +394,47 @@ describe("SqlVisor", () => {
     expect(engine.getState().editor.analysis.result).toEqual({
       diagnostics: [],
       status: "ok",
+    })
+  })
+
+  test("preserves incomplete-input editor analysis results for views to decide how to present", async () => {
+    const fakeAdapter = new FakeBunAdapter()
+    fakeAdapter.explainResultsByQuery.set("select", {
+      diagnostics: [
+        {
+          code: "incomplete-input",
+          message: "incomplete input",
+          severity: "error",
+        },
+      ],
+      status: "invalid",
+    })
+
+    const engine = await SqlVisor.create({
+      persistence: createPersistence(),
+      queryClient: createQueryClient(),
+      registry: new AdapterRegistry([fakeAdapter]),
+    })
+
+    engine.requestEditorAnalysis({ text: "select" })
+
+    await waitFor(() => fakeAdapter.explainCalls === 1 && engine.getState().editor.analysis.status === "ready")
+
+    expect(engine.getState().editor.analysis).toEqual({
+      connectionId: "conn-1",
+      error: undefined,
+      requestedText: "select",
+      result: {
+        diagnostics: [
+          {
+            code: "incomplete-input",
+            message: "incomplete input",
+            severity: "error",
+          },
+        ],
+        status: "invalid",
+      },
+      status: "ready",
     })
   })
 
