@@ -18,6 +18,8 @@ import { createEngineStub, createQueryState, makeConnection, makeQueryExecution,
 
 let rendered: Awaited<ReturnType<typeof testRender>> | undefined
 let focusedPath = ""
+let highlightedPath = ""
+let focusNavigationActive = false
 
 async function render(node: ReactNode, size = { height: 18, width: 100 }) {
   rendered = await testRender(
@@ -36,6 +38,8 @@ afterEach(() => {
   rendered?.renderer.destroy()
   rendered = undefined
   focusedPath = ""
+  highlightedPath = ""
+  focusNavigationActive = false
 })
 
 function FocusController(props: { path: readonly string[] }) {
@@ -55,6 +59,8 @@ function FocusController(props: { path: readonly string[] }) {
 function FocusProbe() {
   const state = useFocusNavigationState()
   focusedPath = focusPathSignature(state.focusedPath) ?? ""
+  highlightedPath = focusPathSignature(state.highlightedPath) ?? ""
+  focusNavigationActive = state.active
   return null
 }
 
@@ -962,18 +968,11 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID]) ?? "")
+    expect(focusNavigationActive).toBe(true)
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
+    expect(highlightedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID]) ?? "")
     expect(ui.captureCharFrame()).toContain("Add Connection")
     expect(ui.captureCharFrame()).toContain("esc esc")
-
-    await act(async () => {
-      ui.mockInput.pressEscape()
-      await Bun.sleep(30)
-      await ui.renderOnce()
-      await ui.renderOnce()
-    })
-
-    expect(ui.captureCharFrame()).toContain("Add Connection")
 
     await act(async () => {
       ui.mockInput.pressEscape()

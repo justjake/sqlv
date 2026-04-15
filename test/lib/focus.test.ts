@@ -123,7 +123,7 @@ describe("FocusTree", () => {
     expect(tree.getNavigationState().active).toBe(false)
   })
 
-  test("esc steps real focus outward through ancestor nodes before entering focus navigation", () => {
+  test("esc starts focus navigation from the current real focus", () => {
     const tree = new FocusTree()
 
     tree.registerNode({
@@ -156,23 +156,23 @@ describe("FocusTree", () => {
 
     tree.handleEscape()
     expect(tree.getNavigationState()).toMatchObject({
-      active: false,
-      focusedPath: ["gp", "cX"],
-      highlightedPath: ["gp", "cX"],
-    })
-
-    tree.handleEscape()
-    expect(tree.getNavigationState()).toMatchObject({
-      active: false,
-      focusedPath: ["gp"],
-      highlightedPath: ["gp"],
+      active: true,
+      focusedPath: ["gp", "cX", "list", "l2"],
+      highlightedPath: ["gp", "cX", "list", "l2"],
     })
 
     tree.handleEscape()
     expect(tree.getNavigationState()).toMatchObject({
       active: true,
+      focusedPath: ["gp", "cX", "list", "l2"],
+      highlightedPath: ["gp", "cX"],
+    })
+
+    tree.handleEscape()
+    expect(tree.getNavigationState()).toMatchObject({
+      active: true,
+      focusedPath: ["gp", "cX", "list", "l2"],
       highlightedPath: ["gp"],
-      focusedPath: ["gp"],
     })
   })
 

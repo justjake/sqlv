@@ -137,6 +137,7 @@ export const shortcutNamedKeyNames = [
   "leftshift",
   "leftsuper",
   "linefeed",
+  /*
   "mediapause",
   "mediafastforward",
   "mediaplay",
@@ -147,6 +148,7 @@ export const shortcutNamedKeyNames = [
   "mediarewind",
   "mediastop",
   "medianext",
+  */
   "menu",
   "mute",
   "numlock",
@@ -182,6 +184,8 @@ export const shortcutNamedKeyNames = [
   "f12",
   "f13",
   "f14",
+  // Not worth the union complexity
+  /*
   "f15",
   "f16",
   "f17",
@@ -231,6 +235,7 @@ export const shortcutNamedKeyNames = [
   "kpend",
   "kpinsert",
   "kpdelete",
+  */
 ] as const
 
 // `alt` and `option` are intentionally both accepted:
@@ -261,39 +266,17 @@ export type ShortcutNormalizedKeyName =
 
 export type ShortcutBareKeyName = (typeof shortcutBareKeyNames)[number]
 
-/** Type-level modifier chain within a single chord step like `ctrl+shift`. */
-type ShortcutModifierChainLiteral<T extends string> = Lowercase<T> extends ShortcutModifierName
-  ? T
-  : T extends `${infer Head}+${infer Tail}`
-    ? Lowercase<Head> extends ShortcutModifierName
-      ? ShortcutModifierChainLiteral<Tail> extends never
-        ? never
-        : T
-      : never
-    : never
+// In macOS display order.
+export type Ctrl = `ctrl+`
+export type Option = `option+` // | `meta+` | `alt+`
+export type Shift = `shift+`
+export type Command = `command+`
+// No Command detected
 
-/** Type-level single chord step like `ctrl+w` within a leader chord such as `ctrl+w h`. */
-type ShortcutChordStepLiteral<T extends string> = Lowercase<T> extends ShortcutBareKeyName
-  ? T
-  : T extends `${infer Prefix}+${infer Key}`
-    ? ShortcutModifierChainLiteral<Prefix> extends never
-      ? never
-      : Lowercase<Key> extends ShortcutBareKeyName
-        ? T
-        : never
-    : never
-
-/** Type-level full shortcut string, including multi-step leader chords separated by spaces. */
-type ShortcutChordLiteral<T extends string> = T extends `${infer Head} ${infer Tail}`
-  ? ShortcutChordStepLiteral<Head> extends never
-    ? never
-    : ShortcutChordLiteral<Tail> extends never
-      ? never
-      : T
-  : ShortcutChordStepLiteral<T>
-
-/** Public shortcut/chord string type. Example: `ctrl+x` or leader chord `ctrl+w h`. */
-export type ShortcutKeys<T extends string> = ShortcutChordLiteral<T> extends never ? never : T
+export type ShortcutModifiedKey =
+  `${Ctrl | never}${Option | never}${Shift | never}${Command | never}${ShortcutBareKeyName}`
+export type ShortcutChain = [ShortcutModifiedKey, ...ShortcutModifiedKey[]]
+export type ShortcutKeys = ShortcutModifiedKey | ShortcutChain
 
 export const shortcutKeyAliases = {
   enter: "return",
@@ -327,6 +310,7 @@ export const shortcutKeyAliases = {
   kpend: "end",
   kpinsert: "insert",
   kpdelete: "delete",
+  command: "super",
 } as const satisfies Record<string, ShortcutNormalizedKeyName>
 
 export function normalizeShortcutKeyName(name: string | undefined): string | undefined {

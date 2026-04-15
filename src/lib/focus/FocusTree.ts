@@ -311,16 +311,6 @@ export class FocusTree {
   handleEscape() {
     const session = this.#session
     if (!session) {
-      const activeScopePath = this.#computeScopePath()
-      const parentPath = this.#focusedPath
-        ? this.#findNearestAncestorFocusablePath(this.#focusedPath, activeScopePath)
-        : undefined
-
-      if (parentPath) {
-        this.focusPath(parentPath, "escape")
-        return
-      }
-
       this.startFocusNavigation()
       return
     }
