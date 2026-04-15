@@ -181,6 +181,53 @@ describe("TreeView", () => {
     expect(focusedPathLine(ui)).toContain("sidebar-tree/row-root")
   })
 
+  test("renders nvim-style nested prefixes", async () => {
+    const nodes = [
+      {
+        expanded: true,
+        children: [
+          {
+            expanded: true,
+            children: [
+              {
+                expanded: true,
+                children: [{ key: "leaf", name: "Leaf" }],
+                expandable: true,
+                key: "src",
+                name: "Src",
+              },
+              { key: "vitest", name: "vitest.config.ts" },
+            ],
+            expandable: true,
+            key: "react",
+            name: "React",
+          },
+          {
+            expandable: true,
+            key: "solid",
+            name: "Solid",
+          },
+        ],
+        expandable: true,
+        key: "root",
+        name: "Root",
+      },
+    ]
+
+    const ui = await render(
+      <TreeView nodes={nodes} />,
+      { height: 8, width: 40 },
+    )
+
+    const [rootLine, reactLine, srcLine, leafLine, vitestLine, solidLine] = ui.captureCharFrame().split("\n")
+    expect(rootLine?.startsWith("    Root")).toBe(true)
+    expect(reactLine?.startsWith("      React")).toBe(true)
+    expect(srcLine?.startsWith("    │   Src")).toBe(true)
+    expect(leafLine?.startsWith("    │ │ └ * Leaf")).toBe(true)
+    expect(vitestLine?.startsWith("    │ └ * vitest.config.ts")).toBe(true)
+    expect(solidLine?.startsWith("      Solid")).toBe(true)
+  })
+
   test("keeps tree rows single-line when labels are long", async () => {
     const nodes = [
       {
@@ -198,10 +245,11 @@ describe("TreeView", () => {
     )
 
     const [rootLine, childLine, thirdLine] = ui.captureCharFrame().split("\n")
-    expect(rootLine?.startsWith(" ▼ ")).toBe(true)
-    expect(childLine?.startsWith("   └ ")).toBe(true)
-    expect(rootLine).not.toContain("label")
-    expect(childLine).not.toContain("label")
+    expect(rootLine?.startsWith("    ")).toBe(true)
+    expect(rootLine).toContain("")
+    expect(childLine?.startsWith("    └ * ")).toBe(true)
+    expect(rootLine).toContain("A root")
+    expect(childLine).toContain("A child")
     expect(thirdLine?.trim()).toBe("")
   })
 })

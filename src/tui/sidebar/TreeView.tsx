@@ -47,10 +47,13 @@ type TreeProps = {
 export const SIDEBAR_TREE_AREA_ID = "sidebar-tree"
 
 const GUIDE_PIPE = "│"
-const GUIDE_BRANCH = "├"
-const GUIDE_CORNER = "└"
-const EXPAND_OPEN = "▼"
-const EXPAND_CLOSED = "▶"
+const LEAF_LAST = "└"
+const LEAF_MIDDLE = "│"
+const EXPAND_OPEN = ""
+const EXPAND_CLOSED = ""
+const FOLDER_OPEN = ""
+const FOLDER_CLOSED = ""
+const DEFAULT_FILE_ICON = "*"
 
 export function TreeView(props: TreeProps) {
   return (
@@ -254,7 +257,7 @@ function TreeRow(props: {
 }) {
   const { children, onToggleDisclosure, row } = props
   const rowRef = useRef<BoxRenderable>(null)
-  const disclosureOffset = treeDisclosureOffset(row.level)
+  const disclosureOffset = treeDisclosureOffset(row)
 
   return (
     <box
@@ -295,6 +298,10 @@ function TreeNodeView(props: VisibleTreeNode & {
   const { focused, node, remembered } = props
   const theme = useTheme()
   const prefix = treePrefix(props)
+  const icon = treeIcon(props)
+  const labelFg = focused ? theme.formFieldLabelActiveFg : theme.primaryFg
+  const prefixFg = focused ? theme.formFieldLabelActiveFg : theme.mutedFg
+  const iconFg = focused ? theme.formFieldLabelActiveFg : theme.focusBg
 
   return (
     <box
@@ -302,11 +309,17 @@ function TreeNodeView(props: VisibleTreeNode & {
       flexDirection="row"
       width="100%"
     >
-      <box flexGrow={0} flexShrink={0} width={prefix.length}>
-        <Text fg={theme.mutedFg} wrapMode="none">{prefix}</Text>
+      <box flexGrow={0} flexShrink={0} width={textCells(prefix)}>
+        <Text fg={prefixFg} wrapMode="none">{prefix}</Text>
       </box>
-      <box flexGrow={1} width="100%">
-        <Text fg={theme.primaryFg} wrapMode="none">{node.name}</Text>
+      <box flexGrow={0} flexShrink={0} width={textCells(icon)}>
+        <Text fg={iconFg} wrapMode="none">{icon}</Text>
+      </box>
+      <box flexGrow={0} flexShrink={0} width={1}>
+        <Text fg={prefixFg} wrapMode="none">{" "}</Text>
+      </box>
+      <box flexGrow={1} flexShrink={1}>
+        <Text fg={labelFg} truncate wrapMode="none">{node.name}</Text>
       </box>
     </box>
   )
@@ -321,32 +334,77 @@ function rowFocusId(rowKey: string): string {
 }
 
 function treePrefix(row: VisibleTreeNode): string {
-  return ` ${treeGuides(row.level, row.parentIsLastPath)}${treeMarker(row)} `
-}
-
-function treeGuides(level: number, parentIsLastPath: readonly boolean[]): string {
-  let guides = ""
-  for (let i = 0; i < level; i += 1) {
-    guides += parentIsLastPath[i] ? "  " : `${GUIDE_PIPE} `
-  }
-  return guides
-}
-
-function treeMarker(row: Pick<VisibleTreeNode, "isExpandable" | "isExpanded" | "isLast">): string {
-  if (row.isExpandable && row.isExpanded) {
-    return EXPAND_OPEN
-  }
   if (row.isExpandable) {
-    return EXPAND_CLOSED
+    return `${treeBaseIndent(row.level, row.parentIsLastPath)}${treeDisclosure(row)} `
   }
-  if (row.isLast) {
-    return GUIDE_CORNER
-  }
-  return GUIDE_BRANCH
+
+  return `${treeLeafIndent(row.level, row.parentIsLastPath)}${treeLeafLead(row)} `
 }
 
-function treeDisclosureOffset(level: number): number {
-  return 1 + level * 2
+function treeBaseIndent(level: number, parentIsLastPath: readonly boolean[]): string {
+  let indent = "  "
+  for (let i = 1; i <= level; i += 1) {
+    if (i === 1) {
+      indent += "  "
+      continue
+    }
+
+    indent += (parentIsLastPath[i - 1] ?? true) ? "  " : `${GUIDE_PIPE} `
+  }
+  return indent
+}
+
+function treeDisclosure(row: Pick<VisibleTreeNode, "isExpandable" | "isExpanded">): string {
+  if (!row.isExpandable) {
+    return " "
+  }
+  return row.isExpanded ? EXPAND_OPEN : EXPAND_CLOSED
+}
+
+function treeLeafIndent(level: number, parentIsLastPath: readonly boolean[]): string {
+  const base = treeBaseIndent(level + 1, parentIsLastPath)
+  return base.slice(0, Math.max(0, base.length - 2))
+}
+
+function treeLeafLead(row: Pick<VisibleTreeNode, "level" | "isLast">): string {
+  if (row.level === 0) {
+    return "  "
+  }
+  return row.isLast ? LEAF_LAST : LEAF_MIDDLE
+}
+
+function treeIcon(row: Pick<VisibleTreeNode, "isExpandable" | "isExpanded" | "node">): string {
+  if (row.isExpandable) {
+    return row.isExpanded ? FOLDER_OPEN : FOLDER_CLOSED
+  }
+
+  switch (row.node.kind) {
+    case "database":
+      return "󰆼"
+    case "schema":
+      return "󰙅"
+    case "table":
+      return "󰓫"
+    case "view":
+    case "matview":
+      return "󰈈"
+    case "index":
+      return "󰛦"
+    case "trigger":
+      return "󰐕"
+    case "placeholder":
+      return DEFAULT_FILE_ICON
+    default:
+      return DEFAULT_FILE_ICON
+  }
+}
+
+function treeDisclosureOffset(row: Pick<VisibleTreeNode, "level" | "parentIsLastPath">): number {
+  return textCells(treeBaseIndent(row.level, row.parentIsLastPath))
+}
+
+function textCells(text: string): number {
+  return [...text].length
 }
 
 function isExpandableNode(node: TreeNode): boolean {
