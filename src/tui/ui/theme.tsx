@@ -7,6 +7,8 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 type Theme = {
   /** Foreground for ordinary body text and input text. */
   primaryFg: string
+  /** Foreground for focus-accented indicators such as selected radio dots. */
+  focusPrimaryFg: string
   /** Foreground for an active form field label. */
   formFieldLabelActiveFg: string
   /** Background for focused/selected rows (tree nodes, history items, form fields). */
@@ -49,8 +51,12 @@ type Theme = {
 // Dark values are taken from the user's WezTerm "Circus (base16)" palette.
 // Light values are reasonable counterparts for a light-background terminal.
 
+const FORM_FIELD_BACKGROUND_ALPHA = 0x20
+const FORM_FIELD_BACKGROUND_ACTIVE_ALPHA = 0x36
+
 const DARK: Theme = {
   primaryFg: "#d0d0d0",
+  focusPrimaryFg: "#639ee4", // base0D (blue)
   formFieldLabelActiveFg: "#ffffff",
   focusBg: "#639ee4", // base0D (blue)
   focusNavBg: "#8ab6ef",
@@ -59,8 +65,8 @@ const DARK: Theme = {
   inputBg: "#303030", // base02
   formFieldFocusRingInactive: "#5f5a60", // base03
   formFieldFocusRingActive: "#8ab6ef",
-  formFieldBackground: "#303030",
-  formFieldBackgroundActive: "#3a3a3a",
+  formFieldBackground: withHexAlpha("#303030", FORM_FIELD_BACKGROUND_ALPHA),
+  formFieldBackgroundActive: withHexAlpha("#3a3a3a", FORM_FIELD_BACKGROUND_ACTIVE_ALPHA),
   shortcutBg: "#5f5a60", // base03
   shortcutActiveBg: "#639ee4", // base0D
   borderColor: "#5f5a60", // base03
@@ -73,6 +79,7 @@ const DARK: Theme = {
 
 const LIGHT: Theme = {
   primaryFg: "#303030",
+  focusPrimaryFg: "#4271ae",
   formFieldLabelActiveFg: "#111111",
   focusBg: "#4271ae",
   focusNavBg: "#6f95c7",
@@ -81,8 +88,8 @@ const LIGHT: Theme = {
   inputBg: "#e0e0e0",
   formFieldFocusRingInactive: "#c8c8c8",
   formFieldFocusRingActive: "#4271ae",
-  formFieldBackground: "#efefef",
-  formFieldBackgroundActive: "#ffffff",
+  formFieldBackground: withHexAlpha("#efefef", FORM_FIELD_BACKGROUND_ALPHA),
+  formFieldBackgroundActive: withHexAlpha("#ffffff", FORM_FIELD_BACKGROUND_ACTIVE_ALPHA),
   shortcutBg: "#c8c8c8",
   shortcutActiveBg: "#4271ae",
   borderColor: "#c8c8c8",
@@ -100,6 +107,7 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
   if (mode === "light") {
     return {
       primaryFg: palette.defaultForeground ?? p[0] ?? LIGHT.primaryFg,
+      focusPrimaryFg: p[4] ?? LIGHT.focusPrimaryFg, // ANSI blue
       formFieldLabelActiveFg: p[0] ?? LIGHT.formFieldLabelActiveFg,
       focusBg: p[4] ?? LIGHT.focusBg, // ANSI blue
       focusNavBg: p[12] ?? brighten(p[4] ?? LIGHT.focusBg, 0.2),
@@ -108,8 +116,11 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
       inputBg: p[7] ?? LIGHT.inputBg, // ANSI white (light bg tint)
       formFieldFocusRingInactive: p[7] ?? LIGHT.formFieldFocusRingInactive,
       formFieldFocusRingActive: p[4] ?? LIGHT.formFieldFocusRingActive,
-      formFieldBackground: p[7] ?? LIGHT.formFieldBackground,
-      formFieldBackgroundActive: p[7] ? brighten(p[7], 0.04) : LIGHT.formFieldBackgroundActive,
+      formFieldBackground: withHexAlpha(p[7] ?? LIGHT.formFieldBackground, FORM_FIELD_BACKGROUND_ALPHA),
+      formFieldBackgroundActive: withHexAlpha(
+        p[7] ? brighten(p[7], 0.04) : LIGHT.formFieldBackgroundActive,
+        FORM_FIELD_BACKGROUND_ACTIVE_ALPHA,
+      ),
       shortcutBg: p[7] ?? LIGHT.shortcutBg,
       shortcutActiveBg: p[4] ?? LIGHT.shortcutActiveBg,
       borderColor: p[7] ?? LIGHT.borderColor,
@@ -122,6 +133,7 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
   }
   return {
     primaryFg: palette.defaultForeground ?? p[7] ?? DARK.primaryFg,
+    focusPrimaryFg: p[4] ?? DARK.focusPrimaryFg, // ANSI blue
     formFieldLabelActiveFg: "#ffffff",
     focusBg: p[4] ?? DARK.focusBg, // ANSI blue
     focusNavBg: p[12] ?? brighten(p[4] ?? DARK.focusBg, 0.18),
@@ -130,8 +142,14 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
     inputBg: p[0] ? brighten(p[0], 0.12) : DARK.inputBg,
     formFieldFocusRingInactive: p[8] ?? DARK.formFieldFocusRingInactive,
     formFieldFocusRingActive: p[12] ?? p[4] ?? DARK.formFieldFocusRingActive,
-    formFieldBackground: p[0] ? brighten(p[0], 0.12) : DARK.formFieldBackground,
-    formFieldBackgroundActive: p[0] ? brighten(p[0], 0.18) : DARK.formFieldBackgroundActive,
+    formFieldBackground: withHexAlpha(
+      p[0] ? brighten(p[0], 0.12) : DARK.formFieldBackground,
+      FORM_FIELD_BACKGROUND_ALPHA,
+    ),
+    formFieldBackgroundActive: withHexAlpha(
+      p[0] ? brighten(p[0], 0.18) : DARK.formFieldBackgroundActive,
+      FORM_FIELD_BACKGROUND_ACTIVE_ALPHA,
+    ),
     shortcutBg: p[8] ?? DARK.shortcutBg, // ANSI bright black
     shortcutActiveBg: p[4] ?? DARK.shortcutActiveBg,
     borderColor: p[8] ?? DARK.borderColor,
@@ -179,4 +197,12 @@ function brighten(hex: string, amount: number): string {
   const b = parseInt(hex.slice(5, 7), 16)
   const bump = (c: number) => Math.min(255, Math.round(c + (255 - c) * amount))
   return `#${bump(r).toString(16).padStart(2, "0")}${bump(g).toString(16).padStart(2, "0")}${bump(b).toString(16).padStart(2, "0")}`
+}
+
+function withHexAlpha(color: string, alpha: number): string {
+  if (!/^#[\da-fA-F]{6}([\da-fA-F]{2})?$/.test(color)) {
+    return color
+  }
+
+  return `${color.slice(0, 7)}${alpha.toString(16).padStart(2, "0")}`
 }

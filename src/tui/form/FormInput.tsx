@@ -12,15 +12,18 @@ export type FormInputProps = {
 
 export function FormInput(props: FormInputProps) {
   const theme = useTheme()
-  const { inputFocused } = useFormFieldContext()
+  const { active, inputFocused } = useFormFieldContext()
 
   return (
-    <box flexDirection="row" width="100%">
+    <box alignSelf="stretch" flexDirection="row" minWidth={0}>
       <input
+        backgroundColor={active ? theme.formFieldBackgroundActive : theme.formFieldBackground}
         cursorColor={theme.primaryFg}
         flexGrow={1}
         focused={inputFocused}
+        focusedBackgroundColor={theme.formFieldBackgroundActive}
         focusedTextColor={theme.primaryFg}
+        minWidth={0}
         onInput={props.onInput}
         placeholder={props.placeholder}
         placeholderColor={theme.mutedFg}

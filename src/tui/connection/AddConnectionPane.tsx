@@ -1,5 +1,5 @@
 import type { InputRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { sameFocusPath } from "../../lib/focus"
 import type {
   AnyAdapter,
@@ -22,6 +22,7 @@ import {
 import { FormInput, FormLabel } from "../form"
 import { Shortcut } from "../Shortcut"
 import { useKeybindHandler } from "../ui/keybind"
+import { useModalBottomRight } from "../ui/Modal"
 import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 import { useSqlVisor, useSqlVisorState } from "../useSqlVisor"
@@ -70,24 +71,41 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
   const scrollRef = useRef<ScrollBoxRenderable>(null)
   const didRequestInitialFocusRef = useRef(false)
 
-  useEffect(() => {
-    if (protocol || !initialProtocol) return
-    loadProtocol(initialProtocol)
-  }, [initialProtocol, protocol])
-
   const adapter = protocol ? adapters.find((candidate) => candidate.protocol === protocol) : undefined
   const spec = adapter?.getConnectionSpec()
   const visibleFields = spec?.fields.filter((field) => field.visible?.(values) ?? true) ?? []
-  const focusFields: FocusField[] = useMemo(
-    () => adapters.length === 0
+  const focusFields: FocusField[] =
+    adapters.length === 0
       ? []
       : [
           { kind: "protocol", key: "protocol" },
           { kind: "name", key: "name" },
           ...visibleFields.map((field): FocusField => ({ kind: "field", field, key: field.key })),
-        ],
-    [adapters.length, visibleFields],
+        ]
+
+  const loadProtocol = useCallback(
+    (nextProtocol: Protocol, focusFieldKey: "name" | "protocol" = "name") => {
+      const nextAdapter = adapters.find((candidate) => candidate.protocol === nextProtocol)
+      if (!nextAdapter) return
+
+      const nextSpec = nextAdapter.getConnectionSpec()
+      protocolRef.current = nextProtocol
+      nameRef.current = ""
+      valuesRef.current = defaultFieldValues(nextSpec)
+      setProtocol(nextProtocol)
+      setName("")
+      setValues(valuesRef.current)
+      setErrors({})
+      setFormError(undefined)
+      focusTree.focusPath(addConnectionFieldPath(focusFieldKey))
+    },
+    [adapters, focusTree],
   )
+
+  useEffect(() => {
+    if (protocol || !initialProtocol) return
+    loadProtocol(initialProtocol)
+  }, [initialProtocol, loadProtocol, protocol])
 
   useEffect(() => {
     if (didRequestInitialFocusRef.current || focusFields.length === 0) {
@@ -101,6 +119,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
   if (!adapters.length) {
     return (
       <Focusable
+        alignSelf="stretch"
         childrenNavigable={false}
         delegatesFocus
         flexDirection="column"
@@ -112,7 +131,6 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
         onTrapEsc={onBack}
         trap
         trapEscLabel="Close"
-        width="100%"
       >
         <AddConnectionChrome onClose={onBack}>
           <Text>No connection forms are available for the registered adapters.</Text>
@@ -150,22 +168,6 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
     }
   }
 
-  function loadProtocol(nextProtocol: Protocol) {
-    const nextAdapter = adapters.find((candidate) => candidate.protocol === nextProtocol)
-    if (!nextAdapter) return
-
-    const nextSpec = nextAdapter.getConnectionSpec()
-    protocolRef.current = nextProtocol
-    nameRef.current = ""
-    valuesRef.current = defaultFieldValues(nextSpec)
-    setProtocol(nextProtocol)
-    setName("")
-    setValues(valuesRef.current)
-    setErrors({})
-    setFormError(undefined)
-    focusTree.focusPath(addConnectionFieldPath("name"))
-  }
-
   function cycleProtocol(step: number) {
     const currentProtocol = protocolRef.current
     if (!currentProtocol || !adapters.length) return
@@ -173,7 +175,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
     if (index < 0) return
     const nextIndex = stepIndex(index, adapters.length, step)
     const nextProtocol = adapters[nextIndex]?.protocol
-    if (nextProtocol) loadProtocol(nextProtocol)
+    if (nextProtocol) loadProtocol(nextProtocol, "protocol")
   }
 
   function updateStringField(key: string, nextValue: string) {
@@ -194,7 +196,8 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
   }
 
   return (
-      <Focusable
+    <Focusable
+      alignSelf="stretch"
       delegatesFocus
       flexDirection="column"
       flexGrow={1}
@@ -207,7 +210,6 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
       scrollRef={scrollRef}
       trap
       trapEscLabel="Close"
-      width="100%"
     >
       <AddConnectionPaneBody
         adapters={adapters}
@@ -253,13 +255,40 @@ function AddConnectionPaneBody(props: {
   spec: ConnectionSpec<any> | undefined
   values: ConnectionFormValues
 }) {
-  const { adapters, errors, focusFields, formError, name, onBack, onCycleProtocol, onSave, onSetBooleanField, onSetName, onSetStringField, protocol, saving, scrollRef, spec, values } = props
+  const {
+    adapters,
+    errors,
+    focusFields,
+    formError,
+    name,
+    onBack,
+    onCycleProtocol,
+    onSave,
+    onSetBooleanField,
+    onSetName,
+    onSetStringField,
+    protocol,
+    saving,
+    scrollRef,
+    spec,
+    values,
+  } = props
   const focusTree = useFocusTree()
   const focusedWithin = useIsFocusWithin([ADD_CONNECTION_AREA_ID])
   const focusedFieldPath = useFocusedDescendantPath()
   const rememberedFieldPath = useRememberedDescendantPath()
   const currentFieldKey = resolveDirectChildKey(focusedFieldPath) ?? resolveDirectChildKey(rememberedFieldPath)
-  const currentFieldIndex = clampIndex(findFieldIndex(focusFields, currentFieldKey ?? "name"), focusFields.length, focusFields.length > 1 ? 1 : 0)
+  const currentFieldIndex = clampIndex(
+    findFieldIndex(focusFields, currentFieldKey ?? "name"),
+    focusFields.length,
+    focusFields.length > 1 ? 1 : 0,
+  )
+  const modalBottomRight = useMemo(
+    () => <Shortcut keys="ctrl+s" label="Save" enabled={!saving} onKey={onSave} />,
+    [onSave, saving],
+  )
+
+  useModalBottomRight(modalBottomRight)
 
   const navigatePrev = () => focusFieldByOffset(-1)
   const navigateNext = () => focusFieldByOffset(1)
@@ -275,10 +304,6 @@ function AddConnectionPaneBody(props: {
 
   return (
     <AddConnectionChrome onClose={onBack}>
-      <box flexDirection="row" gap={1}>
-        <Shortcut keys="ctrl+s" label="Save" enabled={!saving} onKey={onSave} />
-      </box>
-
       <scrollbox ref={scrollRef} flexGrow={1} contentOptions={{ flexDirection: "column", gap: 1 }}>
         {formError && <Text>{formError}</Text>}
 
@@ -365,19 +390,26 @@ function AddConnectionPaneBody(props: {
   )
 }
 
-function AddConnectionChrome(props: {
-  children: ReactNode
-  onClose: () => void
-}) {
+function AddConnectionChrome(props: { children: ReactNode; onClose: () => void }) {
   const theme = useTheme()
+  const navigationActive = useIsFocusNavigationActive()
 
   return (
-    <box flexDirection="column" flexGrow={1} gap={1} height="100%" paddingBottom={1} paddingLeft={2} paddingRight={2} width="100%">
+    <box
+      alignSelf="stretch"
+      flexDirection="column"
+      flexGrow={1}
+      gap={1}
+      height="100%"
+      paddingBottom={1}
+      paddingLeft={2}
+      paddingRight={2}
+    >
       <box flexDirection="row" justifyContent="space-between">
         <Text>Add Connection</Text>
         <box flexDirection="row" gap={1} onMouseUp={props.onClose}>
-          <Text>esc</Text>
-          <Text fg={theme.mutedFg}>esc</Text>
+          <Text fg={navigationActive ? theme.mutedFg : undefined}>esc</Text>
+          <Text fg={navigationActive ? undefined : theme.mutedFg}>esc</Text>
         </box>
       </box>
       {props.children}
@@ -430,13 +462,11 @@ function ProtocolPickerBody(
   })
 
   return (
-    <FormLabel
-      active={active}
-      description="Pick the adapter that will own this connection."
-      name="Protocol"
-    >
-      <box flexDirection="row" justifyContent="space-between" width="100%">
-        <Text>{adapters.map((adapter) => protocolLabel(adapter, protocol)).join("  ")}</Text>
+    <FormLabel active={active} description="Pick the adapter that will own this connection." name="Protocol">
+      <box alignSelf="stretch" flexDirection="row" gap={1} minWidth={0}>
+        <Text flexGrow={1} flexShrink={1} truncate wrapMode="none">
+          {renderProtocolOptions(adapters, protocol, theme)}
+        </Text>
         {focused && !navigationActive && <Text fg={theme.mutedFg}>← → cycle</Text>}
       </box>
     </FormLabel>
@@ -458,11 +488,7 @@ function TextInputField(
   const inputRef = useRef<InputRenderable>(null)
 
   return (
-    <Focusable
-      applyFocus={() => inputRef.current?.focus()}
-      focusable
-      focusableId={focusableId}
-    >
+    <Focusable applyFocus={() => inputRef.current?.focus()} focusable focusableId={focusableId}>
       <TextInputFieldBody
         description={description}
         error={error}
@@ -567,14 +593,9 @@ function BooleanFieldBody(
   })
 
   return (
-    <FormLabel
-      active={active || remembered}
-      description={description}
-      error={error}
-      name={label}
-    >
-      <box flexDirection="row" justifyContent="space-between" onMouseUp={() => onChange(!checked)} width="100%">
-        <Text>
+    <FormLabel active={active || remembered} description={description} error={error} name={label}>
+      <box alignSelf="stretch" flexDirection="row" gap={1} minWidth={0} onMouseUp={() => onChange(!checked)}>
+        <Text flexGrow={1} flexShrink={1} truncate wrapMode="none">
           {checked ? "◉" : "○"} {checked ? "Enabled" : "Disabled"}
         </Text>
         {focused && !navigationActive && <Text fg={theme.mutedFg}>space toggle</Text>}
@@ -642,14 +663,11 @@ function SelectFieldBody(
   const displayLabel = field.options.find((option) => option.value === value)?.label ?? value
 
   return (
-    <FormLabel
-      active={active || remembered}
-      description={description}
-      error={error}
-      name={field.label}
-    >
-      <box flexDirection="row" justifyContent="space-between" width="100%">
-        <Text>{displayLabel}</Text>
+    <FormLabel active={active || remembered} description={description} error={error} name={field.label}>
+      <box alignSelf="stretch" flexDirection="row" gap={1} minWidth={0}>
+        <Text flexGrow={1} flexShrink={1} truncate wrapMode="none">
+          {displayLabel}
+        </Text>
         {focused && !navigationActive && <Text fg={theme.mutedFg}>← → cycle</Text>}
       </box>
     </FormLabel>
@@ -660,7 +678,11 @@ function handleFieldNav(event: KeyEvent, onPrev: () => void, onNext: () => void)
   if (event.name === "tab") {
     event.preventDefault()
     event.stopPropagation()
-    event.shift ? onPrev() : onNext()
+    if (event.shift) {
+      onPrev()
+    } else {
+      onNext()
+    }
     return true
   }
   if (event.name === "up") {
@@ -710,9 +732,22 @@ function findFieldIndex(fields: FocusField[], key: string): number {
   return index < 0 ? 0 : index
 }
 
-function protocolLabel(adapter: AdapterWithConnectionSpec, activeProtocol: Protocol | undefined): string {
-  if (adapter.protocol === activeProtocol) return `[${adapter.protocol}]`
-  return adapter.protocol
+function renderProtocolOptions(
+  adapters: AdapterWithConnectionSpec[],
+  activeProtocol: Protocol | undefined,
+  theme: ReturnType<typeof useTheme>,
+): ReactNode[] {
+  return adapters.flatMap((adapter, index) => {
+    const active = adapter.protocol === activeProtocol
+    return [
+      index > 0 ? "  " : null,
+      <span key={adapter.protocol}>
+        <span fg={active ? theme.focusPrimaryFg : theme.mutedFg}>{active ? "◉" : "○"}</span>
+        {" "}
+        {adapter.protocol}
+      </span>,
+    ]
+  })
 }
 
 function defaultFieldValues(spec: ConnectionSpec<any>): ConnectionFormValues {
@@ -772,6 +807,8 @@ function stringField(values: ConnectionFormValues, key: string, defaultValue: st
   return typeof value === "string" ? value : defaultValue
 }
 
-function textFieldPlaceholder(field: Extract<ConnectionField, { kind: "text" | "path" | "secret" }>): string | undefined {
+function textFieldPlaceholder(
+  field: Extract<ConnectionField, { kind: "text" | "path" | "secret" }>,
+): string | undefined {
   return field.defaultValue === undefined || field.defaultValue === "" ? field.placeholder : undefined
 }

@@ -252,4 +252,52 @@ describe("TreeView", () => {
     expect(childLine).toContain("A child")
     expect(thirdLine?.trim()).toBe("")
   })
+
+  test("renders accessories dimmed at the right edge without changing the main label", async () => {
+    const nodes = [
+      {
+        accessory: "bunsqlite",
+        expandable: true,
+        key: "root",
+        name: "Local DB",
+      },
+    ]
+
+    const ui = await render(
+      <TreeView nodes={nodes} />,
+      { height: 4, width: 30 },
+    )
+
+    const [rootLine] = ui.captureCharFrame().split("\n")
+    expect(rootLine?.startsWith("    Local DB")).toBe(true)
+    expect(rootLine?.endsWith("bunsqlite")).toBe(true)
+    expect(rootLine).not.toContain("(bunsqlite)")
+  })
+
+  test("renders the empty-folder icon when an empty folder is open", async () => {
+    const nodes = [
+      {
+        children: [],
+        expandable: true,
+        expanded: true,
+        key: "open-empty",
+        name: "open-empty",
+      },
+      {
+        children: [],
+        expandable: true,
+        key: "closed-empty",
+        name: "closed-empty",
+      },
+    ]
+
+    const ui = await render(
+      <TreeView nodes={nodes} />,
+      { height: 4, width: 40 },
+    )
+
+    const [openLine, closedLine] = ui.captureCharFrame().split("\n")
+    expect(openLine?.startsWith("   󰉖 open-empty")).toBe(true)
+    expect(closedLine?.startsWith("    closed-empty")).toBe(true)
+  })
 })

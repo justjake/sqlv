@@ -33,21 +33,21 @@ export function SaveQueryDialog(props: SaveQueryDialogProps) {
   useKeybindHandler({
     enabled: focusedWithin && !saving,
     onKey(event) {
-    switch (event.name) {
-      case "enter":
-      case "return":
-        if (!name.trim()) {
+      switch (event.name) {
+        case "enter":
+        case "return":
+          if (!name.trim()) {
+            return
+          }
+          event.preventDefault()
+          event.stopPropagation()
+          void onSave(name)
           return
-        }
-        event.preventDefault()
-        event.stopPropagation()
-        void onSave(name)
-        return
-      case "escape":
-        event.preventDefault()
-        event.stopPropagation()
-        onCancel()
-    }
+        case "escape":
+          event.preventDefault()
+          event.stopPropagation()
+          onCancel()
+      }
     },
   })
 
@@ -64,6 +64,7 @@ export function SaveQueryDialog(props: SaveQueryDialogProps) {
       trapEscLabel="Cancel"
     >
       <box
+        alignSelf="stretch"
         backgroundColor={theme.inputBg}
         border={["top", "right", "bottom", "left"]}
         borderColor={theme.borderColor}
@@ -75,7 +76,6 @@ export function SaveQueryDialog(props: SaveQueryDialogProps) {
         paddingRight={1}
         paddingTop={1}
         position="relative"
-        width="100%"
       >
         <box flexDirection="row" gap={1}>
           <Shortcut keys="return" label="Save" enabled={saveEnabled} onKey={() => void onSave(name)} />

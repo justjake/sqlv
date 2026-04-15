@@ -17,12 +17,11 @@ export function FormLabel(props: FormLabelProps) {
   const active = props.active ?? false
   const inputFocused = props.inputFocused ?? active
   const ringColor = active ? theme.formFieldFocusRingActive : theme.formFieldFocusRingInactive
-  const backgroundColor = active ? theme.formFieldBackgroundActive : theme.formFieldBackground
 
   const ctxValue = useMemo(() => ({ active, inputFocused }), [active, inputFocused])
   return (
     <FormFieldContextProvider value={ctxValue}>
-      <box flexDirection="row" flexGrow={1}>
+      <box alignSelf="stretch" flexDirection="row">
         <box
           alignSelf="stretch"
           width={1}
@@ -31,7 +30,7 @@ export function FormLabel(props: FormLabelProps) {
           borderStyle="rounded"
         />
 
-        <box flexDirection="column" flexGrow={1} padding={1}>
+        <box flexDirection="column" flexGrow={1} minWidth={0} padding={1}>
           <Text fg={active ? theme.formFieldLabelActiveFg : undefined}>{props.name}</Text>
           {props.description && (
             <Text fg={theme.mutedFg} wrapMode="word">

@@ -194,6 +194,9 @@ describe("SqlVisor provider and app", () => {
       { height: 20, width: 100 },
     )
 
+    expect(ui.captureCharFrame()).toContain(connection.name)
+    expect(ui.captureCharFrame()).toContain(connection.protocol)
+    expect(ui.captureCharFrame()).not.toContain(`(${connection.protocol})`)
     expect(ui.captureCharFrame()).toContain("db main")
     expect(ui.captureCharFrame()).toContain("schema public")
     expect(ui.captureCharFrame()).toContain("table users")
@@ -882,7 +885,8 @@ describe("SqlVisor provider and app", () => {
     expect(ui.captureCharFrame()).toContain("esc esc")
     expect(ui.captureCharFrame()).toContain("Protocol")
     expect(ui.captureCharFrame()).toContain("Connection Name")
-    expect(ui.captureCharFrame()).toContain("[bunsqlite]")
+    expect(ui.captureCharFrame()).toContain("◉ bunsqlite")
+    expect(ui.captureCharFrame()).toContain("○ turso")
   })
 
   test("allows clearing a seeded default field value in the add-connection modal", async () => {
@@ -1001,6 +1005,59 @@ describe("SqlVisor provider and app", () => {
     })
 
     expect(ui.captureCharFrame()).not.toContain("Add Connection")
+  })
+
+  test("keeps focus on protocol while cycling adapters in the add-connection modal", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      protocol: "bunsqlite",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      selectedConnectionId: connection.id,
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <App />
+        <FocusProbe />
+      </SqlVisorProvider>,
+      { height: 24, width: 100 },
+    )
+
+    await act(async () => {
+      ui.mockInput.pressKey("n", { ctrl: true })
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
+
+    await act(async () => {
+      ui.mockInput.pressTab({ shift: true })
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "protocol"]) ?? "")
+    expect(ui.captureCharFrame()).toContain("◉ bunsqlite")
+    expect(ui.captureCharFrame()).toContain("○ turso")
+
+    await act(async () => {
+      ui.mockInput.pressArrow("right")
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "protocol"]) ?? "")
+    expect(ui.captureCharFrame()).toContain("◉ turso")
+    expect(ui.captureCharFrame()).toContain("○ bunsqlite")
   })
 
   test("keeps add-connection field keybinds working after activating a checkbox from focus navigation", async () => {

@@ -1,4 +1,4 @@
-import type { BoxRenderable } from "@opentui/core"
+import { TextAttributes, type BoxRenderable } from "@opentui/core"
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { sameFocusPath } from "../../lib/focus"
 import {
@@ -16,6 +16,7 @@ import { useTheme } from "../ui/theme"
 export type TreeNode = {
   key: string
   name: string
+  accessory?: string
   kind?: string
   connectionId?: string
   expandable?: boolean
@@ -52,6 +53,7 @@ const LEAF_MIDDLE = "│"
 const EXPAND_OPEN = ""
 const EXPAND_CLOSED = ""
 const FOLDER_OPEN = ""
+const FOLDER_OPEN_EMPTY = "󰉖"
 const FOLDER_CLOSED = ""
 const DEFAULT_FILE_ICON = "*"
 
@@ -302,6 +304,7 @@ function TreeNodeView(props: VisibleTreeNode & {
   const labelFg = focused ? theme.formFieldLabelActiveFg : theme.primaryFg
   const prefixFg = focused ? theme.formFieldLabelActiveFg : theme.mutedFg
   const iconFg = focused ? theme.formFieldLabelActiveFg : theme.focusBg
+  const accessoryFg = focused ? theme.formFieldLabelActiveFg : theme.mutedFg
 
   return (
     <box
@@ -321,6 +324,18 @@ function TreeNodeView(props: VisibleTreeNode & {
       <box flexGrow={1} flexShrink={1}>
         <Text fg={labelFg} truncate wrapMode="none">{node.name}</Text>
       </box>
+      {node.accessory && (
+        <>
+          <box flexGrow={0} flexShrink={0} width={1}>
+            <Text fg={prefixFg} wrapMode="none">{" "}</Text>
+          </box>
+          <box flexGrow={0} flexShrink={0}>
+            <Text fg={accessoryFg} wrapMode="none">
+              <span attributes={TextAttributes.DIM}>{node.accessory}</span>
+            </Text>
+          </box>
+        </>
+      )}
     </box>
   )
 }
@@ -375,6 +390,9 @@ function treeLeafLead(row: Pick<VisibleTreeNode, "level" | "isLast">): string {
 
 function treeIcon(row: Pick<VisibleTreeNode, "isExpandable" | "isExpanded" | "node">): string {
   if (row.isExpandable) {
+    if (row.isExpanded && hasExplicitEmptyChildren(row.node)) {
+      return FOLDER_OPEN_EMPTY
+    }
     return row.isExpanded ? FOLDER_OPEN : FOLDER_CLOSED
   }
 
@@ -397,6 +415,10 @@ function treeIcon(row: Pick<VisibleTreeNode, "isExpandable" | "isExpanded" | "no
     default:
       return DEFAULT_FILE_ICON
   }
+}
+
+function hasExplicitEmptyChildren(node: Pick<TreeNode, "children">): boolean {
+  return Array.isArray(node.children) && node.children.length === 0
 }
 
 function treeDisclosureOffset(row: Pick<VisibleTreeNode, "level" | "parentIsLastPath">): number {

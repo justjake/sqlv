@@ -20,7 +20,8 @@ export function Sidebar(props: SidebarProps) {
     connectionId: connection.id,
     expandable: true,
     expanded: connection.id === state.selectedConnectionId || !!state.objectsByConnectionId[connection.id],
-    name: `${connection.name} (${connection.protocol})`,
+    name: connection.name,
+    accessory: connection.protocol,
     children:
       connection.id === state.selectedConnectionId || state.objectsByConnectionId[connection.id]
         ? objectNodes(connection.id, state.objectsByConnectionId[connection.id])
