@@ -4,6 +4,13 @@ import type { Json } from "./Json"
 import type { RowStore } from "./RowStore"
 
 export type QueryExecutionStatus = "pending" | "success" | "error" | "cancelled"
+export type QueryInitiator = "user" | "system"
+export type QueryFlow = {
+  id: string
+  name: string
+  initiator: QueryInitiator
+  parentFlowId?: string
+}
 
 export type LogEntry = Session | ConnectLogEntry | FlowEntry | QueryExecution<any>
 
@@ -21,6 +28,8 @@ export type QueryExecution<Row = object> = {
   id: string
   connectionId: string
   sessionId: string
+  savedQueryId?: string
+  initiator: QueryInitiator
   database?: string
   schema?: string
   table?: string
@@ -31,7 +40,7 @@ export type QueryExecution<Row = object> = {
     args: Array<Json>
   }
   sensitive: boolean
-  flowId?: string
+  parentFlowId?: string
   status: QueryExecutionStatus
   finishedAt?: EpochMillis
   error?: string
@@ -46,6 +55,9 @@ export type FlowEntry = {
   id: string
   connectionId: string
   sessionId: string
+  name: string
+  initiator: QueryInitiator
+  parentFlowId?: string
   createdAt: EpochMillis
   endedAt?: EpochMillis
   cancelled?: boolean

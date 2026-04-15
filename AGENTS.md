@@ -102,11 +102,11 @@ Read these before making substantial focus changes:
 
 - Focus navigation is **not** the same thing as real widget focus.
 - The system uses explicit registration. Do not add auto-discovery.
-- Identity is path-based. Stable `focusNavigableId` values matter.
+- Identity is path-based. Stable `focusableId` values matter.
 - Geometry is lazy and evaluated in global viewport coordinates.
-- Areas own trap scope, `Esc`, clipping, reveal, and snapshot/restore behavior.
-- Nodes own actual focus targets.
-- `Esc` first tries to step to the nearest ancestor node within the current scope before falling back to trap `onEsc` or navigation-mode entry/cancel.
+- The core now uses one normalized `Focusable` participant type with capabilities like `focusable`, `navigable`, `childrenNavigable`, `delegatesFocus`, and `trap`.
+- Composite widgets should prefer focus memory plus `delegatesFocus` over keeping their own duplicate "selected item for restore" state.
+- `Esc` first tries to step to the nearest ancestor focusable within the current scope. At a trap root, the next `Esc` starts focus navigation, and only `Esc` from focus-navigation mode triggers `onTrapEsc`.
 - Cancel should restore navigation-only side effects. Activate should commit them.
 
 ### OpenTUI-Specific Rules
@@ -114,8 +114,9 @@ Read these before making substantial focus changes:
 - Focus navigation key handling is intentionally installed at the renderer level, not only through local `useKeyboard()` handlers.
 - While focus navigation is active, the currently focused renderable may be blurred so arrow keys and `Esc` stop mutating the active widget.
 - Widget-local arrow/enter/escape behavior must stand down when focus navigation is active.
-- Scroll-follow belongs to `FocusNavigableArea`, not `FocusNavigable`.
-- If a wrapper is structural and should not become an `Esc` step-out target, prefer `FocusNavigableArea` over `FocusNavigable`.
+- Structural focusable registration now happens in `useInsertionEffect`; the provider calls `flushPendingChanges()` in layout so subscriber notification only happens when observable focus state actually changes.
+- Scroll-follow, clipping, trap behavior, and snapshot/restore are capabilities on `Focusable`, not a separate wrapper type.
+- If a wrapper is structural and should not become an `Esc` step-out target, leave it non-focusable instead of inventing a second wrapper abstraction.
 
 ### Testing Notes
 

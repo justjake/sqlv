@@ -3,13 +3,14 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { act, useEffect, type ReactNode } from "react"
 import { FocusProvider, focusPathSignature, useFocusNavigationState, useFocusTree } from "../../src/tui/focus"
 import { App, QUERY_INSPECTOR_FOCUS_ID, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID, recentQueryFocusId } from "../../src/tui/index"
+import { ADD_CONNECTION_AREA_ID } from "../../src/tui/connection/AddConnectionPane"
 import { onEnterNode, Sidebar } from "../../src/tui/sidebar/Sidebar"
 import { KeybindProvider } from "../../src/tui/ui/keybind"
 import { SqlVisorProvider, useSqlVisor, useSqlVisorState } from "../../src/tui/useSqlVisor"
-import { createEngineStub, createQueryState, makeConnection, makeQueryExecution } from "../support"
+import { createEngineStub, createQueryState, makeConnection, makeQueryExecution, makeSavedQuery } from "../support"
 
 let rendered: Awaited<ReturnType<typeof testRender>> | undefined
-let focusedPath: string | undefined
+let focusedPath = ""
 
 async function render(node: ReactNode, size = { height: 18, width: 100 }) {
   rendered = await testRender(
@@ -27,7 +28,7 @@ async function render(node: ReactNode, size = { height: 18, width: 100 }) {
 afterEach(() => {
   rendered?.renderer.destroy()
   rendered = undefined
-  focusedPath = undefined
+  focusedPath = ""
 })
 
 function FocusController(props: { path: readonly string[] }) {
@@ -46,7 +47,7 @@ function FocusController(props: { path: readonly string[] }) {
 
 function FocusProbe() {
   const state = useFocusNavigationState()
-  focusedPath = focusPathSignature(state.focusedPath)
+  focusedPath = focusPathSignature(state.focusedPath) ?? ""
   return null
 }
 
@@ -224,7 +225,7 @@ describe("SqlVisor provider and app", () => {
       { height: 20, width: 100 },
     )
 
-    expect(ui.captureCharFrame()).toContain("Rows")
+    expect(ui.captureCharFrame()).toContain("Ada")
   })
 
   test("renders fetching state and restores a filtered history query into the editor and inspector", async () => {
@@ -272,7 +273,7 @@ describe("SqlVisor provider and app", () => {
     )
 
     expect(ui.captureCharFrame()).toContain("select 1")
-    expect(ui.captureCharFrame()).toContain("cancel")
+    expect(ui.captureCharFrame()).toContain("Query running")
     ui.renderer.destroy()
 
     let stub!: ReturnType<typeof createEngineStub>
@@ -288,8 +289,8 @@ describe("SqlVisor provider and app", () => {
           message: "query failed",
           title: "Query Error",
         },
-        history: [restorableEntry, failedEntry],
-        queryEditor: {
+        history: [failedEntry, restorableEntry],
+        editor: {
           text: "select 1",
         },
         selectedConnectionId: connection.id,
@@ -314,7 +315,8 @@ describe("SqlVisor provider and app", () => {
                     message: entry.error ?? "query failed",
                     title: "Query Error",
                   },
-            queryEditor: {
+            editor: {
+              ...stub.getState().editor,
               text: entry.sql.source,
             },
             selectedConnectionId: entry.connectionId,
@@ -329,14 +331,14 @@ describe("SqlVisor provider and app", () => {
       { height: 20, width: 100 },
     )
 
-    expect(ui.captureCharFrame()).toContain("Query Error")
+    expect(ui.captureCharFrame()).toContain("Query failed")
     expect(ui.captureCharFrame()).toContain("query failed")
 
     await act(async () => {
       ui.mockInput.pressKey("r", { ctrl: true })
       await ui.renderOnce()
     })
-    expect(ui.captureCharFrame()).toContain("Query Finder")
+    expect(ui.captureCharFrame()).toContain("Filter")
 
     await act(async () => {
       ui.mockInput.pressKey("a")
@@ -363,8 +365,121 @@ describe("SqlVisor provider and app", () => {
 
     expect(stub.calls.restoreQueryExecution).toEqual([restorableEntry.id])
     expect(ui.captureCharFrame()).toContain("select 99 as total from audit_log")
-    expect(ui.captureCharFrame()).toContain("Results (1)")
     expect(ui.captureCharFrame()).toContain("99")
+  })
+
+  test("restores saved queries from ctrl-r and clears the detail pane when no execution exists", async () => {
+    const connection = makeConnection({
+      config: {
+        path: ":memory:",
+      },
+      protocol: "bunsqlite",
+    })
+    const newestEntry = makeQueryExecution({
+      connectionId: connection.id,
+      id: "history-newest",
+      rows: [{ value: 1 }],
+      sql: "select 1",
+    })
+    const newerEntry = makeQueryExecution({
+      connectionId: connection.id,
+      id: "history-newer",
+      rows: [{ value: 2 }],
+      sql: "select 2",
+    })
+    const savedExecution = makeQueryExecution({
+      connectionId: connection.id,
+      id: "history-saved",
+      rows: [{ total: 404 }],
+      savedQueryId: "saved-audit",
+      sql: "select 404 as forced_saved_result_marker",
+    })
+    const savedAudit = makeSavedQuery({
+      id: "saved-audit",
+      name: "Audit Dashboard",
+      protocol: "bunsqlite",
+      text: "select 404 as forced_saved_result_marker",
+    })
+    const savedNoRun = makeSavedQuery({
+      id: "saved-empty",
+      name: "Pending Jobs",
+      protocol: "bunsqlite",
+      text: "select * from pending_jobs",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      history: [newestEntry, newerEntry, savedExecution],
+      savedQueries: [savedAudit, savedNoRun],
+      selectedConnectionId: connection.id,
+    })
+
+    const ui = await render(
+      <SqlVisorProvider engine={stub.engine}>
+        <App />
+      </SqlVisorProvider>,
+      { height: 22, width: 100 },
+    )
+
+    await act(async () => {
+      ui.mockInput.pressKey("r", { ctrl: true })
+      await ui.renderOnce()
+    })
+    await act(async () => {
+      ui.mockInput.pressArrow("down")
+      ui.mockInput.pressArrow("down")
+      ui.mockInput.pressArrow("down")
+      await ui.renderOnce()
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      await ui.renderOnce()
+    })
+
+    await act(async () => {
+      ui.mockInput.pressEnter()
+      await ui.renderOnce()
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      await ui.renderOnce()
+    })
+
+    expect(stub.calls.restoreSavedQuery).toEqual(["saved-audit"])
+    expect(ui.captureCharFrame()).toContain("select 404 as forced_saved_result_marker")
+    expect(ui.captureCharFrame()).toContain("404")
+
+    await act(async () => {
+      ui.mockInput.pressKey("r", { ctrl: true })
+      await ui.renderOnce()
+    })
+    await act(async () => {
+      ui.mockInput.pressArrow("down")
+      ui.mockInput.pressArrow("down")
+      ui.mockInput.pressArrow("down")
+      ui.mockInput.pressArrow("down")
+      await ui.renderOnce()
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      await ui.renderOnce()
+    })
+
+    await act(async () => {
+      ui.mockInput.pressEnter()
+      await ui.renderOnce()
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      await ui.renderOnce()
+    })
+
+    expect(stub.calls.restoreSavedQuery).toEqual(["saved-audit", "saved-empty"])
+    expect(ui.captureCharFrame()).toContain("select * from pending_jobs")
+    expect(ui.captureCharFrame()).toContain("No query run selected")
   })
 
   test("shows recent queries, caps finished rows at two, and moves focus to the inspector on enter", async () => {
@@ -392,6 +507,12 @@ describe("SqlVisor provider and app", () => {
       rows: [{ id: 3 }],
       sql: "select 3",
     })
+    const systemFinished = makeQueryExecution({
+      connectionId: connection.id,
+      id: "history-system",
+      initiator: "system",
+      sql: "pragma table_info(posts)",
+    })
     const activeQueryId = "query-4"
     const stub = createEngineStub(
       {
@@ -400,7 +521,7 @@ describe("SqlVisor provider and app", () => {
           dataUpdateCount: 1,
           status: "success",
         }),
-        history: [newestFinished, failedFinished, oldestFinished],
+        history: [systemFinished, newestFinished, failedFinished, oldestFinished],
         activeQueries: [
           {
             queryId: activeQueryId,
@@ -449,13 +570,14 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(ui.captureCharFrame()).toContain("Recent Queries")
+    expect(ui.captureCharFrame()).not.toContain("Recent Queries")
     expect(ui.captureCharFrame()).toContain("select 4")
     expect(ui.captureCharFrame()).toContain("select 3")
     expect(ui.captureCharFrame()).toContain("select 2")
     expect(ui.captureCharFrame()).not.toContain("select 1")
+    expect(ui.captureCharFrame()).not.toContain("pragma table_info(posts)")
     expect(focusedPath).toBe(
-      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(activeQueryId)]),
+      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(activeQueryId)]) ?? "",
     )
 
     await act(async () => {
@@ -463,7 +585,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
     expect(focusedPath).toBe(
-      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(newestFinished.id)]),
+      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(newestFinished.id)]) ?? "",
     )
 
     await act(async () => {
@@ -471,18 +593,28 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
     expect(focusedPath).toBe(
-      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(failedFinished.id)]),
+      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(failedFinished.id)]) ?? "",
     )
+    expect(ui.captureCharFrame()).toContain("Query running")
 
+    let frameAfterInspect = ""
     await act(async () => {
       ui.mockInput.pressEnter()
-      await ui.renderOnce()
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        await ui.renderOnce()
+        frameAfterInspect = ui.captureCharFrame()
+        if (frameAfterInspect.includes("query failed")) {
+          break
+        }
+        await Bun.sleep(0)
+      }
     })
 
-    expect(focusedPath).toBe(focusPathSignature([QUERY_INSPECTOR_FOCUS_ID]))
-    expect(ui.captureCharFrame()).toContain("Inspector")
-    expect(ui.captureCharFrame()).toContain("query failed")
-    expect(ui.captureCharFrame()).toContain("select 2")
+    expect(focusedPath).toBe(focusPathSignature([QUERY_INSPECTOR_FOCUS_ID]) ?? "")
+    expect(frameAfterInspect).not.toContain("Inspector")
+    expect(frameAfterInspect).toContain("Query failed")
+    expect(frameAfterInspect).toContain("query failed")
+    expect(frameAfterInspect).toContain("select 2")
   })
 
   test("renders the connection form from adapter specs", async () => {
@@ -538,6 +670,7 @@ describe("SqlVisor provider and app", () => {
     const ui = await render(
       <SqlVisorProvider engine={stub.engine}>
         <App />
+        <FocusProbe />
       </SqlVisorProvider>,
       { height: 24, width: 100 },
     )
@@ -546,6 +679,19 @@ describe("SqlVisor provider and app", () => {
       ui.mockInput.pressKey("n", { ctrl: true })
       await ui.renderOnce()
       await ui.renderOnce()
+    })
+
+    await act(async () => {
+      ui.mockInput.pressEscape()
+      await Bun.sleep(30)
+      await ui.renderOnce()
+      await ui.renderOnce()
+    })
+
+    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID]) ?? "")
+    expect(ui.captureCharFrame()).toContain("Add Connection")
+
+    await act(async () => {
       ui.mockInput.pressEscape()
       await Bun.sleep(30)
       await ui.renderOnce()
@@ -578,7 +724,7 @@ describe("SqlVisor provider and app", () => {
         status: "success",
       }),
       selectedConnectionId: connection.id,
-      queryEditor: {
+      editor: {
         text: "",
       },
     })
@@ -600,6 +746,6 @@ describe("SqlVisor provider and app", () => {
     })
 
     expect(ui.captureCharFrame()).toContain("abc")
-    expect(stub.getState().queryEditor.text).toBe("abc")
+    expect(stub.getState().editor.text).toBe("abc")
   })
 })

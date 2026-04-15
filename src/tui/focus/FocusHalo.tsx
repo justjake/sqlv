@@ -1,10 +1,10 @@
 import { useTheme } from "../ui/theme"
-import { useIsFocusNavigableHighlighted, useIsFocusNavigationActive } from "./context"
+import { useIsFocusNavigationActive, useIsHighlighted } from "./context"
 
 export function FocusHalo() {
   const theme = useTheme()
   const active = useIsFocusNavigationActive()
-  const highlighted = useIsFocusNavigableHighlighted()
+  const highlighted = useIsHighlighted()
 
   if (!active || !highlighted) {
     return null

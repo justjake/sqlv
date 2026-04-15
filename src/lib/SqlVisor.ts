@@ -5,17 +5,70 @@ import { TursoAdapter } from "./adapters/TursoAdapter"
 import { createLocalPersistence, type LocalPersistence, type PersistenceStore } from "./createLocalPersistence"
 import { AdapterRegistry, type AnyAdapter, type Protocol, type ProtocolConfig } from "./interface/Adapter"
 import { QueryExecutionError, QueryRunnerImpl } from "./QueryRunnerImpl"
+import { KnownObjectsSuggestionProvider } from "./suggestions/KnownObjectsSuggestionProvider"
+import type {
+  EditorRange,
+  EditorSuggestionMenuTrigger,
+  EditorSuggestionScope,
+  EditorSuggestionScopeMode,
+  SuggestionItem,
+  SuggestionProvider,
+  SuggestionRequest,
+} from "./suggestions/types"
 import { selectStoredRows } from "./sqliteRowStore"
 import type { Connection } from "./types/Connection"
+import type { ExplainResult } from "./types/Explain"
 import { createId } from "./types/Id"
-import { EpochMillis, type QueryExecution, type Session } from "./types/Log"
+import { EpochMillis, type LogEntry, type QueryExecution, type QueryFlow, type Session } from "./types/Log"
 import type { ObjectInfo } from "./types/objects"
 import { OrderString } from "./types/Order"
 import { pendingQueryState, queryStateOrPending, type QueryState } from "./types/QueryState"
+import type { SavedQuery } from "./types/SavedQuery"
 import { unsafeRawSQL } from "./types/SQL"
 
-export type QueryEditorState = {
+export type EditorSuggestionMenuItemRef = {
+  id: string
+}
+
+export type EditorSuggestionMenuItemFocusInput =
+  | EditorSuggestionMenuItemRef
+  | {
+      delta: number
+    }
+  | {
+      index: number
+    }
+
+export type EditorSuggestionMenuStatus = "closed" | "loading" | "ready" | "error"
+export type EditorAnalysisStatus = "idle" | "loading" | "ready" | "error"
+
+export type EditorSuggestionMenuState = {
+  open: boolean
+  status: EditorSuggestionMenuStatus
+  trigger?: EditorSuggestionMenuTrigger
+  query: string
+  replacementRange?: EditorRange
+  scope?: EditorSuggestionScope
+  items: SuggestionItem[]
+  focusedItemId?: string
+  error?: string
+}
+
+export type EditorAnalysisState = {
+  status: EditorAnalysisStatus
+  requestedText?: string
+  connectionId?: string
+  result?: ExplainResult
+  error?: string
+}
+
+export type EditorState = {
   text: string
+  cursorOffset: number
+  savedQueryId?: string
+  suggestionScopeMode: EditorSuggestionScopeMode
+  suggestionMenu: EditorSuggestionMenuState
+  analysis: EditorAnalysisState
 }
 
 export type DetailView =
@@ -54,8 +107,9 @@ export type SqlVisorState = {
   sessionId: string
   connections: ConnectionsState
   selectedConnectionId?: string
-  queryEditor: QueryEditorState
+  editor: EditorState
   history: QueryExecution[]
+  savedQueries: SavedQuery[]
   detailView: DetailView
   queryExecution: QueryExecutionState
   activeQueries: ActiveQuery[]
@@ -75,6 +129,37 @@ export type RunQueryInput = {
   connectionId?: string
 }
 
+export type RequestEditorAnalysisInput = {
+  text?: string
+  connectionId?: string
+  parentFlowId?: string
+}
+
+export type SaveQueryAsNewInput = {
+  name: string
+  text?: string
+  protocol?: Protocol
+}
+
+export type SaveSavedQueryChangesInput = {
+  name?: string
+  text?: string
+  protocol?: Protocol
+}
+
+export type RestoreSavedQueryResult = {
+  savedQuery: SavedQuery
+  queryExecutionId?: string
+}
+
+export type OpenEditorSuggestionMenuInput = {
+  documentText: string
+  cursorOffset: number
+  replacementRange: EditorRange
+  trigger: EditorSuggestionMenuTrigger
+  scope?: EditorSuggestionScope
+}
+
 export type SqlVisorCreateOptions = {
   /** Unique name for this program. */
   app?: string
@@ -82,6 +167,7 @@ export type SqlVisorCreateOptions = {
   registry?: AdapterRegistry
   persistence?: LocalPersistence
   queryClient?: QueryClient
+  suggestionProviders?: SuggestionProvider[]
 }
 
 type Listener = () => void
@@ -103,9 +189,12 @@ export class SqlVisor {
       persist: persistence.persist,
       queryClient: options.queryClient ?? createQueryClient(),
       session: persistence.session,
+      suggestionProviders: options.suggestionProviders ?? builtInSuggestionProviders(),
     })
 
     await engine.refreshConnections()
+    await engine.#loadPersistedHistory()
+    await engine.#loadPersistedSavedQueries()
     return engine
   }
 
@@ -114,10 +203,15 @@ export class SqlVisor {
   readonly session: Session
   #queryClient: QueryClient
   #queryKeyPrefix: readonly ["sqlvisor", string]
+  #suggestionProviders: SuggestionProvider[]
 
   #listeners = new Set<Listener>()
   #queryRunners = new Map<string, QueryRunnerImpl<any>>()
   #currentQueryId: string | undefined
+  #suggestionAbortController: AbortController | undefined
+  #suggestionRequestSerial = 0
+  #editorAnalysisAbortController: AbortController | undefined
+  #editorAnalysisRequestSerial = 0
   #state: SqlVisorState
 
   private constructor(args: {
@@ -125,20 +219,28 @@ export class SqlVisor {
     persist: LocalPersistence["persist"]
     queryClient: QueryClient
     session: LocalPersistence["session"]
+    suggestionProviders: SuggestionProvider[]
   }) {
     this.registry = args.registry
     this.persist = args.persist
     this.session = args.session
     this.#queryClient = args.queryClient
     this.#queryKeyPrefix = ["sqlvisor", args.session.id]
+    this.#suggestionProviders = args.suggestionProviders
     this.#state = {
       sessionId: args.session.id,
       connections: pendingQueryState<Connection<any>[]>(),
       selectedConnectionId: undefined,
-      queryEditor: {
+      editor: {
+        analysis: idleEditorAnalysisState(),
         text: "",
+        cursorOffset: 0,
+        savedQueryId: undefined,
+        suggestionScopeMode: "all-connections",
+        suggestionMenu: closedEditorSuggestionMenuState(),
       },
       history: [],
+      savedQueries: [],
       detailView: {
         kind: "empty",
         title: "Results",
@@ -196,6 +298,27 @@ export class SqlVisor {
     return connections
   }
 
+  async #loadPersistedHistory(): Promise<void> {
+    const logEntries = await this.persist.log.query(
+      (table) => sqlite<LogEntry>`
+        ${selectStoredRows<LogEntry>(table)}
+        ORDER BY COALESCE(updatedAt, createdAt) DESC
+      `,
+    )
+    const history = logEntries.filter(isQueryExecution).sort((a, b) => historySortTime(b) - historySortTime(a))
+    this.#setState({ history })
+  }
+
+  async #loadPersistedSavedQueries(): Promise<void> {
+    const savedQueries = await this.persist.savedQueries.query(
+      (table) => sqlite<SavedQuery>`
+        ${selectStoredRows<SavedQuery>(table)}
+        ORDER BY COALESCE(updatedAt, createdAt) DESC
+      `,
+    )
+    this.#setState({ savedQueries: sortSavedQueries(savedQueries) })
+  }
+
   async addConnection<P extends Protocol>(input: AddConnectionInput<P>): Promise<Connection<ProtocolConfig<P>>> {
     const connection: Connection<ProtocolConfig<P>> = {
       id: input.id ?? createId(),
@@ -219,7 +342,17 @@ export class SqlVisor {
   }
 
   selectConnection(connectionId: string | undefined) {
+    if (connectionId !== this.#state.selectedConnectionId) {
+      this.#abortEditorAnalysisRequest()
+    }
     this.#setState({
+      editor:
+        connectionId === this.#state.selectedConnectionId
+          ? this.#state.editor
+          : {
+              ...this.#state.editor,
+              analysis: idleEditorAnalysisState(),
+            },
       selectedConnectionId: connectionId,
     })
     this.#syncQueryState()
@@ -229,16 +362,161 @@ export class SqlVisor {
     }
   }
 
-  setQueryEditorState(patch: Partial<Pick<QueryEditorState, "text">>) {
+  setEditorState(patch: Partial<Pick<EditorState, "text" | "cursorOffset">> & {
+    savedQueryId?: string | null
+  }) {
     this.#setState({
-      queryEditor: {
-        text: patch.text ?? this.#state.queryEditor.text,
+      editor: {
+        ...this.#state.editor,
+        text: patch.text ?? this.#state.editor.text,
+        cursorOffset: patch.cursorOffset ?? this.#state.editor.cursorOffset,
+        savedQueryId: patch.savedQueryId === undefined ? this.#state.editor.savedQueryId : (patch.savedQueryId ?? undefined),
       },
     })
   }
 
+  async saveQueryAsNew(input: SaveQueryAsNewInput): Promise<SavedQuery> {
+    const name = input.name.trim()
+    const text = input.text ?? this.#state.editor.text
+    if (!name) {
+      throw new Error("Saved query name is required.")
+    }
+    if (!text.trim()) {
+      throw new Error("Cannot save an empty query.")
+    }
+
+    const savedQuery = {
+      type: "savedQuery",
+      id: createId(),
+      createdAt: EpochMillis.now(),
+      name,
+      protocol: input.protocol ?? this.#currentEditorProtocol(),
+      text,
+    } satisfies SavedQuery
+    await this.persist.savedQueries.upsert(savedQuery)
+
+    this.#setState({
+      editor: {
+        ...this.#state.editor,
+        savedQueryId: savedQuery.id,
+      },
+      savedQueries: sortSavedQueries([savedQuery, ...this.#state.savedQueries.filter((entry) => entry.id !== savedQuery.id)]),
+    })
+    return savedQuery
+  }
+
+  async saveSavedQueryChanges(input: SaveSavedQueryChangesInput = {}): Promise<SavedQuery> {
+    const savedQueryId = this.#state.editor.savedQueryId
+    if (!savedQueryId) {
+      throw new Error("No saved query loaded.")
+    }
+
+    const current = this.#state.savedQueries.find((entry) => entry.id === savedQueryId)
+    if (!current) {
+      throw new Error("Saved query not found.")
+    }
+
+    const name = input.name === undefined ? current.name : input.name.trim()
+    const text = input.text ?? this.#state.editor.text
+    if (!name) {
+      throw new Error("Saved query name is required.")
+    }
+    if (!text.trim()) {
+      throw new Error("Cannot save an empty query.")
+    }
+
+    const savedQuery = {
+      ...current,
+      name,
+      protocol: input.protocol ?? this.#currentEditorProtocol() ?? current.protocol,
+      text,
+      updatedAt: EpochMillis.now(),
+    } satisfies SavedQuery
+    await this.persist.savedQueries.upsert(savedQuery)
+
+    this.#setState({
+      editor: {
+        ...this.#state.editor,
+        savedQueryId: savedQuery.id,
+      },
+      savedQueries: sortSavedQueries([savedQuery, ...this.#state.savedQueries.filter((entry) => entry.id !== savedQuery.id)]),
+    })
+    return savedQuery
+  }
+
   setDetailView(detailView: DetailView) {
     this.#setState({ detailView })
+  }
+
+  requestEditorAnalysis(input: RequestEditorAnalysisInput = {}) {
+    const text = input.text ?? this.#state.editor.text
+    const connectionId = input.connectionId ?? this.#state.selectedConnectionId
+    this.#abortEditorAnalysisRequest()
+
+    if (!text.trim() || !connectionId) {
+      this.#setState({
+        editor: {
+          ...this.#state.editor,
+          analysis: idleEditorAnalysisState(),
+        },
+      })
+      return
+    }
+
+    const connection = this.#requireConnection(connectionId)
+    const adapter = this.registry.get(connection.protocol)
+    if (!adapter.explain) {
+      this.#setState({
+        editor: {
+          ...this.#state.editor,
+          analysis: {
+            connectionId,
+            requestedText: text,
+            result: {
+              diagnostics: [],
+              status: "unsupported",
+            },
+            status: "ready",
+          },
+        },
+      })
+      return
+    }
+
+    const requestId = ++this.#editorAnalysisRequestSerial
+    const abortController = new AbortController()
+    this.#editorAnalysisAbortController = abortController
+
+    this.#setState({
+      editor: {
+        ...this.#state.editor,
+        analysis: {
+          connectionId,
+          error: undefined,
+          requestedText: text,
+          result: undefined,
+          status: "loading",
+        },
+      },
+    })
+
+    void this.#loadEditorAnalysis(requestId, {
+      abortSignal: abortController.signal,
+      connection,
+      connectionId,
+      parentFlowId: input.parentFlowId,
+      text,
+    })
+  }
+
+  cancelEditorAnalysis() {
+    this.#abortEditorAnalysisRequest()
+    this.#setState({
+      editor: {
+        ...this.#state.editor,
+        analysis: idleEditorAnalysisState(),
+      },
+    })
   }
 
   restoreHistoryEntry(entryId: string) {
@@ -254,21 +532,45 @@ export class SqlVisor {
     this.#currentQueryId = executionId
     this.selectConnection(execution.connectionId)
     this.#syncQueryState()
-    this.setQueryEditorState({ text: execution.sql.source })
-    if (execution.status !== "success") {
-      this.setDetailView({
-        kind: "error",
-        title: execution.status === "cancelled" ? "Query Cancelled" : "Query Error",
-        message: execution.error ?? "Query failed.",
-      })
-      return
+    this.closeEditorSuggestionMenu()
+    this.cancelEditorAnalysis()
+    this.setEditorState({
+      cursorOffset: execution.sql.source.length,
+      savedQueryId: execution.savedQueryId ?? null,
+      text: execution.sql.source,
+    })
+    this.setDetailView(detailViewFromExecution(execution))
+  }
+
+  restoreSavedQuery(savedQueryId: string): RestoreSavedQueryResult | undefined {
+    const savedQuery = this.#state.savedQueries.find((entry) => entry.id === savedQueryId)
+    if (!savedQuery) {
+      return undefined
     }
 
-    this.setDetailView({
-      kind: "rows",
-      title: `Results (${execution.rowCount})`,
-      rows: execution.rows,
+    const execution = findLatestSavedQueryExecution(savedQuery, this.#state.history, this.#state.connections.data ?? [])
+    this.#currentQueryId = execution?.id
+
+    const connectionId = this.#resolveSavedQueryConnectionId(savedQuery, execution)
+    if (connectionId) {
+      this.selectConnection(connectionId)
+    } else {
+      this.#syncQueryState()
+    }
+
+    this.closeEditorSuggestionMenu()
+    this.cancelEditorAnalysis()
+    this.setEditorState({
+      cursorOffset: savedQuery.text.length,
+      savedQueryId: savedQuery.id,
+      text: savedQuery.text,
     })
+    this.setDetailView(execution ? detailViewFromExecution(execution) : emptyDetailView())
+
+    return {
+      savedQuery,
+      queryExecutionId: execution?.id,
+    }
   }
 
   getQueryState(query: QueryRef): QueryExecutionState {
@@ -324,11 +626,15 @@ export class SqlVisor {
   }
 
   runQuery(input: RunQueryInput = {}): QueryRef {
-    const text = input.text ?? this.#state.queryEditor.text
+    const text = input.text ?? this.#state.editor.text
     const connectionId = input.connectionId ?? this.#state.selectedConnectionId
+    const savedQueryId = this.#state.editor.savedQueryId
 
     if (input.text !== undefined) {
-      this.setQueryEditorState({ text: input.text })
+      this.setEditorState({
+        cursorOffset: input.text.length,
+        text: input.text,
+      })
     }
 
     if (!text.trim()) {
@@ -359,6 +665,8 @@ export class SqlVisor {
         return db.execute(unsafeRawSQL<object>(text), {
           abortSignal: signal,
           executionId: queryId,
+          initiator: "user",
+          savedQueryId,
         })
       },
       meta: { queryId, text, connectionId, startedAt },
@@ -384,7 +692,7 @@ export class SqlVisor {
 
         this.#setState(patch)
       })
-      .catch((_error) => {
+      .catch(async (_error) => {
         const error = _error instanceof Error ? _error : new Error(String(_error))
         const cancelled = isQueryCancellationError(error)
         const execution =
@@ -392,13 +700,23 @@ export class SqlVisor {
             ? error.execution
             : createSyntheticQueryExecution({
                 id: queryId,
+                initiator: "user",
                 connectionId,
+                savedQueryId,
                 sessionId: this.session.id,
                 sql: text,
                 error: cancelled ? "Query cancelled." : error.message,
                 errorStack: error.stack,
                 status: cancelled ? "cancelled" : "error",
               })
+
+        if (!(error instanceof QueryExecutionError)) {
+          try {
+            await this.persist.log.upsert(execution)
+          } catch {
+            // keep in-memory history usable even if persistence fails
+          }
+        }
 
         const patch: Partial<SqlVisorState> = {
           history: [execution, ...this.#state.history],
@@ -421,16 +739,147 @@ export class SqlVisor {
     return queryRef
   }
 
+  openEditorSuggestionMenu(input: OpenEditorSuggestionMenuInput) {
+    const scope = this.#resolveEditorSuggestionScope(input.scope)
+    this.#abortSuggestionRequest()
+
+    const requestId = ++this.#suggestionRequestSerial
+    const abortController = new AbortController()
+    this.#suggestionAbortController = abortController
+    const previousFocusedItemId = this.#state.editor.suggestionMenu.focusedItemId
+    const query = input.trigger.query ?? ""
+
+    this.#setState({
+      editor: {
+        ...this.#state.editor,
+        cursorOffset: input.cursorOffset,
+        text: input.documentText,
+        suggestionMenu: {
+          error: undefined,
+          focusedItemId: previousFocusedItemId,
+          items: [],
+          open: true,
+          query,
+          replacementRange: input.replacementRange,
+          scope,
+          status: "loading",
+          trigger: input.trigger,
+        },
+      },
+    })
+
+    const request: SuggestionRequest = {
+      abortSignal: abortController.signal,
+      cursorOffset: input.cursorOffset,
+      documentText: input.documentText,
+      engine: this,
+      replacementRange: input.replacementRange,
+      scope,
+      trigger: input.trigger,
+    }
+
+    void this.#loadSuggestionItems(requestId, request)
+  }
+
+  closeEditorSuggestionMenu() {
+    this.#abortSuggestionRequest()
+    this.#setState({
+      editor: {
+        ...this.#state.editor,
+        suggestionMenu: closedEditorSuggestionMenuState(),
+      },
+    })
+  }
+
+  focusEditorSuggestionMenuItem(input: EditorSuggestionMenuItemFocusInput) {
+    const menu = this.#state.editor.suggestionMenu
+    if (!menu.open || menu.items.length === 0) {
+      return
+    }
+
+    let nextFocusedItemId = menu.focusedItemId ?? menu.items[0]?.id
+
+    if ("id" in input) {
+      if (menu.items.some((item) => item.id === input.id)) {
+        nextFocusedItemId = input.id
+      }
+    } else if ("index" in input) {
+      nextFocusedItemId = menu.items[clamp(input.index, menu.items.length)]?.id
+    } else if ("delta" in input) {
+      const currentIndex = menu.items.findIndex((item) => item.id === menu.focusedItemId)
+      const baseIndex = currentIndex >= 0 ? currentIndex : 0
+      nextFocusedItemId = menu.items[clamp(baseIndex + input.delta, menu.items.length)]?.id
+    }
+
+    if (!nextFocusedItemId || nextFocusedItemId === menu.focusedItemId) {
+      return
+    }
+
+    this.#setState({
+      editor: {
+        ...this.#state.editor,
+        suggestionMenu: {
+          ...menu,
+          focusedItemId: nextFocusedItemId,
+        },
+      },
+    })
+  }
+
+  applyEditorSuggestionMenuItem(ref?: EditorSuggestionMenuItemRef): boolean {
+    const menu = this.#state.editor.suggestionMenu
+    const item =
+      (ref ? menu.items.find((candidate) => candidate.id === ref.id) : undefined) ??
+      menu.items.find((candidate) => candidate.id === menu.focusedItemId) ??
+      menu.items[0]
+
+    if (!menu.open || !menu.replacementRange || !item) {
+      return false
+    }
+
+    const nextText = replaceTextRange(this.#state.editor.text, menu.replacementRange, item.insertText)
+    const cursorOffset = menu.replacementRange.start + item.insertText.length
+    const suggestionScopeMode = item.connectionId ? "selected-connection" : this.#state.editor.suggestionScopeMode
+
+    this.#abortSuggestionRequest()
+    this.#setState({
+      editor: {
+        ...this.#state.editor,
+        cursorOffset,
+        suggestionMenu: closedEditorSuggestionMenuState(),
+        suggestionScopeMode,
+        text: nextText,
+      },
+    })
+
+    if (item.connectionId) {
+      this.selectConnection(item.connectionId)
+    }
+
+    return true
+  }
+
   async loadConnectionObjects(connectionId: string): Promise<ObjectInfo[]> {
     const connection = this.#requireConnection(connectionId)
 
     return this.#queryClient.fetchQuery({
       gcTime: 10 * 60 * 1000,
       queryKey: this.#connectionObjectsQueryKey(connectionId),
-      queryFn: async () => {
+      queryFn: async ({ signal }) => {
+        signal.throwIfAborted()
         const db = await this.#getQueryRunner(connection)
+        signal.throwIfAborted()
         const adapter = this.registry.get(connection.protocol)
-        return adapter.fetchObjects(db)
+        const flow = await db.openFlow({
+          initiator: "system",
+          name: "load-objects",
+        })
+
+        try {
+          return await adapter.fetchObjects(db.withFlow(flow))
+        } finally {
+          await db.closeFlow(flow, { cancelled: signal.aborted })
+        }
       },
       retry: false,
       staleTime: 0,
@@ -456,6 +905,168 @@ export class SqlVisor {
       throw new Error(`Unknown connection: ${connectionId}`)
     }
     return connection
+  }
+
+  #resolveEditorSuggestionScope(scope: EditorSuggestionScope | undefined): EditorSuggestionScope {
+    if (scope) {
+      return scope
+    }
+
+    if (this.#state.editor.suggestionScopeMode === "selected-connection" && this.#state.selectedConnectionId) {
+      return {
+        connectionId: this.#state.selectedConnectionId,
+        kind: "selected-connection",
+      }
+    }
+
+    return {
+      kind: "all-connections",
+    }
+  }
+
+  async #loadSuggestionItems(requestId: number, request: SuggestionRequest) {
+    try {
+      const providerResults = await Promise.all(
+        this.#suggestionProviders.map((provider) => provider.getSuggestions(request)),
+      )
+
+      if (request.abortSignal.aborted || requestId !== this.#suggestionRequestSerial) {
+        return
+      }
+
+      const items = providerResults.flat()
+      const focusedItemId = items.some((item) => item.id === this.#state.editor.suggestionMenu.focusedItemId)
+        ? this.#state.editor.suggestionMenu.focusedItemId
+        : items[0]?.id
+
+      this.#setState({
+        editor: {
+          ...this.#state.editor,
+          suggestionMenu: {
+            ...this.#state.editor.suggestionMenu,
+            error: undefined,
+            focusedItemId,
+            items,
+            open: true,
+            status: "ready",
+          },
+        },
+      })
+    } catch (_error) {
+      const error = _error instanceof Error ? _error : new Error(String(_error))
+      if (request.abortSignal.aborted || isAbortError(error)) {
+        return
+      }
+      if (requestId !== this.#suggestionRequestSerial) {
+        return
+      }
+
+      this.#setState({
+        editor: {
+          ...this.#state.editor,
+          suggestionMenu: {
+            ...this.#state.editor.suggestionMenu,
+            error: error.message,
+            focusedItemId: undefined,
+            items: [],
+            open: true,
+            status: "error",
+          },
+        },
+      })
+    } finally {
+      if (this.#suggestionRequestSerial === requestId && this.#suggestionAbortController?.signal === request.abortSignal) {
+        this.#suggestionAbortController = undefined
+      }
+    }
+  }
+
+  #abortSuggestionRequest() {
+    this.#suggestionAbortController?.abort()
+    this.#suggestionAbortController = undefined
+  }
+
+  async #loadEditorAnalysis(requestId: number, args: {
+    abortSignal: AbortSignal
+    connection: Connection<any>
+    connectionId: string
+    parentFlowId?: string
+    text: string
+  }) {
+    const { abortSignal, connection, connectionId, parentFlowId, text } = args
+    const adapter = this.registry.get(connection.protocol)
+    if (!adapter.explain) {
+      return
+    }
+
+    let db: QueryRunnerImpl<any> | undefined
+    let flow: QueryFlow | undefined
+
+    try {
+      abortSignal.throwIfAborted()
+      db = await this.#getQueryRunner(connection)
+      abortSignal.throwIfAborted()
+      flow = await db.openFlow({
+        initiator: "system",
+        name: "editor-explain",
+        parentFlowId,
+      })
+
+      const result = await adapter.explain(db.withFlow(flow), {
+        abortSignal,
+        text,
+      })
+
+      if (abortSignal.aborted || requestId !== this.#editorAnalysisRequestSerial) {
+        return
+      }
+
+      this.#setState({
+        editor: {
+          ...this.#state.editor,
+          analysis: {
+            connectionId,
+            error: undefined,
+            requestedText: text,
+            result,
+            status: "ready",
+          },
+        },
+      })
+    } catch (_error) {
+      const error = _error instanceof Error ? _error : new Error(String(_error))
+      if (abortSignal.aborted || isAbortError(error)) {
+        return
+      }
+      if (requestId !== this.#editorAnalysisRequestSerial) {
+        return
+      }
+
+      this.#setState({
+        editor: {
+          ...this.#state.editor,
+          analysis: {
+            connectionId,
+            error: error.message,
+            requestedText: text,
+            result: undefined,
+            status: "error",
+          },
+        },
+      })
+    } finally {
+      if (db && flow) {
+        await db.closeFlow(flow, { cancelled: abortSignal.aborted })
+      }
+      if (this.#editorAnalysisRequestSerial === requestId && this.#editorAnalysisAbortController?.signal === abortSignal) {
+        this.#editorAnalysisAbortController = undefined
+      }
+    }
+  }
+
+  #abortEditorAnalysisRequest() {
+    this.#editorAnalysisAbortController?.abort()
+    this.#editorAnalysisAbortController = undefined
   }
 
   #syncQueryState() {
@@ -538,10 +1149,36 @@ export class SqlVisor {
   #queryExecutionQueryKey(executionId: string): readonly ["sqlvisor", string, "query-execution", string] {
     return [this.#queryKeyPrefix[0], this.#queryKeyPrefix[1], "query-execution", executionId]
   }
+
+  #currentEditorProtocol(): Protocol | undefined {
+    return this.#state.connections.data?.find((connection) => connection.id === this.#state.selectedConnectionId)?.protocol
+  }
+
+  #resolveSavedQueryConnectionId(savedQuery: SavedQuery, execution: QueryExecution | undefined): string | undefined {
+    if (execution?.connectionId) {
+      return execution.connectionId
+    }
+
+    const connections = this.#state.connections.data ?? []
+    if (!savedQuery.protocol) {
+      return this.#state.selectedConnectionId
+    }
+
+    const selectedConnection = connections.find((connection) => connection.id === this.#state.selectedConnectionId)
+    if (selectedConnection?.protocol === savedQuery.protocol) {
+      return selectedConnection.id
+    }
+
+    return connections.find((connection) => connection.protocol === savedQuery.protocol)?.id ?? this.#state.selectedConnectionId
+  }
 }
 
 function builtInAdapters(): AnyAdapter[] {
   return [new TursoAdapter(), new BunSqlAdapter()]
+}
+
+function builtInSuggestionProviders(): SuggestionProvider[] {
+  return [new KnownObjectsSuggestionProvider()]
 }
 
 function createQueryClient(): QueryClient {
@@ -556,7 +1193,9 @@ function createQueryClient(): QueryClient {
 
 function createSyntheticQueryExecution(args: {
   id: string
+  initiator: "user" | "system"
   connectionId: string
+  savedQueryId?: string
   sessionId: string
   sql: string
   error: string
@@ -569,6 +1208,8 @@ function createSyntheticQueryExecution(args: {
     id: args.id,
     connectionId: args.connectionId,
     sessionId: args.sessionId,
+    savedQueryId: args.savedQueryId,
+    initiator: args.initiator,
     createdAt: now,
     finishedAt: now,
     sql: {
@@ -581,6 +1222,63 @@ function createSyntheticQueryExecution(args: {
     errorStack: args.errorStack,
     rows: [],
     rowCount: 0,
+  }
+}
+
+function isQueryExecution(entry: LogEntry): entry is QueryExecution {
+  return entry.type === "queryExecution"
+}
+
+function historySortTime(entry: QueryExecution): number {
+  return entry.finishedAt ?? entry.updatedAt ?? entry.createdAt
+}
+
+function savedQuerySortTime(query: SavedQuery): number {
+  return query.updatedAt ?? query.createdAt
+}
+
+function sortSavedQueries(savedQueries: SavedQuery[]): SavedQuery[] {
+  return savedQueries.toSorted((a, b) => savedQuerySortTime(b) - savedQuerySortTime(a))
+}
+
+function findLatestSavedQueryExecution(
+  savedQuery: SavedQuery,
+  history: QueryExecution[],
+  connections: Connection<any>[],
+): QueryExecution | undefined {
+  const protocolByConnectionId = new Map(connections.map((connection) => [connection.id, connection.protocol]))
+
+  return (
+    history.find((entry) => entry.savedQueryId === savedQuery.id) ??
+    history.find(
+      (entry) =>
+        entry.sql.source === savedQuery.text &&
+        (savedQuery.protocol === undefined || protocolByConnectionId.get(entry.connectionId) === savedQuery.protocol),
+    )
+  )
+}
+
+function detailViewFromExecution(execution: QueryExecution): DetailView {
+  if (execution.status !== "success") {
+    return {
+      kind: "error",
+      title: execution.status === "cancelled" ? "Query Cancelled" : "Query Error",
+      message: execution.error ?? "Query failed.",
+    }
+  }
+
+  return {
+    kind: "rows",
+    title: `Results (${execution.rowCount})`,
+    rows: execution.rows,
+  }
+}
+
+function emptyDetailView(): DetailView {
+  return {
+    kind: "empty",
+    title: "Results",
+    message: "No query run selected",
   }
 }
 
@@ -605,4 +1303,34 @@ function queryExecutionStateFromExecution(execution: QueryExecution): QueryExecu
 
 function isQueryCancellationError(error: Error): boolean {
   return error instanceof CancelledError || error.name === "AbortError"
+}
+
+function isAbortError(error: Error): boolean {
+  return error.name === "AbortError"
+}
+
+function closedEditorSuggestionMenuState(): EditorSuggestionMenuState {
+  return {
+    items: [],
+    open: false,
+    query: "",
+    status: "closed",
+  }
+}
+
+function idleEditorAnalysisState(): EditorAnalysisState {
+  return {
+    status: "idle",
+  }
+}
+
+function replaceTextRange(text: string, range: EditorRange, replacement: string): string {
+  return text.slice(0, range.start) + replacement + text.slice(range.end)
+}
+
+function clamp(index: number, length: number): number {
+  if (length <= 1) {
+    return 0
+  }
+  return Math.min(Math.max(index, 0), length - 1)
 }

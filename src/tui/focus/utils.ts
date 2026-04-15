@@ -1,11 +1,13 @@
 import type { Renderable, ScrollBoxRenderable } from "@opentui/core"
-import type { FocusNavigablePath, FocusRect, FocusVisibleRect } from "../../lib/focus"
+import type { FocusPath, FocusRect, FocusVisibleRect } from "../../lib/focus"
 
-const FOCUS_RENDERABLE_PREFIX = "focus-nav:"
+const FOCUS_RENDERABLE_PREFIX = "focus:"
 
-export function focusNavigableRenderableId(path: FocusNavigablePath): string {
+export function focusableRenderableId(path: FocusPath): string {
   return `${FOCUS_RENDERABLE_PREFIX}${path.map((segment) => encodeURIComponent(segment)).join("/")}`
 }
+
+export const focusNavigableRenderableId = focusableRenderableId
 
 export function renderableViewportRect(renderable: Renderable | null | undefined): FocusVisibleRect {
   if (!renderable || renderable.isDestroyed || !renderable.visible) {

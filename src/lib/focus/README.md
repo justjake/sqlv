@@ -42,9 +42,13 @@ Automatic discovery sounds convenient, but it makes several important properties
 
 The rule is simple: if something should participate in focus navigation, it must register itself.
 
+That registration is intentionally structural, not observable.
+
+Mounting or updating a focusable should not by itself force every subscriber to re-render. The registry behaves more like a DOM tree: it can change silently, and only committed focus state changes are observable.
+
 ## Stable Identity By Path
 
-Each area and node provides a stable `focusNavigableId`.
+Each registered focusable provides a stable `focusableId`.
 
 The canonical identity for any registered thing is its full path:
 
@@ -62,41 +66,43 @@ That path is the source of truth for:
 
 Paths are preferred over opaque generated ids because they explain *where* something lives, not just *that* it exists.
 
-## Areas And Nodes
+## One Participant Type
 
-The core recognizes two kinds of participants:
+The core now models a single participant type: a **focusable**.
 
-- **areas**
-- **nodes**
+Different focusables opt into different capabilities:
 
-Areas define structure and policy. Nodes are actual focus targets.
+- `focusable`: can be the committed logical focus target
+- `navigable`: can be selected directly in focus-navigation mode
+- `childrenNavigable`: whether descendants participate in focus-navigation mode
+- `delegatesFocus`: whether ordinary focus requests should resolve to a remembered/current descendant
+- `trap`: whether the subtree becomes a navigation scope
 
-An area may:
+And any focusable may additionally provide:
 
-- establish a subtree boundary
-- trap navigation
-- own an `Esc` action
-- provide clipping information
-- reveal descendants
-- snapshot and restore temporary UI state
+- a physical focus callback
+- a viewport rect
+- a clip rect
+- descendant reveal behavior
+- snapshot/restore behavior
+- an `onTrapEsc` action
 
-A node may:
+This is more accurate than the older area/node split. A tree root, modal, list, row, cell, or field can all be modeled by the same primitive with different capabilities turned on or off.
 
-- expose a focus callback
-- expose its visible rect
-- be disabled
-- snapshot and restore temporary UI state
+That matters especially for composite widgets:
 
-This split is important because scrolling, clipping, and escape behavior are usually container concerns, while actual focus transfer is a leaf concern.
+- a tree root can own physical focus and delegate ordinary focus into a remembered row
+- a row can be logically focusable but not globally navigable
+- a modal root can trap navigation without itself being a direct focus-navigation target
 
 ## Trap Scope
 
 Trap semantics are intentionally simple:
 
 - navigation scope defaults to the root
-- if the currently focused or highlighted path lives inside trapped areas, the **innermost** trapped ancestor becomes the active scope
+- if the currently focused or highlighted path lives inside trapped focusables, the **innermost** trapped ancestor becomes the active scope
 - directional movement cannot leave that scope
-- if that area provides an `Esc` action, focus navigation surfaces that as the current escape affordance
+- if that focusable provides an `onTrapEsc` action, focus navigation surfaces that as the current escape affordance
 
 This gives modals and popovers a clean ownership boundary without teaching the rest of the tree anything special about "modals."
 
@@ -106,21 +112,18 @@ This gives modals and popovers a clean ownership boundary without teaching the r
 
 Outside focus navigation:
 
-1. try to move real focus to the nearest ancestor node within the current trap scope
-2. if there is no such ancestor and the active trapped area owns `Esc`, invoke that action
-3. otherwise start focus navigation
+1. try to move real focus to the nearest ancestor focusable within the current trap scope
+2. if there is no such ancestor, start focus navigation
 
 Inside focus navigation:
 
-1. try to move the highlighted path to the nearest ancestor node within the active scope
-2. if there is no such ancestor and the active trapped area owns `Esc`, invoke that action and cancel navigation
+1. try to move the highlighted path to the nearest ancestor focusable within the active scope
+2. if there is no such ancestor and the active trapped focusable owns `onTrapEsc`, invoke that action and cancel navigation
 3. otherwise cancel navigation
 
-This lets deeply nested sub-content back out step by step before the system falls back to closing a modal or entering/leaving navigation mode.
+This lets deeply nested sub-content back out step by step, then enter focus navigation at the scope root, and only then fall back to trap-owned escape actions like closing a modal.
 
-It also implies an important modeling rule:
-
-- if a container is structural and should **not** become an `Esc` step-out target, it should usually be an **area**, not a **node**
+It also means composite roots are real logical focus targets. A list or tree can remember which descendant would be restored later without forcing `Esc` to bounce straight back into that descendant.
 
 ## Real Focus vs Navigation Highlight
 
@@ -129,23 +132,37 @@ The core stores both:
 - the currently focused path
 - the currently highlighted path
 
-When focus navigation starts, the initial highlighted node is chosen in this order:
+When focus navigation starts, the initial highlighted focusable is chosen in this order:
 
-1. the current focused node, if it is visible in scope
+1. the current focused focusable, if it is visible in scope
 2. the previous highlight, if it is still visible in scope
-3. the first visible node in scope by registration order
+3. the first visible navigable focusable in scope by registration order
 
-When focus navigation activates the highlight, the node's real `focus()` callback is invoked and the highlighted path becomes the focused path.
+When focus navigation activates the highlight, the nearest ancestor focusable with a physical focus callback is invoked and the highlighted path becomes the focused path.
 
 When focus navigation is cancelled, the highlighted path may change, but real focus should conceptually remain where it was before navigation began.
 
 The core deliberately models both states so renderers can express that distinction clearly.
 
+## Focus Memory
+
+The core also remembers the last committed focused descendant for every ancestor path.
+
+That is separate from navigation snapshots.
+
+It exists so composite widgets can render things like:
+
+- a strong "currently focused" row
+- a temporary focus-navigation highlight
+- a muted "this is where focus would return" row after focus leaves the subtree
+
+This is how tree views, lists, and grids avoid inventing their own duplicate "selected item" state purely for focus restoration.
+
 ## Geometry Is Lazy
 
 The core does not cache layout.
 
-Instead, areas and nodes provide lazy callbacks that return visible viewport rects when needed.
+Instead, focusables provide lazy callbacks that return visible viewport rects when needed.
 
 That choice matters for two reasons:
 
@@ -156,7 +173,7 @@ So the core only reads geometry during navigation commands such as:
 
 - start focus navigation
 - move in a direction
-- activate the highlighted node
+- activate the highlighted focusable
 
 This keeps the core deterministic and portable while letting each renderer decide how to measure itself.
 
@@ -177,9 +194,9 @@ That simplifies directional navigation because every candidate can be compared i
 
 ## Clipping And Visibility
 
-Nodes provide a base visible rect. Areas may provide clip rects.
+Focusable leaves provide a base visible rect. Any ancestor focusable may provide a clip rect.
 
-When the core evaluates a node, it intersects the node rect with every ancestor clip rect. If the result is empty, the node is treated as non-visible for navigation.
+When the core evaluates a focusable, it intersects the base rect with every ancestor clip rect. If the result is empty, the focusable is treated as non-visible for navigation.
 
 This keeps visibility decisions local:
 
@@ -240,16 +257,39 @@ So:
 
 This is the heart of the model. It lets focus navigation temporarily move the viewport or other UI state without making those moves permanent unless the user actually commits to the target.
 
+## Pending Focus And Commit-Time Flush
+
+Focus requests may arrive before the requested target is fully available. A composite root may request focus before its delegated child has mounted, or a widget may ask for focus during the same commit that introduces the target.
+
+The core handles that with a small pending-request model:
+
+- focus requests are intents first
+- if they can resolve immediately, they do
+- if they cannot, they stay pending without becoming observable state
+
+After the renderer finishes a commit, it calls `flushPendingChanges()` once. That flush:
+
+1. retries pending focus requests against the now-complete tree
+2. repairs focused/highlighted paths if structure changed
+3. prunes invalid remembered descendants
+4. notifies subscribers only if observable state actually changed
+
+This keeps the core simple:
+
+- registration stays silent
+- pending focus does not leak into render-time state
+- widgets do not need their own `queueMicrotask(...)` focus choreography
+
 ## Reveal Descendant
 
 The core does not scroll anything itself.
 
-Instead, it asks ancestor areas to reveal the highlighted descendant.
+Instead, it asks ancestor focusables to reveal the highlighted descendant.
 
 Reveal runs from inner to outer ancestors because nested scrolling containers are common and that order composes naturally:
 
-1. inner area reveals the descendant locally
-2. outer area reveals that inner region
+1. inner focusable reveals the descendant locally
+2. outer focusable reveals that inner region
 3. repeat outward as needed
 
 The core only coordinates this. Each renderer decides what "reveal" means.
@@ -292,7 +332,7 @@ They were chosen because they keep the system debuggable, portable, and honest a
 
 The shortest way to think about this subsystem is:
 
-- the app declares a tree of navigable areas and nodes
+- the app declares a tree of focusables with different capabilities
 - the core turns that into a deterministic navigation graph at event time
 - navigation mode is a reversible session layered on top of real focus
 

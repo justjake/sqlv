@@ -25,12 +25,20 @@ export type KeyStep = {
 
 /** Does a concrete key event match a step? Undefined fields are wildcards. */
 export function stepMatches(step: KeyStep, event: KeyEvent): boolean {
-  if (step.name !== undefined && step.name !== event.name) return false
+  if (step.name !== undefined && !keyNameMatches(step.name, event.name)) return false
   if (!!step.ctrl !== !!event.ctrl) return false
   if (!!step.shift !== !!event.shift) return false
   if (!!step.meta !== !!event.meta) return false
   if (!!step.option !== !!event.option) return false
   return true
+}
+
+function keyNameMatches(expected: string, actual: string | undefined): boolean {
+  if (expected === actual) {
+    return true
+  }
+
+  return (expected === "enter" && actual === "return") || (expected === "return" && actual === "enter")
 }
 
 function sequenceEquals(a: KeyStep[], b: KeyStep[]): boolean {
@@ -94,10 +102,25 @@ export function labelizeSequence(seq: KeyStep[]): string {
       if (step.shift) s += "⬆"
       if (step.meta) s += "alt+"
       if (step.option) s += "⌥"
-      if (step.name) s += step.name
+      if (step.name) s += labelizeKeyName(step.name)
       return s
     })
     .join(" ")
+}
+
+function labelizeKeyName(name: string): string {
+  switch (name) {
+    case "up":
+      return "↑"
+    case "down":
+      return "↓"
+    case "left":
+      return "←"
+    case "right":
+      return "→"
+    default:
+      return name
+  }
 }
 
 // ---------------------------------------------------------------------------

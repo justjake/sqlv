@@ -4,16 +4,27 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useSyncExternalStore,
   type ReactNode,
 } from "react"
-import { FocusTree, ROOT_FOCUS_PATH, focusPathKey, isAncestorFocusPath, sameFocusPath, type FocusNavigablePath } from "../../lib/focus"
+import {
+  FocusTree,
+  ROOT_FOCUS_PATH,
+  focusPathKey,
+  focusPathSubpath,
+  isAncestorFocusPath,
+  sameFocusPath,
+  type FocusPath,
+  type FocusPathSuffix,
+  type FocusNavigationState,
+} from "../../lib/focus"
 
 const FocusTreeContext = createContext<FocusTree | undefined>(undefined)
-const FocusPathContext = createContext<FocusNavigablePath>(ROOT_FOCUS_PATH)
-const CurrentFocusNavigablePathContext = createContext<FocusNavigablePath | undefined>(undefined)
+const FocusPathContext = createContext<FocusPath>(ROOT_FOCUS_PATH)
+const CurrentFocusablePathContext = createContext<FocusPath | undefined>(undefined)
 
 export function FocusProvider(props: { children: ReactNode }) {
   const tree = useMemo(() => new FocusTree(), [])
@@ -45,7 +56,7 @@ export function FocusProvider(props: { children: ReactNode }) {
           case "return":
           case "space":
             skipRestoreOnExitRef.current = true
-            tree.activateHighlightedFocusNavigable()
+            tree.activateHighlightedFocusable()
             break
         }
         return
@@ -55,7 +66,7 @@ export function FocusProvider(props: { children: ReactNode }) {
         event.preventDefault()
         event.stopPropagation()
         skipRestoreOnExitRef.current = false
-        tree.startFocusNavigation()
+        tree.handleEscape()
       }
     }
 
@@ -98,6 +109,10 @@ export function FocusProvider(props: { children: ReactNode }) {
     })
   }, [renderer, tree])
 
+  useLayoutEffect(() => {
+    tree.flushPendingChanges()
+  })
+
   return <FocusTreeContext.Provider value={tree}>{props.children}</FocusTreeContext.Provider>
 }
 
@@ -109,27 +124,23 @@ export function useFocusTree(): FocusTree {
   return tree
 }
 
-export function useFocusParentPath(): FocusNavigablePath {
+export function useFocusParentPath(): FocusPath {
   return useContext(FocusPathContext)
 }
 
-export function FocusParentPathProvider(props: { children: ReactNode; path: FocusNavigablePath }) {
-  return <FocusPathContext.Provider value={props.path}>{props.children}</FocusPathContext.Provider>
-}
-
-export function FocusNavigablePathProvider(props: { children: ReactNode; path: FocusNavigablePath }) {
+export function FocusPathProvider(props: { children: ReactNode; path: FocusPath }) {
   return (
-    <CurrentFocusNavigablePathContext.Provider value={props.path}>
+    <CurrentFocusablePathContext.Provider value={props.path}>
       <FocusPathContext.Provider value={props.path}>{props.children}</FocusPathContext.Provider>
-    </CurrentFocusNavigablePathContext.Provider>
+    </CurrentFocusablePathContext.Provider>
   )
 }
 
-export function useFocusNavigablePath(): FocusNavigablePath | undefined {
-  return useContext(CurrentFocusNavigablePathContext)
+export function useFocusPath(): FocusPath | undefined {
+  return useContext(CurrentFocusablePathContext)
 }
 
-export function useFocusNavigationState() {
+export function useFocusNavigationState(): FocusNavigationState {
   const tree = useFocusTree()
   return useSyncExternalStore(
     (listener) => tree.subscribe(listener),
@@ -142,23 +153,92 @@ export function useIsFocusNavigationActive(): boolean {
   return useFocusNavigationState().active
 }
 
-export function useIsFocusNavigableHighlighted(): boolean {
-  const path = useFocusNavigablePath()
-  const state = useFocusNavigationState()
-  return state.active && sameFocusPath(path, state.highlightedPath)
-}
-
-export function useIsFocusNavigableFocused(): boolean {
-  const path = useFocusNavigablePath()
+export function useIsFocused(): boolean {
+  const path = useFocusPath()
   const state = useFocusNavigationState()
   return sameFocusPath(path, state.focusedPath)
 }
 
-export function useIsFocusWithin(path: FocusNavigablePath): boolean {
+export function useIsHighlighted(): boolean {
+  const path = useFocusPath()
+  const state = useFocusNavigationState()
+  return state.active && sameFocusPath(path, state.highlightedPath)
+}
+
+export function useIsFocusWithin(path: FocusPath): boolean {
   const state = useFocusNavigationState()
   return isAncestorFocusPath(path, state.focusedPath)
 }
 
-export function focusPathSignature(path: FocusNavigablePath | undefined): string | undefined {
+export function useFocusedDescendantPath(): FocusPath | undefined {
+  const tree = useFocusTree()
+  const path = useFocusPath()
+  return useSyncExternalStore(
+    (listener) => tree.subscribe(listener),
+    () => (path ? tree.getFocusedDescendantPath(path) : undefined),
+    () => (path ? tree.getFocusedDescendantPath(path) : undefined),
+  )
+}
+
+export function useFocusedDescendantSubpath(): FocusPathSuffix | undefined {
+  const path = useFocusPath()
+  const descendantPath = useFocusedDescendantPath()
+  return useMemo(
+    () => (path ? focusPathSubpath(path, descendantPath) : undefined),
+    [descendantPath, path],
+  )
+}
+
+export function useHighlightedDescendantPath(): FocusPath | undefined {
+  const tree = useFocusTree()
+  const path = useFocusPath()
+  return useSyncExternalStore(
+    (listener) => tree.subscribe(listener),
+    () => (path ? tree.getHighlightedDescendantPath(path) : undefined),
+    () => (path ? tree.getHighlightedDescendantPath(path) : undefined),
+  )
+}
+
+export function useHighlightedDescendantSubpath(): FocusPathSuffix | undefined {
+  const path = useFocusPath()
+  const descendantPath = useHighlightedDescendantPath()
+  return useMemo(
+    () => (path ? focusPathSubpath(path, descendantPath) : undefined),
+    [descendantPath, path],
+  )
+}
+
+export function useRememberedDescendantPath(): FocusPath | undefined {
+  const tree = useFocusTree()
+  const path = useFocusPath()
+  return useSyncExternalStore(
+    (listener) => tree.subscribe(listener),
+    () => (path ? tree.getRememberedDescendantPath(path) : undefined),
+    () => (path ? tree.getRememberedDescendantPath(path) : undefined),
+  )
+}
+
+export function useRememberedDescendantSubpath(): FocusPathSuffix | undefined {
+  const path = useFocusPath()
+  const descendantPath = useRememberedDescendantPath()
+  return useMemo(
+    () => (path ? focusPathSubpath(path, descendantPath) : undefined),
+    [descendantPath, path],
+  )
+}
+
+export function useIsFocusNavigableFocused(): boolean {
+  return useIsFocused()
+}
+
+export function useIsFocusNavigableHighlighted(): boolean {
+  return useIsHighlighted()
+}
+
+export function useFocusNavigablePath(): FocusPath | undefined {
+  return useFocusPath()
+}
+
+export function focusPathSignature(path: FocusPath | undefined): string | undefined {
   return focusPathKey(path)
 }

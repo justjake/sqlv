@@ -1,5 +1,7 @@
+import type { ExplainInput, ExplainResult } from "../types/Explain"
 import type { DatabaseInfo, ObjectInfo, TableInfo } from "../types/objects"
-import { Identifier, Paginated, SQL, sql, type SQLValue } from "../types/SQL"
+import type { QueryRunner } from "../types/QueryRunner"
+import { Identifier, Paginated, SQL, sql, unsafeRawSQL, type SQLValue } from "../types/SQL"
 import { unreachable } from "../types/unreachable"
 
 export type SqliteArg = string | number | null
@@ -146,4 +148,192 @@ export function sqlite<Row>(strings: TemplateStringsArray, ...values: SQLValue<S
 
 export function jsonb_patch<Row = unknown>(target: SQLValue<SqliteArg>, patch: SQLValue<SqliteArg>): SqliteSQL<Row> {
   return sqlite<Row>`jsonb(json_patch(json(${target}), json(${patch})))`
+}
+
+export async function explainSqliteQuery<Config>(
+  db: QueryRunner<Config>,
+  input: ExplainInput,
+): Promise<ExplainResult> {
+  throwIfAborted(input.abortSignal)
+
+  try {
+    await db.query(unsafeRawSQL(`EXPLAIN ${input.text}`), {
+      abortSignal: input.abortSignal,
+    })
+    return {
+      diagnostics: [],
+      status: "ok",
+    }
+  } catch (_error) {
+    const error = _error instanceof Error ? _error : new Error(String(_error))
+    if (error.name === "AbortError") {
+      throw error
+    }
+
+    const message = normalizeSqliteExplainErrorMessage(error.message)
+    return {
+      diagnostics: [
+        {
+          message,
+          range: inferSqliteDiagnosticRange(input.text, message),
+          severity: "error",
+        },
+      ],
+      status: "invalid",
+    }
+  }
+}
+
+function normalizeSqliteExplainErrorMessage(message: string): string {
+  return message.replace(/^SQLite3?\s+Error:\s*/i, "").trim()
+}
+
+function inferSqliteDiagnosticRange(
+  text: string,
+  message: string,
+): {
+  start: number
+  end: number
+} | undefined {
+  const messageToken = parseSqliteDiagnosticToken(message)
+  if (messageToken) {
+    const tokenRange = findTokenRange(text, messageToken)
+    if (tokenRange) {
+      return tokenRange
+    }
+  }
+
+  if (/incomplete input/i.test(message)) {
+    return findTrailingTokenRange(text) ?? findLastVisibleCharRange(text)
+  }
+
+  return undefined
+}
+
+function parseSqliteDiagnosticToken(message: string): string | undefined {
+  const nearMatch = message.match(/^near\s+["'`](.+?)["'`]:/i)
+  if (nearMatch?.[1]) {
+    return nearMatch[1]
+  }
+
+  const missingObjectMatch = message.match(/^no such (?:table|column):\s+(.+)$/i)
+  if (missingObjectMatch?.[1]) {
+    return missingObjectMatch[1]
+  }
+
+  const ambiguousColumnMatch = message.match(/^ambiguous column name:\s+(.+)$/i)
+  if (ambiguousColumnMatch?.[1]) {
+    return ambiguousColumnMatch[1]
+  }
+
+  const unrecognizedTokenMatch = message.match(/^unrecognized token:\s+(.+)$/i)
+  if (unrecognizedTokenMatch?.[1]) {
+    return stripBalancedQuotes(unrecognizedTokenMatch[1])
+  }
+
+  return undefined
+}
+
+function findTokenRange(
+  text: string,
+  rawToken: string,
+): {
+  start: number
+  end: number
+} | undefined {
+  const token = stripBalancedQuotes(rawToken).trim()
+  if (!token) {
+    return undefined
+  }
+
+  const directIndex = text.toLowerCase().indexOf(token.toLowerCase())
+  if (directIndex >= 0) {
+    return {
+      start: directIndex,
+      end: directIndex + token.length,
+    }
+  }
+
+  const lastSegment = token.split(".").at(-1)?.trim()
+  if (lastSegment && lastSegment !== token) {
+    return findTokenRange(text, lastSegment)
+  }
+
+  return undefined
+}
+
+function findTrailingTokenRange(
+  text: string,
+): {
+  start: number
+  end: number
+} | undefined {
+  const trailingWordMatch = /([A-Za-z_][A-Za-z0-9_$]*)\s*$/.exec(text)
+  if (trailingWordMatch?.index !== undefined) {
+    const trailingWord = trailingWordMatch[1]
+    if (!trailingWord) {
+      return undefined
+    }
+    return {
+      start: trailingWordMatch.index,
+      end: trailingWordMatch.index + trailingWord.length,
+    }
+  }
+
+  const trailingNonWhitespaceMatch = /\S+\s*$/.exec(text)
+  if (trailingNonWhitespaceMatch?.index !== undefined) {
+    return {
+      start: trailingNonWhitespaceMatch.index,
+      end: trailingNonWhitespaceMatch.index + trailingNonWhitespaceMatch[0].trimEnd().length,
+    }
+  }
+
+  return undefined
+}
+
+function findLastVisibleCharRange(
+  text: string,
+): {
+  start: number
+  end: number
+} | undefined {
+  const trimmed = text.trimEnd()
+  if (!trimmed.length) {
+    return undefined
+  }
+
+  return {
+    start: trimmed.length - 1,
+    end: trimmed.length,
+  }
+}
+
+function stripBalancedQuotes(value: string): string {
+  const trimmed = value.trim()
+  if (trimmed.length < 2) {
+    return trimmed
+  }
+
+  const first = trimmed[0]
+  const last = trimmed.at(-1)
+  if ((first === `"` && last === `"`) || (first === `'` && last === `'`) || (first === "`" && last === "`")) {
+    return trimmed.slice(1, -1)
+  }
+
+  return trimmed
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (typeof signal.throwIfAborted === "function") {
+    signal.throwIfAborted()
+    return
+  }
+
+  if (!signal.aborted) {
+    return
+  }
+
+  const error = signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason ?? "Aborted"))
+  error.name = "AbortError"
+  throw error
 }

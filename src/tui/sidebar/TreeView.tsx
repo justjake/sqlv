@@ -1,12 +1,13 @@
 import { useKeyboard } from "@opentui/react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo } from "react"
+import { sameFocusPath } from "../../lib/focus"
 import {
-  FocusNavigable,
-  FocusNavigableArea,
-  useFocusTree,
-  useIsFocusNavigableHighlighted,
+  Focusable,
+  useFocusedDescendantPath,
   useIsFocusNavigationActive,
   useIsFocusWithin,
+  useRememberedDescendantPath,
+  useFocusTree,
 } from "../focus"
 import { useKeybind } from "../ui/keybind"
 import { useTheme } from "../ui/theme"
@@ -43,33 +44,47 @@ const EXPAND_OPEN = "▼"
 const EXPAND_CLOSED = "▶"
 
 export function TreeView(props: TreeProps) {
+  return (
+    <Focusable
+      childrenNavigable={false}
+      delegatesFocus
+      focusSelf
+      focusable
+      flexDirection="column"
+      focusableId={SIDEBAR_TREE_AREA_ID}
+    >
+      <TreeViewBody {...props} />
+    </Focusable>
+  )
+}
+
+function TreeViewBody(props: TreeProps) {
   const { nodes, onFocus, onEnter } = props
   const { inChordRef } = useKeybind()
   const tree = useFocusTree()
   const rows = useMemo(() => flattenTree(nodes), [nodes])
   const focusedWithin = useIsFocusWithin([SIDEBAR_TREE_AREA_ID])
   const navigationActive = useIsFocusNavigationActive()
+  const focusedRowPath = useFocusedDescendantPath()
+  const rememberedRowPath = useRememberedDescendantPath()
 
-  const [index, setIndex] = useState(0)
+  const focusedIndex = rows.findIndex((row) => sameFocusPath(focusedRowPath, treeRowPath(row.rowKey)))
+  const currentIndex = focusedIndex >= 0 ? focusedIndex : 0
+  const currentRow = rows[currentIndex]
 
   useEffect(() => {
-    setIndex((current) => clampTreeIndex(current, rows.length))
-  }, [rows.length])
-
-  useEffect(() => {
-    const node = rows[index]?.node
+    const node = currentRow?.node
     if (node) {
-      onFocus?.(index, node)
+      onFocus?.(currentIndex, node)
     }
-  }, [index, onFocus, rows])
+  }, [currentIndex, currentRow, onFocus])
 
   function focusRow(nextIndex: number) {
     const row = rows[nextIndex]
     if (!row) {
       return
     }
-    setIndex(nextIndex)
-    tree.focusPath([SIDEBAR_TREE_AREA_ID, rowFocusId(row.rowKey)])
+    tree.focusPath(treeRowPath(row.rowKey))
   }
 
   useKeyboard((key) => {
@@ -79,40 +94,53 @@ export function TreeView(props: TreeProps) {
 
     switch (key.name) {
       case "up":
-        focusRow(Math.max(0, index - 1))
+        focusRow(Math.max(0, currentIndex - 1))
         return
       case "down":
-        focusRow(Math.min(rows.length - 1, index + 1))
+        focusRow(Math.min(rows.length - 1, currentIndex + 1))
         return
       case "enter":
       case "return": {
-        const node = rows[index]?.node
+        const node = currentRow?.node
         if (!node) {
           return
         }
-        onEnter?.(index, node)
+        onEnter?.(currentIndex, node)
       }
     }
   })
 
   return (
-    <FocusNavigableArea flexDirection="column" focusNavigableId={SIDEBAR_TREE_AREA_ID}>
-      <box flexDirection="column">
-        {rows.map((row, rowIndex) => (
-          <FocusNavigable key={row.rowKey} focus={() => setIndex(rowIndex)} focusNavigableId={rowFocusId(row.rowKey)}>
-            <TreeNodeView active={rowIndex === index} {...row} />
-          </FocusNavigable>
-        ))}
-      </box>
-    </FocusNavigableArea>
+    <box flexDirection="column">
+      {rows.length === 0 && (
+        <Focusable focusable focusableId="empty" navigable={false}>
+          <box paddingLeft={1}>
+            <text>No objects yet.</text>
+          </box>
+        </Focusable>
+      )}
+      {rows.map((row) => {
+        const path = treeRowPath(row.rowKey)
+        const focused = sameFocusPath(path, focusedRowPath)
+        const remembered = !focusedWithin && sameFocusPath(path, rememberedRowPath)
+        return (
+          <Focusable
+            key={row.rowKey}
+            focusable
+            focusableId={rowFocusId(row.rowKey)}
+            navigable={false}
+          >
+            <TreeNodeView focused={focused} remembered={remembered} {...row} />
+          </Focusable>
+        )
+      })}
+    </box>
   )
 }
 
-function TreeNodeView(props: FlatTreeNode & { active: boolean }) {
-  const { node, level, isLast, parentIsLastPath, active } = props
+function TreeNodeView(props: FlatTreeNode & { focused: boolean; remembered: boolean }) {
+  const { node, focused, isLast, level, parentIsLastPath, remembered } = props
   const theme = useTheme()
-  const highlighted = useIsFocusNavigableHighlighted()
-  const navigationActive = useIsFocusNavigationActive()
   const isExpanded = node.expandable && node.children !== undefined
   const isCollapsed = node.expandable && node.children === undefined
 
@@ -133,11 +161,15 @@ function TreeNodeView(props: FlatTreeNode & { active: boolean }) {
   }
 
   return (
-    <box backgroundColor={navigationActive && highlighted ? theme.focusNavBg : (active ? theme.focusBg : undefined)} flexDirection="row">
+    <box backgroundColor={focused ? theme.focusBg : (remembered ? theme.inputBg : undefined)} flexDirection="row">
       <text fg={theme.mutedFg}>{` ${guides}${marker} `}</text>
       <text>{node.name}</text>
     </box>
   )
+}
+
+function treeRowPath(rowKey: string): readonly [string, string] {
+  return [SIDEBAR_TREE_AREA_ID, rowFocusId(rowKey)]
 }
 
 function rowFocusId(rowKey: string): string {

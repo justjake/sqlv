@@ -25,6 +25,12 @@ type Theme = {
   borderHoverColor: string
   /** Foreground for tree guides and other structural decoration. */
   mutedFg: string
+  /** Foreground for successful query state. */
+  successFg: string
+  /** Foreground for warning or in-progress query state. */
+  warningFg: string
+  /** Foreground for failed query state. */
+  errorFg: string
 }
 
 // ── Hardcoded fallbacks ─────────────────────────────────────────────────────
@@ -42,6 +48,9 @@ const DARK: Theme = {
   borderColor: "#5f5a60", // base03
   borderHoverColor: "#a7a7a7", // base05
   mutedFg: "#5f5a60", // base03
+  successFg: "#84d084",
+  warningFg: "#f0c674",
+  errorFg: "#ff7b72",
 }
 
 const LIGHT: Theme = {
@@ -55,6 +64,9 @@ const LIGHT: Theme = {
   borderColor: "#c8c8c8",
   borderHoverColor: "#505050",
   mutedFg: "#999999",
+  successFg: "#2f9e44",
+  warningFg: "#b7791f",
+  errorFg: "#c53030",
 }
 
 // ── Palette → theme mapping ─────────────────────────────────────────────────
@@ -73,6 +85,9 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
       borderColor: p[7] ?? LIGHT.borderColor,
       borderHoverColor: p[8] ?? LIGHT.borderHoverColor,
       mutedFg: p[8] ?? LIGHT.mutedFg, // ANSI bright black
+      successFg: p[2] ?? LIGHT.successFg,
+      warningFg: p[3] ?? LIGHT.warningFg,
+      errorFg: p[1] ?? LIGHT.errorFg,
     }
   }
   return {
@@ -86,6 +101,9 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
     borderColor: p[8] ?? DARK.borderColor,
     borderHoverColor: p[7] ?? DARK.borderHoverColor,
     mutedFg: p[8] ?? DARK.mutedFg,
+    successFg: p[2] ?? DARK.successFg,
+    warningFg: p[3] ?? DARK.warningFg,
+    errorFg: p[1] ?? DARK.errorFg,
   }
 }
 

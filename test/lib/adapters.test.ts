@@ -46,6 +46,7 @@ describe("database adapters", () => {
   test("executes queries with the Bun sqlite adapter", async () => {
     const adapter = new BunSqlAdapter()
 
+    expect(adapter.treeSitterGrammar).toBe("sql")
     expect(
       adapter.describeConfig({
         create: false,
@@ -88,6 +89,7 @@ describe("database adapters", () => {
   test("executes queries with the Turso adapter against local files", async () => {
     const adapter = new TursoAdapter()
 
+    expect(adapter.treeSitterGrammar).toBe("sql")
     expect(
       adapter.describeConfig({
         encryption: {

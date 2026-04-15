@@ -4,11 +4,12 @@ import { dirname } from "node:path"
 import { type Adapter, type ConnectionFormValues, type ConnectionSpec } from "../interface/Adapter"
 import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "../interface/Executor"
 import { aborter } from "../types/defer"
+import type { ExplainInput, ExplainResult } from "../types/Explain"
 import type { ObjectInfo } from "../types/objects"
 import type { QueryRunner } from "../types/QueryRunner"
 import { ident, type SQL } from "../types/SQL"
 import type { SqliteArg } from "./sqlite"
-import { IterateSqliteSchema, parsePragmaDatabaseListRow, parseSqliteSchemaRow, PragmaDatabaseList } from "./sqlite"
+import { IterateSqliteSchema, explainSqliteQuery, parsePragmaDatabaseListRow, parseSqliteSchemaRow, PragmaDatabaseList } from "./sqlite"
 
 type connectArgs = Parameters<typeof turso.connect>
 type DatabaseOpts = NonNullable<connectArgs[1]>
@@ -31,6 +32,7 @@ type TursoFeatures = {}
 
 export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatures> {
   readonly protocol = "turso"
+  readonly treeSitterGrammar = "sql"
 
   describeConfig(config: TursoConfig): string {
     let desc = config.path
@@ -145,6 +147,10 @@ export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatur
       }
     }
     return result
+  }
+
+  async explain(db: QueryRunner<TursoConfig>, input: ExplainInput): Promise<ExplainResult> {
+    return explainSqliteQuery(db, input)
   }
 
   async connect(config: TursoConfig): Promise<TursoExecutor> {

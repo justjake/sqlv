@@ -1,17 +1,26 @@
+export { Focusable, type FocusableProps } from "./Focusable"
 export { FocusHalo } from "./FocusHalo"
-export { FocusNavigable, type FocusNavigableProps } from "./FocusNavigable"
-export { FocusNavigableArea, type FocusNavigableAreaProps } from "./FocusNavigableArea"
 export { FocusNavigationHint } from "./FocusNavigationHint"
 export {
   FocusProvider,
+  FocusPathProvider,
   focusPathSignature,
-  useFocusNavigablePath,
   useFocusNavigationState,
   useFocusParentPath,
+  useFocusPath,
   useFocusTree,
+  useFocusedDescendantPath,
+  useFocusedDescendantSubpath,
+  useHighlightedDescendantPath,
+  useHighlightedDescendantSubpath,
+  useRememberedDescendantPath,
+  useRememberedDescendantSubpath,
+  useIsFocusNavigationActive,
+  useIsFocused,
+  useIsHighlighted,
+  useIsFocusWithin,
   useIsFocusNavigableFocused,
   useIsFocusNavigableHighlighted,
-  useIsFocusNavigationActive,
-  useIsFocusWithin,
+  useFocusNavigablePath,
 } from "./context"
-export { focusNavigableRenderableId, renderableViewportRect, scrollViewportRect } from "./utils"
+export { focusableRenderableId, focusNavigableRenderableId, renderableViewportRect, scrollViewportRect } from "./utils"

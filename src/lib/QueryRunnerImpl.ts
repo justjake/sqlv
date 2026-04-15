@@ -2,8 +2,8 @@ import type { Executor } from "./interface/Executor"
 import type { Connection } from "./types/Connection"
 import { aborter } from "./types/defer"
 import { createId } from "./types/Id"
-import { EpochMillis, type FlowEntry, type LogStore, type QueryExecution, type Session } from "./types/Log"
-import type { QueryRunner } from "./types/QueryRunner"
+import { EpochMillis, type FlowEntry, type LogStore, type QueryExecution, type QueryFlow, type Session } from "./types/Log"
+import type { QueryFlowInput, QueryRunOptions, QueryRunner } from "./types/QueryRunner"
 import { Result } from "./types/Result"
 import { preserveErrorStack } from "./types/errors"
 import { RowHandle } from "./types/RowStore"
@@ -28,30 +28,74 @@ export class QueryExecutionError<Row = object> extends Error {
   }
 }
 
-type ExecuteOptions = {
-  abortSignal?: AbortSignal
-  executionId?: string
-  flowId?: string
-}
-
 export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
+  readonly flow: QueryFlow | undefined
+
   constructor(
     public readonly session: Session,
     public readonly connection: Connection<Config>,
-    private readonly executor: Executor,
+    public readonly executor: Executor,
     private readonly logger: LogStore,
-  ) {}
+    options: {
+      abortControllers?: Set<AbortController>
+      flow?: QueryFlow
+    } = {},
+  ) {
+    this.flow = options.flow
+    this.#abortControllers = options.abortControllers ?? new Set<AbortController>()
+  }
 
-  #abortControllers = new Set<AbortController>()
+  #abortControllers: Set<AbortController>
 
-  async query<Row>(sql: SQL<Row>, options: ExecuteOptions = {}): Promise<Row[]> {
+  withFlow(flow: QueryFlow): QueryRunnerImpl<Config> {
+    return new QueryRunnerImpl(this.session, this.connection, this.executor, this.logger, {
+      abortControllers: this.#abortControllers,
+      flow,
+    })
+  }
+
+  async openFlow(input: QueryFlowInput): Promise<QueryFlow> {
+    const flow: QueryFlow = {
+      id: input.id ?? createId(),
+      initiator: input.initiator,
+      name: input.name,
+      parentFlowId: input.parentFlowId,
+    }
+    await this.logger.upsert({
+      connectionId: this.connection.id,
+      createdAt: EpochMillis.now(),
+      id: flow.id,
+      initiator: flow.initiator,
+      name: flow.name,
+      parentFlowId: flow.parentFlowId,
+      sessionId: this.session.id,
+      type: "flow",
+    } satisfies FlowEntry)
+    return flow
+  }
+
+  async closeFlow(flow: QueryFlow, patch: {
+    cancelled?: boolean
+  } = {}): Promise<void> {
+    await this.logger.update(
+      { id: flow.id, type: "flow" },
+      {
+        cancelled: patch.cancelled,
+        endedAt: EpochMillis.now(),
+      },
+    )
+  }
+
+  async query<Row>(sql: SQL<Row>, options: QueryRunOptions = {}): Promise<Row[]> {
     const execution = await this.execute(sql, options)
     return execution.rows
   }
 
-  async execute<Row>(sql: SQL<Row>, options: ExecuteOptions = {}): Promise<QueryExecution<Row>> {
+  async execute<Row>(sql: SQL<Row>, options: QueryRunOptions = {}): Promise<QueryExecution<Row>> {
     const { abortSignal, cleanup } = this.#createAbortHandle(options.abortSignal)
     abortSignal.throwIfAborted()
+    const parentFlowId = options.parentFlowId ?? this.flow?.id
+    const initiator = options.initiator ?? this.flow?.initiator ?? "user"
 
     const executionHandle = new RowHandle<QueryExecution<Row>>(this.logger, {
       id: options.executionId ?? createId(),
@@ -62,11 +106,13 @@ export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
       createdAt: EpochMillis.now(),
       sensitive: false,
       sessionId: this.session.id,
+      savedQueryId: options.savedQueryId,
+      initiator,
       sql: {
         source: sql.toSource(),
         args: sql.getArgs() as any[],
       },
-      flowId: options.flowId,
+      parentFlowId,
       rows: [],
       rowCount: 0,
       status: "pending",
@@ -124,36 +170,26 @@ export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
   async *iterate<Params extends { limit: number; cursor: object }, Row>(
     paginated: Paginated<Params, Row>,
     params: Params,
+    options: QueryRunOptions = {},
   ): AsyncGenerator<Row[], Params> {
-    const { abortSignal, cleanup } = this.#createAbortHandle()
+    const { abortSignal, cleanup } = this.#createAbortHandle(options.abortSignal)
     abortSignal.throwIfAborted()
-
-    const flowHandle = new RowHandle<FlowEntry>(this.logger, {
-      id: createId(),
-      type: "flow",
+    const flow = await this.openFlow({
+      initiator: options.initiator ?? this.flow?.initiator ?? "user",
+      name: "iterate",
+      parentFlowId: options.parentFlowId ?? this.flow?.id,
     })
-
-    await flowHandle.set({
-      connectionId: this.connection.id,
-      sessionId: this.session.id,
-      createdAt: EpochMillis.now(),
-    })
-
-    const flowRef = {
-      ...flowHandle.ref,
-      abortSignal,
-    }
+    const flowRunner = this.withFlow(flow)
 
     let cancelled = false
-    using _ = aborter(flowRef.abortSignal, () => {
+    using _ = aborter(abortSignal, () => {
       cancelled = true
     })
 
     try {
       while (true) {
-        const rows = await this.query(paginated.query(params), {
-          abortSignal: flowRef.abortSignal,
-          flowId: flowRef.id,
+        const rows = await flowRunner.query(paginated.query(params), {
+          abortSignal,
         })
         yield rows
         if (rows.length < params.limit) {
@@ -168,10 +204,7 @@ export class QueryRunnerImpl<Config> implements QueryRunner<Config> {
       return params
     } finally {
       cleanup()
-      await flowHandle.update({
-        endedAt: EpochMillis.now(),
-        cancelled,
-      })
+      await this.closeFlow(flow, { cancelled })
     }
   }
 

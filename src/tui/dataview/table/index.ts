@@ -1,4 +1,8 @@
 export {
+  QueryListTable,
+  type QueryListTableProps,
+} from "./QueryListTable"
+export {
   Table,
   singleBorder,
   roundedBorder,

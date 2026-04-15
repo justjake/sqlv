@@ -1,19 +1,19 @@
-import type { FocusNavigablePath } from "./types"
+import type { FocusPath, FocusPathSuffix } from "./types"
 
-export const ROOT_FOCUS_PATH: FocusNavigablePath = Object.freeze([])
+export const ROOT_FOCUS_PATH: FocusPath = Object.freeze([])
 
-export function focusPath(parentPath: FocusNavigablePath, id: string): FocusNavigablePath {
+export function focusPath(parentPath: FocusPath, id: string): FocusPath {
   return Object.freeze([...parentPath, id])
 }
 
-export function focusPathKey(path: FocusNavigablePath | undefined): string | undefined {
+export function focusPathKey(path: FocusPath | undefined): string | undefined {
   if (!path) {
     return undefined
   }
   return path.join("\u001f")
 }
 
-export function sameFocusPath(a: FocusNavigablePath | undefined, b: FocusNavigablePath | undefined): boolean {
+export function sameFocusPath(a: FocusPath | undefined, b: FocusPath | undefined): boolean {
   if (a === b) {
     return true
   }
@@ -29,8 +29,8 @@ export function sameFocusPath(a: FocusNavigablePath | undefined, b: FocusNavigab
 }
 
 export function isAncestorFocusPath(
-  ancestor: FocusNavigablePath | undefined,
-  descendant: FocusNavigablePath | undefined,
+  ancestor: FocusPath | undefined,
+  descendant: FocusPath | undefined,
 ): boolean {
   if (!ancestor || !descendant || ancestor.length > descendant.length) {
     return false
@@ -43,10 +43,22 @@ export function isAncestorFocusPath(
   return true
 }
 
-export function focusPathAncestors(path: FocusNavigablePath): FocusNavigablePath[] {
-  const ancestors: FocusNavigablePath[] = []
+export function focusPathAncestors(path: FocusPath): FocusPath[] {
+  const ancestors: FocusPath[] = []
   for (let i = 1; i <= path.length; i += 1) {
     ancestors.push(Object.freeze(path.slice(0, i)))
   }
   return ancestors
+}
+
+export function focusPathSubpath(
+  ancestorPath: FocusPath,
+  descendantPath: FocusPath | undefined,
+): FocusPathSuffix | undefined {
+  if (!descendantPath || !isAncestorFocusPath(ancestorPath, descendantPath)) {
+    return undefined
+  }
+
+  const suffix = descendantPath.slice(ancestorPath.length)
+  return suffix.length > 0 ? Object.freeze(suffix) : undefined
 }

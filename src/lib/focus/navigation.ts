@@ -1,7 +1,7 @@
-import type { FocusDirection, FocusNavigablePath, FocusRect } from "./types"
+import type { FocusDirection, FocusPath, FocusRect } from "./types"
 
 export type MeasuredFocusNode = {
-  path: FocusNavigablePath
+  path: FocusPath
   rect: FocusRect
   order: number
 }

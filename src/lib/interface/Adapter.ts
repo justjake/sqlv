@@ -1,4 +1,5 @@
 import type { ObjectInfo } from "../types/objects"
+import type { ExplainInput, ExplainResult } from "../types/Explain"
 import type { QueryRunner } from "../types/QueryRunner"
 import type { Identifier, SQL } from "../types/SQL"
 import type { ExecuteResult, Executor } from "./Executor"
@@ -56,9 +57,11 @@ export type ConnectionSpec<Config = {}> = {
 
 export type Adapter<Config = {}, Arg = {}, F extends Record<string, Feature<unknown>> = {}> = {
   protocol: string
+  treeSitterGrammar?: string
   connect(config: Config): Promise<Executor>
   describeConfig(config: Config): string
   fetchObjects(db: QueryRunner<Config>): Promise<ObjectInfo[]>
+  explain?(db: QueryRunner<Config>, input: ExplainInput): Promise<ExplainResult>
   renderSQL(sql: SQL<any>): { source: string; args: Arg[] }
   getConnectionSpec?: () => ConnectionSpec<Config>
   sample?: {

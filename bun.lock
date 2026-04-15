@@ -174,8 +174,6 @@
 
     "@tanstack/query-core": ["@tanstack/query-core@5.99.0", "", {}, "sha512-3Jv3WQG0BCcH7G+7lf/bP8QyBfJOXeY+T08Rin3GZ1bshvwlbPt7NrDHMEzGdKIOmOzvIQmxjk28YEQX60k7pQ=="],
 
-    "@tanstack/react-query": ["@tanstack/react-query@5.99.0", "", { "dependencies": { "@tanstack/query-core": "5.99.0" }, "peerDependencies": { "react": "^18 || ^19" } }, "sha512-OY2bCqPemT1LlqJ8Y2CUau4KELnIhhG9Ol3ZndPbdnB095pRbPo1cHuXTndg8iIwtoHTgwZjyaDnQ0xD0mYwAw=="],
-
     "@tokenizer/token": ["@tokenizer/token@0.3.0", "", {}, "sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A=="],
 
     "@tursodatabase/database": ["@tursodatabase/database@0.6.0-pre.17", "", { "dependencies": { "@tursodatabase/database-common": "^0.6.0-pre.17" }, "optionalDependencies": { "@tursodatabase/database-darwin-arm64": "0.6.0-pre.17", "@tursodatabase/database-linux-arm64-gnu": "0.6.0-pre.17", "@tursodatabase/database-linux-x64-gnu": "0.6.0-pre.17", "@tursodatabase/database-win32-x64-msvc": "0.6.0-pre.17" } }, "sha512-1dPL1sM0GWzOwIipYEoUBiGko/YCbKwwKLagnNnmZh06pA+T1CVcUixU1zP9CoevGIkvjuU+DhMQ+8fbcbKddw=="],

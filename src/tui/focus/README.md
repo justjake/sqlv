@@ -64,21 +64,21 @@ OpenTUI only has real renderable focus. It does not have a built-in concept of "
 
 So the adapter renders that distinction explicitly:
 
-- `useIsFocusNavigableFocused()` reflects committed focus
-- `useIsFocusNavigableHighlighted()` reflects the temporary navigation target
+- `useIsFocused()` reflects committed focus
+- `useIsHighlighted()` reflects the temporary navigation target
 - [`FocusHalo.tsx`](./FocusHalo.tsx) renders highlight chrome
 - [`FocusNavigationHint.tsx`](./FocusNavigationHint.tsx) renders the mode affordance
 
 This is an important principle in the bindings: visual focus navigation state is derived from the focus tree, not inferred from OpenTUI's focused renderable.
 
-## `FocusNavigable` As A Registration Wrapper
+## `Focusable` As The Registration Wrapper
 
-`FocusNavigable` is intentionally a wrapper component instead of a hook that expects the child to already be focusable.
+`Focusable` is intentionally a wrapper component instead of a hook that expects the child to already be focusable.
 
 That gives the binding a consistent place to do several jobs:
 
 - compute the full path from context
-- register and unregister the node
+- register and unregister the focusable
 - attach a stable renderable id derived from the path
 - expose a wrapper rect when the inner widget is not directly measurable
 - synchronize mouse-down with real focus path updates
@@ -92,25 +92,34 @@ So the component supports both:
 
 That keeps the binding flexible without leaking OpenTUI-specific focus mechanics back into the core.
 
-One important consequence of nested `FocusNavigable`s is that they participate in `Esc` step-out ancestry.
+One important consequence of nested `Focusable`s is that they participate in `Esc` step-out ancestry if they are logically focusable.
 
-So if a wrapper is only structural and should not become the next stop when escaping outward, it should usually be a `FocusNavigableArea`, not a `FocusNavigable`.
+So a structural wrapper should usually stay `focusable={false}` and `navigable={false}` rather than being modeled as a separate "area" type.
 
-## `FocusNavigableArea` Owns The Container Semantics
+## Why There Is Not A Separate "Area" Component
 
-The area binding is where OpenTUI container behavior gets mapped into the universal model.
+The older focus system had separate "navigable" and "area" wrappers. The current one does not.
 
-In practice, areas are where the platform-specific work happens:
+A single `Focusable` can act as:
 
-- modal trap state
-- `Esc` ownership
+- a composite focus owner
+- a trap scope
+- a scroll-follow container
+- a clipping container
+- a structural subtree boundary
+
+In practice, the container-specific behavior still lives in the binding, but it is surfaced as capabilities on one wrapper:
+
+- `trap` / `onTrapEsc`
 - viewport clipping
 - descendant reveal
-- scroll snapshot and restore
+- snapshot / restore
+- `delegatesFocus`
+- `childrenNavigable={false}` for composite widgets that want local navigation but only one global stop
 
 If a `scrollRef` is provided, the adapter supplies reasonable defaults:
 
-- the scrollbox viewport becomes the area viewport and clip rect
+- the scrollbox viewport becomes the focusable viewport and clip rect
 - descendant reveal uses `scrollChildIntoView(...)`
 - navigation snapshots capture `scrollLeft` / `scrollTop`
 - cancel restores that scroll state
@@ -132,6 +141,37 @@ This is a good example of the adapter's role:
 - the adapter translates between the two
 
 Without that mapping, nested scroll-follow would need widget-specific plumbing everywhere.
+
+## Why Registration Uses `useInsertionEffect`
+
+The binding now uses `useInsertionEffect` for one narrow job: make the structural focusable path exist before any layout effects try to move focus around.
+
+That matters because focus requests can happen during layout effects in already-mounted components. If a newly mounted target only registers in `useLayoutEffect`, a sibling or ancestor may try to focus it one phase too early.
+
+So the current split is:
+
+- `useInsertionEffect`: silent structural register/unregister
+- `useLayoutEffect` in `Focusable`: install the current live callbacks
+- `useLayoutEffect` in `FocusProvider`: call `flushPendingChanges()`
+
+That gives the tree a simple ordering story without leaking timing hacks into widget code.
+
+## Why The Provider Flushes Pending Changes
+
+The focus tree deliberately separates two concerns:
+
+- the imperative registry of focusables
+- the observable focus state that React components render from
+
+Registration is therefore silent. It should not wake every subscriber just because a node mounted.
+
+Instead, the provider performs one small post-commit flush:
+
+- resolve any still-pending focus request against the now-complete tree
+- repair focused/highlighted paths if structure changed
+- notify subscribers only if committed observable state actually changed
+
+This is intentionally not a large reconciler. It is just a narrow "finish commit-time focus bookkeeping" step.
 
 ## Geometry In OpenTUI
 
@@ -170,7 +210,7 @@ So the binding and surrounding widgets follow a rule:
 
 This is why some old direct `escape` shortcuts had to be removed from panes like add-connection and query history. They were competing with the navigation model instead of cooperating with it.
 
-Outside focus navigation, `Esc` is still owned by the focus system first. The tree may use it to step real focus outward to an ancestor node, invoke a trapped area's `onEsc`, or start focus navigation depending on the current path and scope.
+Outside focus navigation, `Esc` is still owned by the focus system first. It first tries to step real focus outward to an ancestor focusable. At a trap root, the next `Esc` enters focus navigation, and only `Esc` from focus-navigation mode triggers the trap action such as closing a modal.
 
 ## Visual Treatment Is Derived, Not Commanding
 
@@ -179,7 +219,7 @@ The halo and hint panel are deliberately passive.
 They do not make decisions. They only reflect the current focus-tree state:
 
 - whether focus navigation is active
-- which node is highlighted
+- which focusable is highlighted
 - whether the active scope exposes an `Esc` label
 
 That separation matters because it keeps the renderer honest:
@@ -206,7 +246,7 @@ That timing belongs in the binding's mental model because it affects how focus-n
 
 The bindings treat mouse focus and programmatic focus as first-class, not as special cases.
 
-Mouse-down on a `FocusNavigable` updates the tree's focused path, and components can opt into `autoFocus` to establish initial real focus through the same path-based model.
+Mouse-down on a `Focusable` updates the tree's focused path, and components can opt into `autoFocus` to establish initial real focus through the same path-based model.
 
 That keeps all focus entry points aligned:
 

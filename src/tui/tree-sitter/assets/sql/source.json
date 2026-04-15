@@ -1,0 +1,10 @@
+{
+  "sourceLabel": "DerekStride/tree-sitter-sql gh-pages",
+  "sourceUrl": "https://github.com/DerekStride/tree-sitter-sql/archive/refs/heads/gh-pages.tar.gz",
+  "builtLocally": true,
+  "sourceRoot": "tree-sitter-sql-gh-pages",
+  "sourceEntries": {
+    "highlights": "queries/highlights.scm",
+    "wasm": "tree-sitter-sql.wasm"
+  }
+}

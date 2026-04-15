@@ -85,6 +85,7 @@ describe("QueryRunnerImpl", () => {
     ])
     expect(execution).toMatchObject({
       connectionId: "conn-1",
+      initiator: "user",
       rowCount: 1,
       rows: [{ value: 1 }],
       sessionId: service.session.id,
@@ -124,6 +125,7 @@ describe("QueryRunnerImpl", () => {
     const execution = log.list().find((entry): entry is QueryExecution => entry.type === "queryExecution")
     expect(execution?.error).toBe("stopped")
     expect(execution).toMatchObject({
+      initiator: "user",
       rowCount: 0,
       status: "cancelled",
       type: "queryExecution",
@@ -170,6 +172,7 @@ describe("QueryRunnerImpl", () => {
     expect(execution).toMatchObject({
       error: "boom",
       errorStack: cause.stack,
+      initiator: "user",
       status: "error",
       type: "queryExecution",
     })
@@ -229,6 +232,8 @@ describe("QueryRunnerImpl", () => {
     expect(flow).toMatchObject({
       cancelled: false,
       connectionId: "conn-1",
+      initiator: "user",
+      name: "iterate",
       sessionId: service.session.id,
       type: "flow",
     })
@@ -276,6 +281,8 @@ describe("QueryRunnerImpl", () => {
     const flow = log.list().find((entry): entry is FlowLogEntry => entry.type === "flow")
     expect(flow).toMatchObject({
       cancelled: true,
+      initiator: "user",
+      name: "iterate",
       type: "flow",
     })
   })
@@ -302,6 +309,50 @@ describe("QueryRunnerImpl", () => {
     })
 
     expect(execution.id).toBe("query-123")
+    expect(execution.initiator).toBe("user")
+  })
+
+  test("binds query executions to an explicit flow", async () => {
+    const log = createMemoryLogStore()
+    const service = new QueryRunnerImpl(
+      createSession("flow"),
+      makeConnection({
+        config: {
+          path: ":memory:",
+        },
+        protocol: "bunsqlite",
+      }),
+      {
+        async execute() {
+          return { rows: [{ value: 1 }] as any[] }
+        },
+      },
+      log.store,
+    )
+
+    const flow = await service.openFlow({
+      initiator: "system",
+      name: "editor-explain",
+    })
+    await service.withFlow(flow).query(unsafeRawSQL("select 1"))
+
+    const execution = log.list().find((entry): entry is QueryExecution => entry.type === "queryExecution")
+    const flowEntry = log.list().find((entry): entry is FlowLogEntry => entry.type === "flow")
+
+    expect(flowEntry).toMatchObject({
+      id: flow.id,
+      initiator: "system",
+      name: "editor-explain",
+      type: "flow",
+    })
+    expect(execution).toMatchObject({
+      initiator: "system",
+      parentFlowId: flow.id,
+      sql: {
+        source: "select 1",
+      },
+      type: "queryExecution",
+    })
   })
 
   test("can run new queries after cancelling in-flight work", async () => {

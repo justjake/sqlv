@@ -1,16 +1,15 @@
-import type { KeyEvent } from "@opentui/core"
-import { useKeyboard } from "@opentui/react"
-import { useMemo, useRef, type ReactNode } from "react"
+import type { BoxRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
+import { useKeyboard, useTerminalDimensions } from "@opentui/react"
+import { useMemo, useRef, useState, type ReactNode } from "react"
 import {
   FocusHalo,
-  FocusNavigable,
-  FocusNavigableArea,
-  useFocusNavigationState,
-  useFocusTree,
-  useIsFocusNavigableFocused,
-  useIsFocusNavigableHighlighted,
+  Focusable,
+  useFocusedDescendantPath,
   useIsFocusNavigationActive,
+  useIsFocused,
   useIsFocusWithin,
+  useRememberedDescendantPath,
+  useFocusTree,
 } from "../focus"
 import { useKeybind } from "../ui/keybind"
 import { useTheme } from "../ui/theme"
@@ -35,13 +34,35 @@ export function resultsTableCellFocusId(columnIndex: number): string {
 }
 
 export function ResultsTable(props: { rows: object[]; width?: number }) {
+  return (
+    <Focusable
+      childrenNavigable={false}
+      delegatesFocus
+      flexGrow={1}
+      focusSelf
+      focusable
+      flexDirection="column"
+      focusableId={RESULTS_TABLE_FOCUS_ID}
+      position="relative"
+    >
+      <ResultsTableBody {...props} />
+    </Focusable>
+  )
+}
+
+function ResultsTableBody(props: { rows: object[]; width?: number }) {
   const { rows, width } = props
   const theme = useTheme()
   const tree = useFocusTree()
   const { inChordRef } = useKeybind()
+  const { width: terminalWidth } = useTerminalDimensions()
+  const containerRef = useRef<BoxRenderable>(null)
+  const scrollRef = useRef<ScrollBoxRenderable>(null)
+  const [measuredWidth, setMeasuredWidth] = useState<number | undefined>(width)
   const navigationActive = useIsFocusNavigationActive()
-  const focusState = useFocusNavigationState()
   const focusedWithin = useIsFocusWithin([RESULTS_TABLE_FOCUS_ID])
+  const focusedCellPath = useFocusedDescendantPath()
+  const rememberedCellPath = useRememberedDescendantPath()
 
   const records = rows as Record<string, unknown>[]
 
@@ -62,11 +83,41 @@ export function ResultsTable(props: { rows: object[]; width?: number }) {
       return values
     })
   }, [columnKeys, records])
+  const viewportWidth = width ?? measuredWidth ?? terminalWidth
+  const preferredColumnWidths = useMemo(() => {
+    return columnKeys.map((key) => preferredWidthForColumn(key, displayRows))
+  }, [columnKeys, displayRows])
+  const preferredTableWidth = useMemo(() => {
+    if (preferredColumnWidths.length === 0) {
+      return viewportWidth
+    }
+    return preferredColumnWidths.reduce((sum, columnWidth) => sum + columnWidth, 0) + Math.max(0, preferredColumnWidths.length - 1)
+  }, [preferredColumnWidths, viewportWidth])
+  const shouldScroll = preferredTableWidth > viewportWidth
+  const tableWidth = shouldScroll ? preferredTableWidth : viewportWidth
+  const rowIndexById = useMemo(() => {
+    const next = new Map<string, number>()
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+      next.set(resultsTableRowFocusId(rowIndex), rowIndex)
+    }
+    return next
+  }, [rows.length])
+  const columnIndexById = useMemo(() => {
+    const next = new Map<string, number>()
+    for (let columnIndex = 0; columnIndex < columnKeys.length; columnIndex += 1) {
+      next.set(resultsTableCellFocusId(columnIndex), columnIndex)
+    }
+    return next
+  }, [columnKeys.length])
 
   const cellCount = rows.length * columnKeys.length
   const activeCell = useMemo(
-    () => resolveFocusedCellCoordinates(focusState.focusedPath),
-    [focusState.focusedPath],
+    () => resolveFocusedCellCoordinates(focusedCellPath, rowIndexById, columnIndexById),
+    [columnIndexById, focusedCellPath, rowIndexById],
+  )
+  const rememberedCell = useMemo(
+    () => resolveFocusedCellCoordinates(rememberedCellPath, rowIndexById, columnIndexById),
+    [columnIndexById, rememberedCellPath, rowIndexById],
   )
   const focusedWithinRef = useRef(focusedWithin)
   const navigationActiveRef = useRef(navigationActive)
@@ -87,16 +138,6 @@ export function ResultsTable(props: { rows: object[]; width?: number }) {
 
     const next = clampCellCoordinates(coords, rows.length, columnKeys.length)
     return tree.focusPath(resultsTableCellPath(next.rowIndex, next.columnIndex))
-  }
-
-  function focusCellDeferred(coords: CellCoordinates) {
-    if (cellCount === 0) {
-      return
-    }
-
-    queueMicrotask(() => {
-      void focusCell(coords)
-    })
   }
 
   const focusCellRef = useRef(focusCell)
@@ -129,62 +170,68 @@ export function ResultsTable(props: { rows: object[]; width?: number }) {
     for (const [columnIndex, key] of columnKeys.entries()) {
       const maxContentWidth = Math.max(key.length, ...displayRows.map((row) => row[key]!.length))
       cols[key] = {
-        width: { grow: growWidthForColumn(maxContentWidth) },
+        width: shouldScroll ? { absolute: preferredColumnWidths[columnIndex] ?? 1 } : { grow: growWidthForColumn(maxContentWidth) },
         Header: () => <text wrapMode="none" truncate>{" " + key}</text>,
         Cell: ({ rowIndex, columnWidth }) => (
           <ResultsCell
             columnIndex={columnIndex}
             columnWidth={columnWidth}
-            value={displayRows[rowIndex]![key]}
+            remembered={!focusedWithin && sameCellCoordinates(rememberedCell, rowIndex, columnIndex)}
+            value={displayRows[rowIndex]?.[key] ?? ""}
           />
         ),
       }
     }
     return cols
-  }, [columnKeys, displayRows])
+  }, [columnKeys, displayRows, focusedWithin, preferredColumnWidths, rememberedCell, shouldScroll])
 
   if (rows.length === 0) return <text>No results.</text>
 
+  function handleSizeChange() {
+    const nextWidth = containerRef.current?.width
+    if (!nextWidth) {
+      return
+    }
+    setMeasuredWidth((current) => (current === nextWidth ? current : nextWidth))
+  }
+
   return (
-    <FocusNavigable
+    <box
+      ref={containerRef}
       flexDirection="column"
-      focus={() => focusCellDeferred({ rowIndex: 0, columnIndex: 0 })}
-      focusNavigableId={RESULTS_TABLE_FOCUS_ID}
+      flexGrow={1}
+      onSizeChange={handleSizeChange}
       position="relative"
+      width={width ?? "100%"}
     >
-      <box flexDirection="column" position="relative">
-        <FocusNavigableArea flexDirection="column" focusNavigableId={RESULTS_TABLE_GRID_AREA_ID}>
+      <Focusable flexDirection="column" flexGrow={1} focusableId={RESULTS_TABLE_GRID_AREA_ID} scrollRef={scrollRef}>
+        <scrollbox ref={scrollRef} flexGrow={1} scrollX={shouldScroll} contentOptions={{ flexDirection: "column" }}>
           <Table
             rows={rows}
             columns={columns}
-            width={width}
+            width={tableWidth}
             headerBg={theme.inputBg}
             borderColor={theme.borderColor}
             wrapRow={({ rowIndex, children }) => (
-              <ResultsRow
-                rowIndex={rowIndex}
-                onFocus={() => focusCellDeferred({ rowIndex, columnIndex: 0 })}
-              >
+              <ResultsRow rowIndex={rowIndex}>
                 {children}
               </ResultsRow>
             )}
           />
-        </FocusNavigableArea>
-        <FocusHalo />
-      </box>
-    </FocusNavigable>
+        </scrollbox>
+      </Focusable>
+      <FocusHalo />
+    </box>
   )
 }
 
 function ResultsRow(props: {
   rowIndex: number
-  onFocus: () => void
   children: ReactNode
 }) {
   return (
-    <FocusNavigable
-      focus={props.onFocus}
-      focusNavigableId={resultsTableRowFocusId(props.rowIndex)}
+    <Focusable
+      focusableId={resultsTableRowFocusId(props.rowIndex)}
       onMouseDown={(event) => {
         event.stopPropagation()
       }}
@@ -193,28 +240,29 @@ function ResultsRow(props: {
     >
       <box position="relative" width="100%">
         {props.children}
-        <FocusHalo />
       </box>
-    </FocusNavigable>
+    </Focusable>
   )
 }
 
 function ResultsCell(props: {
   columnIndex: number
   columnWidth: number
+  remembered: boolean
   value: string
 }) {
-  const { columnIndex, columnWidth, value } = props
+  const { columnIndex, columnWidth, remembered, value } = props
   const theme = useTheme()
-  const focused = useIsFocusNavigableFocused()
-  const highlighted = useIsFocusNavigableHighlighted()
+  const focused = useIsFocused()
   const navigationActive = useIsFocusNavigationActive()
   const showPopout = focused && !navigationActive && shouldPopOut(value, columnWidth)
 
   return (
-    <FocusNavigable
-      focusNavigableId={resultsTableCellFocusId(columnIndex)}
+    <Focusable
+      focusable
+      focusableId={resultsTableCellFocusId(columnIndex)}
       height={1}
+      navigable={false}
       onMouseDown={(event) => {
         event.stopPropagation()
       }}
@@ -222,7 +270,7 @@ function ResultsCell(props: {
       width="100%"
     >
       <box
-        backgroundColor={navigationActive && highlighted ? theme.focusNavBg : (focused ? theme.focusBg : undefined)}
+        backgroundColor={focused ? theme.focusBg : (remembered ? theme.inputBg : undefined)}
         position="relative"
         width="100%"
       >
@@ -241,9 +289,8 @@ function ResultsCell(props: {
             <text wrapMode={resolvePopOutWrapMode(value)}>{" " + value}</text>
           </box>
         )}
-        <FocusHalo />
       </box>
-    </FocusNavigable>
+    </Focusable>
   )
 }
 
@@ -319,70 +366,7 @@ function navigateResultsGrid(
 }
 
 function hasPlainLetterModifiers(key: KeyEvent): boolean {
-  return !key.ctrl && !key.meta && !key.option && !key.shift
-}
-
-function resolveFocusedCellCoordinates(path: readonly string[] | undefined): CellCoordinates | undefined {
-  return parseFocusedCellCoordinates(path) ?? parseFocusedRowCoordinates(path) ?? parseFocusedTableCoordinates(path)
-}
-
-function parseFocusedCellCoordinates(path: readonly string[] | undefined): CellCoordinates | undefined {
-  if (!path || path.length !== 4) {
-    return undefined
-  }
-  if (path[0] !== RESULTS_TABLE_FOCUS_ID || path[1] !== RESULTS_TABLE_GRID_AREA_ID) {
-    return undefined
-  }
-
-  const rowIndex = parseIndexedFocusId(path[2], "row-")
-  const columnIndex = parseIndexedFocusId(path[3], "cell-")
-  if (rowIndex === undefined || columnIndex === undefined) {
-    return undefined
-  }
-
-  return { rowIndex, columnIndex }
-}
-
-function parseFocusedRowCoordinates(path: readonly string[] | undefined): CellCoordinates | undefined {
-  const rowIndex = parseFocusedRowIndex(path)
-  if (rowIndex === undefined) {
-    return undefined
-  }
-  return { rowIndex, columnIndex: 0 }
-}
-
-function parseFocusedTableCoordinates(path: readonly string[] | undefined): CellCoordinates | undefined {
-  if (!path || path[0] !== RESULTS_TABLE_FOCUS_ID) {
-    return undefined
-  }
-  return { rowIndex: 0, columnIndex: 0 }
-}
-
-function parseFocusedRowIndex(path: readonly string[] | undefined): number | undefined {
-  if (!path || path.length < 3) {
-    return undefined
-  }
-  if (path[0] !== RESULTS_TABLE_FOCUS_ID || path[1] !== RESULTS_TABLE_GRID_AREA_ID) {
-    return undefined
-  }
-  return parseIndexedFocusId(path[2], "row-")
-}
-
-function parseIndexedFocusId(value: string | undefined, prefix: string): number | undefined {
-  if (!value?.startsWith(prefix)) {
-    return undefined
-  }
-  const index = Number.parseInt(value.slice(prefix.length), 10)
-  return Number.isFinite(index) ? index : undefined
-}
-
-function resultsTableCellPath(rowIndex: number, columnIndex: number): readonly string[] {
-  return [
-    RESULTS_TABLE_FOCUS_ID,
-    RESULTS_TABLE_GRID_AREA_ID,
-    resultsTableRowFocusId(rowIndex),
-    resultsTableCellFocusId(columnIndex),
-  ]
+  return !key.ctrl && !key.meta && !key.option
 }
 
 function clampCellCoordinates(
@@ -391,36 +375,90 @@ function clampCellCoordinates(
   columnCount: number,
 ): CellCoordinates {
   return {
-    rowIndex: clamp(coords.rowIndex, 0, rowCount - 1),
-    columnIndex: clamp(coords.columnIndex, 0, columnCount - 1),
+    rowIndex: clamp(coords.rowIndex, rowCount),
+    columnIndex: clamp(coords.columnIndex, columnCount),
   }
 }
 
-function shouldPopOut(value: string, columnWidth: number): boolean {
-  if (columnWidth <= 0) {
-    return value.length > 0
+function clamp(index: number, length: number): number {
+  if (length === 0) {
+    return 0
   }
-
-  return value.includes("\n") || value.length + 1 > columnWidth
+  return Math.min(Math.max(index, 0), length - 1)
 }
 
-function resolvePopOutWrapMode(value: string): "word" | "char" {
-  return /\s/.test(value) ? "word" : "char"
+function resultsTableCellPath(rowIndex: number, columnIndex: number): readonly [string, string, string, string] {
+  return [
+    RESULTS_TABLE_FOCUS_ID,
+    RESULTS_TABLE_GRID_AREA_ID,
+    resultsTableRowFocusId(rowIndex),
+    resultsTableCellFocusId(columnIndex),
+  ]
+}
+
+function resolveFocusedCellCoordinates(
+  path: readonly string[] | undefined,
+  rowIndexById: ReadonlyMap<string, number>,
+  columnIndexById: ReadonlyMap<string, number>,
+): CellCoordinates | undefined {
+  if (!path || path.length < 4 || path[0] !== RESULTS_TABLE_FOCUS_ID || path[1] !== RESULTS_TABLE_GRID_AREA_ID) {
+    return undefined
+  }
+
+  const rowId = path[2]
+  const columnId = path[3]
+  if (!rowId || !columnId) {
+    return undefined
+  }
+
+  const rowIndex = rowIndexById.get(rowId)
+  const columnIndex = columnIndexById.get(columnId)
+  if (rowIndex === undefined || columnIndex === undefined) {
+    return undefined
+  }
+
+  return { rowIndex, columnIndex }
+}
+
+function sameCellCoordinates(
+  coords: CellCoordinates | undefined,
+  rowIndex: number,
+  columnIndex: number,
+): boolean {
+  return coords !== undefined && coords.rowIndex === rowIndex && coords.columnIndex === columnIndex
 }
 
 function formatValue(value: unknown): string {
-  if (value === null) return "NULL"
-  if (value === undefined) return ""
+  if (value === null) return "null"
+  if (value === undefined) return "undefined"
   if (typeof value === "string") return value
-  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean")
+  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
     return String(value)
-  return JSON.stringify(value)
+  }
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
 }
 
 function growWidthForColumn(maxContentWidth: number): number {
-  return clamp(maxContentWidth + 2, 4, 32)
+  if (maxContentWidth <= 8) return 1
+  if (maxContentWidth <= 16) return 2
+  if (maxContentWidth <= 32) return 3
+  if (maxContentWidth <= 64) return 4
+  return 5
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value))
+function preferredWidthForColumn(column: string, rows: DisplayRow[]): number {
+  const maxContentWidth = Math.max(column.length, ...rows.map((row) => row[column]!.length))
+  return Math.max(4, Math.min(maxContentWidth + 1, 32))
+}
+
+function shouldPopOut(value: string, columnWidth: number): boolean {
+  return value.length + 1 > columnWidth || value.includes("\n")
+}
+
+function resolvePopOutWrapMode(value: string): "char" | "word" | "none" {
+  return /\s/.test(value) ? "word" : "char"
 }

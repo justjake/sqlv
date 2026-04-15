@@ -3,11 +3,12 @@ import { mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
 import { type Adapter, type ConnectionFormValues, type ConnectionSpec } from "../interface/Adapter"
 import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "../interface/Executor"
+import type { ExplainInput, ExplainResult } from "../types/Explain"
 import type { ObjectInfo } from "../types/objects"
 import type { QueryRunner } from "../types/QueryRunner"
 import { ident, type SQL } from "../types/SQL"
 import type { SqliteArg } from "./sqlite"
-import { IterateSqliteSchema, parsePragmaDatabaseListRow, parseSqliteSchemaRow, PragmaDatabaseList } from "./sqlite"
+import { IterateSqliteSchema, explainSqliteQuery, parsePragmaDatabaseListRow, parseSqliteSchemaRow, PragmaDatabaseList } from "./sqlite"
 
 type ConnectArgs = ConstructorParameters<typeof Database>
 type DatabaseOpts = Exclude<ConnectArgs[1], number | undefined>
@@ -23,6 +24,7 @@ type BunSqlFeatures = {}
 
 export class BunSqlAdapter implements Adapter<BunSqlConfig, SqliteArg, BunSqlFeatures> {
   readonly protocol = "bunsqlite"
+  readonly treeSitterGrammar = "sql"
 
   describeConfig(config: BunSqlConfig): string {
     let desc = config.path || ":memory:"
@@ -116,6 +118,10 @@ export class BunSqlAdapter implements Adapter<BunSqlConfig, SqliteArg, BunSqlFea
       }
     }
     return result
+  }
+
+  async explain(db: QueryRunner<BunSqlConfig>, input: ExplainInput): Promise<ExplainResult> {
+    return explainSqliteQuery(db, input)
   }
 
   async connect(config: BunSqlConfig): Promise<BunSqlExecutor> {
