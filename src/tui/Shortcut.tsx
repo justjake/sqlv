@@ -2,7 +2,6 @@ import type { KeyEvent, MouseEvent } from "@opentui/core"
 import { flushSync } from "@opentui/react"
 import { useState, type ReactNode } from "react"
 import { labelizeSequences, useShortcut } from "./ui/keybind"
-import type { ShortcutKeys } from "./ui/shortcutKeys"
 import { Text } from "./ui/Text"
 import { useTheme } from "./ui/theme"
 
@@ -13,10 +12,6 @@ export type ShortcutProps = {
   enabled?: boolean
 }
 
-export function Shortcut<TKey extends string>(
-  props: Omit<ShortcutProps, "keys"> & { keys: ShortcutKeys<TKey> | readonly ShortcutKeys<TKey>[] },
-): ReactNode
-export function Shortcut(props: ShortcutProps): ReactNode
 export function Shortcut(props: ShortcutProps) {
   const { keys, label, onKey, enabled } = props
   const [active, setActive] = useState(false)

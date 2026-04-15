@@ -128,11 +128,44 @@ describe("Shortcut", () => {
     expect(stepMatches(step, key)).toBe(true)
   })
 
+  test("matches command and super shortcuts against OpenTUI super events", () => {
+    const commandStep = parseKeys("command+f")[0]!
+    const superStep = parseKeys("super+f")[0]!
+    const key = { name: "f", ctrl: false, shift: false, meta: false, option: false, super: true } as KeyEvent
+
+    expect(stepMatches(commandStep, key)).toBe(true)
+    expect(stepMatches(superStep, key)).toBe(true)
+  })
+
   test("renders option shortcuts without duplicating the alt label", async () => {
     const ui = await render(<Shortcut keys="option+f" enabled label="Format" />)
 
     expect(ui.captureCharFrame()).toContain("⌥f Format")
     expect(ui.captureCharFrame()).not.toContain("alt+⌥f")
+  })
+
+  test("renders combined modifiers in macOS display order", async () => {
+    const ui = await render(<Shortcut keys="ctrl+option+shift+f" enabled label="Format" />)
+
+    expect(ui.captureCharFrame()).toContain("^⌥⬆f Format")
+  })
+
+  test("renders and dispatches command shortcuts via OpenTUI super", async () => {
+    const hits: string[] = []
+    const ui = await render(<Shortcut keys="command+f" enabled label="Format" onKey={() => hits.push("format")} />, {
+      kittyKeyboard: true,
+    })
+
+    expect(ui.captureCharFrame()).toContain("⌘f Format")
+
+    await act(async () => {
+      ui.mockInput.pressKey("f", { super: true })
+      await ui.renderOnce()
+      ui.mockInput.pressKey("f")
+      await ui.renderOnce()
+    })
+
+    expect(hits).toEqual(["format"])
   })
 
   test("renders plus shortcuts using the plus symbol", async () => {

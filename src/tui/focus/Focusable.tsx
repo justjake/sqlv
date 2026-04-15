@@ -82,6 +82,19 @@ export function Focusable(props: FocusableProps) {
   focusSelfRef.current = focusSelf
 
   function buildRegistration(): FocusableRegistration {
+    const resolvedApplyFocus = applyFocusRef.current
+      ? (context: FocusApplyContext) => {
+          applyFocusRef.current?.(context)
+        }
+      : focusSelfRef.current
+        ? () => {
+            const renderable = renderableTargetRef.current?.current ?? wrapperRef.current
+            if (renderable && !renderable.isDestroyed) {
+              renderable.focus()
+            }
+          }
+        : undefined
+
     return {
       id: focusableId,
       parentPath,
@@ -93,22 +106,7 @@ export function Focusable(props: FocusableProps) {
       trap,
       onTrapEsc: () => onTrapEscRef.current?.(),
       trapEscLabel,
-      applyFocus: (context) => {
-        const handler = applyFocusRef.current
-        if (handler) {
-          handler(context)
-          return
-        }
-
-        if (!focusSelfRef.current) {
-          return
-        }
-
-        const renderable = renderableTargetRef.current?.current ?? wrapperRef.current
-        if (renderable && !renderable.isDestroyed) {
-          renderable.focus()
-        }
-      },
+      applyFocus: resolvedApplyFocus,
       getViewportRect: () => renderableViewportRect(renderableTargetRef.current?.current ?? wrapperRef.current),
       getViewportClipRect: () =>
         scrollViewportRect(scrollTargetRef.current?.current) ??

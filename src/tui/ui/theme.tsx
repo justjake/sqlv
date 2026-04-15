@@ -7,6 +7,8 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 type Theme = {
   /** Foreground for ordinary body text and input text. */
   primaryFg: string
+  /** Foreground for an active form field label. */
+  formFieldLabelActiveFg: string
   /** Background for focused/selected rows (tree nodes, history items, form fields). */
   focusBg: string
   /** Background for the highlighted target while focus navigation mode is active. */
@@ -17,6 +19,14 @@ type Theme = {
   focusHintBg: string
   /** Background for interactive input fields. */
   inputBg: string
+  /** Border color for idle form fields. */
+  formFieldFocusRingInactive: string
+  /** Border color for active form fields. */
+  formFieldFocusRingActive: string
+  /** Background for idle form fields. */
+  formFieldBackground: string
+  /** Background for active form fields. */
+  formFieldBackgroundActive: string
   /** Background for shortcut badges in their default state. */
   shortcutBg: string
   /** Background for shortcut badges when activated. */
@@ -41,11 +51,16 @@ type Theme = {
 
 const DARK: Theme = {
   primaryFg: "#d0d0d0",
+  formFieldLabelActiveFg: "#ffffff",
   focusBg: "#639ee4", // base0D (blue)
   focusNavBg: "#8ab6ef",
   focusNavBorder: "#d0d0d0",
   focusHintBg: "#1f1f1f",
   inputBg: "#303030", // base02
+  formFieldFocusRingInactive: "#5f5a60", // base03
+  formFieldFocusRingActive: "#8ab6ef",
+  formFieldBackground: "#303030",
+  formFieldBackgroundActive: "#3a3a3a",
   shortcutBg: "#5f5a60", // base03
   shortcutActiveBg: "#639ee4", // base0D
   borderColor: "#5f5a60", // base03
@@ -58,11 +73,16 @@ const DARK: Theme = {
 
 const LIGHT: Theme = {
   primaryFg: "#303030",
+  formFieldLabelActiveFg: "#111111",
   focusBg: "#4271ae",
   focusNavBg: "#6f95c7",
   focusNavBorder: "#303030",
   focusHintBg: "#f3f3f3",
   inputBg: "#e0e0e0",
+  formFieldFocusRingInactive: "#c8c8c8",
+  formFieldFocusRingActive: "#4271ae",
+  formFieldBackground: "#efefef",
+  formFieldBackgroundActive: "#ffffff",
   shortcutBg: "#c8c8c8",
   shortcutActiveBg: "#4271ae",
   borderColor: "#c8c8c8",
@@ -80,11 +100,16 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
   if (mode === "light") {
     return {
       primaryFg: palette.defaultForeground ?? p[0] ?? LIGHT.primaryFg,
+      formFieldLabelActiveFg: p[0] ?? LIGHT.formFieldLabelActiveFg,
       focusBg: p[4] ?? LIGHT.focusBg, // ANSI blue
       focusNavBg: p[12] ?? brighten(p[4] ?? LIGHT.focusBg, 0.2),
       focusNavBorder: p[0] ?? LIGHT.focusNavBorder,
       focusHintBg: p[7] ?? LIGHT.focusHintBg,
       inputBg: p[7] ?? LIGHT.inputBg, // ANSI white (light bg tint)
+      formFieldFocusRingInactive: p[7] ?? LIGHT.formFieldFocusRingInactive,
+      formFieldFocusRingActive: p[4] ?? LIGHT.formFieldFocusRingActive,
+      formFieldBackground: p[7] ?? LIGHT.formFieldBackground,
+      formFieldBackgroundActive: p[7] ? brighten(p[7], 0.04) : LIGHT.formFieldBackgroundActive,
       shortcutBg: p[7] ?? LIGHT.shortcutBg,
       shortcutActiveBg: p[4] ?? LIGHT.shortcutActiveBg,
       borderColor: p[7] ?? LIGHT.borderColor,
@@ -97,11 +122,16 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
   }
   return {
     primaryFg: palette.defaultForeground ?? p[7] ?? DARK.primaryFg,
+    formFieldLabelActiveFg: "#ffffff",
     focusBg: p[4] ?? DARK.focusBg, // ANSI blue
     focusNavBg: p[12] ?? brighten(p[4] ?? DARK.focusBg, 0.18),
     focusNavBorder: p[7] ?? DARK.focusNavBorder,
     focusHintBg: p[0] ? brighten(p[0], 0.08) : DARK.focusHintBg,
     inputBg: p[0] ? brighten(p[0], 0.12) : DARK.inputBg,
+    formFieldFocusRingInactive: p[8] ?? DARK.formFieldFocusRingInactive,
+    formFieldFocusRingActive: p[12] ?? p[4] ?? DARK.formFieldFocusRingActive,
+    formFieldBackground: p[0] ? brighten(p[0], 0.12) : DARK.formFieldBackground,
+    formFieldBackgroundActive: p[0] ? brighten(p[0], 0.18) : DARK.formFieldBackgroundActive,
     shortcutBg: p[8] ?? DARK.shortcutBg, // ANSI bright black
     shortcutActiveBg: p[4] ?? DARK.shortcutActiveBg,
     borderColor: p[8] ?? DARK.borderColor,

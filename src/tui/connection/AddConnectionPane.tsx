@@ -12,11 +12,14 @@ import type {
 import {
   Focusable,
   useFocusedDescendantPath,
+  useIsFocusNavigationActive,
   useFocusTree,
   useIsFocused,
+  useIsHighlighted,
   useIsFocusWithin,
   useRememberedDescendantPath,
 } from "../focus"
+import { FormInput, FormLabel } from "../form"
 import { Shortcut } from "../Shortcut"
 import { useKeybindHandler } from "../ui/keybind"
 import { Text } from "../ui/Text"
@@ -191,8 +194,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
   }
 
   return (
-    <Focusable
-      childrenNavigable={false}
+      <Focusable
       delegatesFocus
       flexDirection="column"
       flexGrow={1}
@@ -200,6 +202,7 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
       focusSelf
       focusable
       focusableId={ADD_CONNECTION_AREA_ID}
+      navigable={false}
       onTrapEsc={onBack}
       scrollRef={scrollRef}
       trap
@@ -390,7 +393,7 @@ function ProtocolPickerField(
   },
 ) {
   return (
-    <Focusable focusable focusableId="protocol" navigable={false}>
+    <Focusable focusable focusableId="protocol">
       <ProtocolPickerBody {...props} />
     </Focusable>
   )
@@ -403,8 +406,12 @@ function ProtocolPickerBody(
     onCycle: (step: number) => void
   },
 ) {
-  const { onPrev, onNext, adapters, protocol, onCycle, remembered } = props
+  const { onPrev, onNext, adapters, protocol, onCycle } = props
   const focused = useIsFocused()
+  const highlighted = useIsHighlighted()
+  const navigationActive = useIsFocusNavigationActive()
+  const active = navigationActive ? highlighted : focused
+  const theme = useTheme()
 
   useKeybindHandler({
     enabled: focused,
@@ -423,10 +430,16 @@ function ProtocolPickerBody(
   })
 
   return (
-    <FieldContainer focused={focused} remembered={remembered}>
-      <Text>Protocol</Text>
-      <Text>{adapters.map((adapter) => protocolLabel(adapter, protocol)).join("  ")}</Text>
-    </FieldContainer>
+    <FormLabel
+      active={active}
+      description="Pick the adapter that will own this connection."
+      name="Protocol"
+    >
+      <box flexDirection="row" justifyContent="space-between" width="100%">
+        <Text>{adapters.map((adapter) => protocolLabel(adapter, protocol)).join("  ")}</Text>
+        {focused && !navigationActive && <Text fg={theme.mutedFg}>← → cycle</Text>}
+      </box>
+    </FormLabel>
   )
 }
 
@@ -442,7 +455,6 @@ function TextInputField(
   },
 ) {
   const { description, error, focusableId, label, onChange, onNext, onPrev, placeholder, remembered, value } = props
-  const theme = useTheme()
   const inputRef = useRef<InputRenderable>(null)
 
   return (
@@ -450,7 +462,6 @@ function TextInputField(
       applyFocus={() => inputRef.current?.focus()}
       focusable
       focusableId={focusableId}
-      navigable={false}
     >
       <TextInputFieldBody
         description={description}
@@ -462,7 +473,6 @@ function TextInputField(
         onPrev={onPrev}
         placeholder={placeholder}
         remembered={remembered}
-        theme={theme}
         value={value}
       />
     </Focusable>
@@ -479,10 +489,12 @@ function TextInputFieldBody(props: {
   onPrev: () => void
   placeholder?: string
   remembered: boolean
-  theme: ReturnType<typeof useTheme>
   value: string
 }) {
   const focused = useIsFocused()
+  const highlighted = useIsHighlighted()
+  const navigationActive = useIsFocusNavigationActive()
+  const active = navigationActive ? highlighted : focused
 
   useKeybindHandler({
     enabled: focused,
@@ -492,27 +504,20 @@ function TextInputFieldBody(props: {
   })
 
   return (
-    <FieldContainer focused={focused} remembered={props.remembered}>
-      <box flexDirection="row">
-        <Text>{props.label} </Text>
-        <box backgroundColor={props.theme.inputBg} flexGrow={1}>
-          <input
-            cursorColor={props.theme.primaryFg}
-            ref={props.inputRef}
-            focused={focused}
-            focusedTextColor={props.theme.primaryFg}
-            flexGrow={1}
-            onInput={props.onChange}
-            placeholder={props.placeholder}
-            placeholderColor={props.theme.mutedFg}
-            textColor={props.theme.primaryFg}
-            value={props.value}
-          />
-        </box>
-      </box>
-      {props.description && <Text opacity={0.5}>{props.description}</Text>}
-      {props.error && <Text>{props.error}</Text>}
-    </FieldContainer>
+    <FormLabel
+      active={active || props.remembered}
+      description={props.description}
+      error={props.error}
+      inputFocused={!navigationActive && focused}
+      name={props.label}
+    >
+      <FormInput
+        inputRef={props.inputRef}
+        onInput={props.onChange}
+        placeholder={props.placeholder}
+        value={props.value}
+      />
+    </FormLabel>
   )
 }
 
@@ -527,7 +532,7 @@ function BooleanField(
   },
 ) {
   return (
-    <Focusable focusable focusableId={props.focusableId} navigable={false}>
+    <Focusable focusable focusableId={props.focusableId}>
       <BooleanFieldBody {...props} />
     </Focusable>
   )
@@ -544,6 +549,10 @@ function BooleanFieldBody(
 ) {
   const { checked, description, error, label, onChange, onNext, onPrev, remembered } = props
   const focused = useIsFocused()
+  const highlighted = useIsHighlighted()
+  const navigationActive = useIsFocusNavigationActive()
+  const active = navigationActive ? highlighted : focused
+  const theme = useTheme()
 
   useKeybindHandler({
     enabled: focused,
@@ -558,16 +567,19 @@ function BooleanFieldBody(
   })
 
   return (
-    <FieldContainer focused={focused} remembered={remembered}>
-      <box flexDirection="row" justifyContent="space-between" onMouseUp={() => onChange(!checked)}>
+    <FormLabel
+      active={active || remembered}
+      description={description}
+      error={error}
+      name={label}
+    >
+      <box flexDirection="row" justifyContent="space-between" onMouseUp={() => onChange(!checked)} width="100%">
         <Text>
-          {checked ? "◉" : "○"} {label}
+          {checked ? "◉" : "○"} {checked ? "Enabled" : "Disabled"}
         </Text>
-        {focused && <Text opacity={0.5}>space toggle</Text>}
+        {focused && !navigationActive && <Text fg={theme.mutedFg}>space toggle</Text>}
       </box>
-      {description && <Text opacity={0.5}>{description}</Text>}
-      {error && <Text>{error}</Text>}
-    </FieldContainer>
+    </FormLabel>
   )
 }
 
@@ -582,7 +594,7 @@ function SelectField(
   },
 ) {
   return (
-    <Focusable focusable focusableId={props.focusableId} navigable={false}>
+    <Focusable focusable focusableId={props.focusableId}>
       <SelectFieldBody {...props} />
     </Focusable>
   )
@@ -599,6 +611,10 @@ function SelectFieldBody(
 ) {
   const { description, error, field, onChange, onNext, onPrev, remembered, value } = props
   const focused = useIsFocused()
+  const highlighted = useIsHighlighted()
+  const navigationActive = useIsFocusNavigationActive()
+  const active = navigationActive ? highlighted : focused
+  const theme = useTheme()
 
   useKeybindHandler({
     enabled: focused,
@@ -626,27 +642,17 @@ function SelectFieldBody(
   const displayLabel = field.options.find((option) => option.value === value)?.label ?? value
 
   return (
-    <FieldContainer focused={focused} remembered={remembered}>
-      <Text>{field.label}</Text>
-      <Text>{displayLabel}</Text>
-      {description && <Text opacity={0.5}>{description}</Text>}
-      {error && <Text>{error}</Text>}
-    </FieldContainer>
-  )
-}
-
-function FieldContainer(props: { focused: boolean; remembered: boolean; children: ReactNode }) {
-  const theme = useTheme()
-
-  return (
-    <box
-      backgroundColor={props.focused ? theme.focusBg : (props.remembered ? theme.inputBg : undefined)}
-      flexDirection="column"
-      paddingLeft={1}
-      paddingRight={1}
+    <FormLabel
+      active={active || remembered}
+      description={description}
+      error={error}
+      name={field.label}
     >
-      {props.children}
-    </box>
+      <box flexDirection="row" justifyContent="space-between" width="100%">
+        <Text>{displayLabel}</Text>
+        {focused && !navigationActive && <Text fg={theme.mutedFg}>← → cycle</Text>}
+      </box>
+    </FormLabel>
   )
 }
 

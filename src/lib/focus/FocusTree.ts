@@ -316,18 +316,21 @@ export class FocusTree {
     }
 
     const highlightedPath = this.#resolveHighlightedPath()
+    const scopeFocusable = this.#getFocusable(session.activeScopePath)
     const parentPath = highlightedPath
       ? this.#findNearestAncestorFocusablePath(highlightedPath, session.activeScopePath)
       : undefined
 
-    if (parentPath) {
+    if (
+      parentPath &&
+      !(scopeFocusable?.input.trap && sameFocusPath(parentPath, session.activeScopePath))
+    ) {
       this.#highlightedPath = parentPath
       this.#revealPath(parentPath, true)
       this.#emitIfObservableChanged()
       return
     }
 
-    const scopeFocusable = this.#getFocusable(session.activeScopePath)
     scopeFocusable?.input.onTrapEsc?.()
     this.cancelFocusNavigation()
   }
@@ -343,6 +346,7 @@ export class FocusTree {
     }
 
     this.#commitFocusPath(highlightedPath, "activate")
+    this.#emitIfObservableChanged()
   }
 
   activateHighlightedFocusNavigable() {
@@ -367,12 +371,12 @@ export class FocusTree {
       return
     }
 
-    const current = this.#measureNavigablePath(currentPath)
+    const current = this.#measureNavigablePath(currentPath, false)
     if (!current) {
       return
     }
 
-    const candidates = this.#collectMeasuredNavigableFocusables(session.activeScopePath).filter(
+    const candidates = this.#collectMeasuredNavigableFocusables(session.activeScopePath, false).filter(
       (candidate) => !sameFocusPath(candidate.path, current.path),
     )
     const next = chooseNextFocusNavigable(current, candidates, direction)
@@ -598,17 +602,20 @@ export class FocusTree {
   }
 
   #firstVisibleNavigableInScope(activeScopePath: FocusPath): MeasuredFocusNode | undefined {
-    return this.#collectMeasuredNavigableFocusables(activeScopePath)[0]
+    return this.#collectMeasuredNavigableFocusables(activeScopePath, true)[0]
   }
 
-  #collectMeasuredNavigableFocusables(activeScopePath: FocusPath): MeasuredFocusNode[] {
+  #collectMeasuredNavigableFocusables(
+    activeScopePath: FocusPath,
+    clipToViewport: boolean,
+  ): MeasuredFocusNode[] {
     const nodes: MeasuredFocusNode[] = []
     for (const focusable of this.#focusables.values()) {
       if (!this.#isPathNavigableInScope(focusable.path, activeScopePath)) {
         continue
       }
 
-      const rect = this.#resolvePathRect(focusable.path)
+      const rect = this.#resolvePathRect(focusable.path, clipToViewport)
       if (!rect) {
         continue
       }
@@ -624,13 +631,13 @@ export class FocusTree {
     return nodes
   }
 
-  #measureNavigablePath(path: FocusPath): MeasuredFocusNode | undefined {
+  #measureNavigablePath(path: FocusPath, clipToViewport: boolean): MeasuredFocusNode | undefined {
     if (!this.#isPathNavigableInScope(path, this.#session?.activeScopePath ?? ROOT_FOCUS_PATH)) {
       return undefined
     }
 
     const focusable = this.#getFocusable(path)
-    const rect = this.#resolvePathRect(path)
+    const rect = this.#resolvePathRect(path, clipToViewport)
     if (!focusable || !rect) {
       return undefined
     }
@@ -642,11 +649,20 @@ export class FocusTree {
     }
   }
 
-  #resolvePathRect(path: FocusPath): FocusRect | undefined {
+  #resolvePathRect(path: FocusPath, clipToViewport = true): FocusRect | undefined {
     const focusable = this.#getFocusable(path)
     const baseRect = focusable?.input.getViewportRect?.()
     if (!focusable || !baseRect) {
       return undefined
+    }
+
+    if (!clipToViewport) {
+      return {
+        x: baseRect.x,
+        y: baseRect.y,
+        width: baseRect.width,
+        height: baseRect.height,
+      }
     }
 
     let rect: FocusVisibleRect = { ...baseRect }

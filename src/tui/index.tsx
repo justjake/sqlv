@@ -576,7 +576,7 @@ function RecentQueryViewBody(props: {
   useKeybindHandler({
     enabled: !navigationActive && focusedWithin && queries.length > 0,
     onKey(key) {
-      const plainVimMove = !key.ctrl && !key.shift && !key.meta && !key.option
+      const plainVimMove = !key.ctrl && !key.shift && !key.meta && !key.option && !key.super
       switch (key.name) {
         case "up":
         case "k":

@@ -25,11 +25,12 @@ export type KeyStep = {
   shift?: boolean
   meta?: boolean
   option?: boolean
+  super?: boolean
 }
 
-export type ShortcutKeyInput<TKey extends string = string> =
-  | ShortcutKeys<TKey>
-  | readonly ShortcutKeys<TKey>[]
+export type ShortcutKeyInput =
+  | ShortcutKeys
+  | readonly ShortcutKeys[]
 
 /** `option` is accepted in shortcut syntax for display, but matching relies on `meta` because many terminals never set `event.option`. */
 export function stepMatches(step: KeyStep, event: KeyEvent): boolean {
@@ -37,6 +38,7 @@ export function stepMatches(step: KeyStep, event: KeyEvent): boolean {
   if (!!step.ctrl !== !!event.ctrl) return false
   if (!!step.shift !== !!event.shift) return false
   if (!!step.meta !== !!event.meta) return false
+  if (!!step.super !== !!event.super) return false
   return true
 }
 
@@ -56,12 +58,13 @@ function sequenceEquals(a: KeyStep[], b: KeyStep[]): boolean {
     if (!!sa.ctrl !== !!sb.ctrl) return false
     if (!!sa.shift !== !!sb.shift) return false
     if (!!sa.meta !== !!sb.meta) return false
+    if (!!sa.super !== !!sb.super) return false
   }
   return true
 }
 
 function eventToStep(e: KeyEvent): KeyStep {
-  return { name: e.name, ctrl: e.ctrl, shift: e.shift, meta: e.meta, option: e.option }
+  return { name: e.name, ctrl: e.ctrl, shift: e.shift, meta: e.meta, option: e.option, super: e.super }
 }
 
 function shortcutKeyInputs(input: string | readonly string[]): readonly string[] {
@@ -83,8 +86,6 @@ function shortcutKeyInputSignature(input: string | readonly string[] | undefined
 // Parse leader chords like "ctrl+w h" into chord steps
 // ---------------------------------------------------------------------------
 
-export function parseKeys<TKey extends string>(input: ShortcutKeys<TKey>): KeyStep[]
-export function parseKeys(input: string): KeyStep[]
 export function parseKeys(input: string): KeyStep[] {
   return input
     .trim()
@@ -108,6 +109,10 @@ export function parseKeys(input: string): KeyStep[] {
             step.meta = true
             step.option = true
             break
+          case "command":
+          case "super":
+            step.super = true
+            break
           default:
             step.name = token
             break
@@ -117,8 +122,6 @@ export function parseKeys(input: string): KeyStep[] {
     })
 }
 
-export function parseKeyAlternatives<TKey extends string>(input: ShortcutKeyInput<TKey>): KeyStep[][]
-export function parseKeyAlternatives(input: string | readonly string[]): KeyStep[][]
 export function parseKeyAlternatives(input: string | readonly string[]): KeyStep[][] {
   return shortcutKeyInputs(input).map((item) => parseKeys(item))
 }
@@ -128,9 +131,10 @@ export function labelizeSequence(seq: KeyStep[]): string {
     .map((step) => {
       let s = ""
       if (step.ctrl) s += "^"
-      if (step.shift) s += "⬆"
       if (step.option) s += "⌥"
       else if (step.meta) s += "alt+"
+      if (step.shift) s += "⬆"
+      if (step.super) s += "⌘"
       if (step.name) s += labelizeKeyName(step.name)
       return s
     })
@@ -159,7 +163,7 @@ function labelizeKeyName(name: string): string {
 }
 
 function isPlainNavigationLetterKey(event: KeyEvent): boolean {
-  return !event.ctrl && !event.shift && !event.meta && !event.option
+  return !event.ctrl && !event.shift && !event.meta && !event.option && !event.super
 }
 
 function focusNavigationDirectionForKey(event: KeyEvent): FocusDirection | undefined {
@@ -187,7 +191,7 @@ function focusNavigationDirectionForKey(event: KeyEvent): FocusDirection | undef
 
 function isFocusNavigationActivationKey(event: KeyEvent): boolean {
   const name = normalizeShortcutKeyName(event.name)
-  return name === "return" || name === "space"
+  return name === "enter" || name === "return" || name === "space"
 }
 
 // ---------------------------------------------------------------------------
@@ -603,10 +607,6 @@ export type UseKeybindHandlerOptions = Omit<UseShortcutOptions, "keys"> & {
  *
  * Returns the parsed sequences for display purposes.
  */
-export function useShortcut<TKey extends string>(
-  options: Omit<UseShortcutOptions, "keys"> & { keys: ShortcutKeyInput<TKey> },
-): { sequence: KeyStep[]; sequences: KeyStep[][] }
-export function useShortcut(options: UseShortcutOptions): { sequence: KeyStep[]; sequences: KeyStep[][] }
 export function useShortcut(options: UseShortcutOptions): { sequence: KeyStep[]; sequences: KeyStep[][] } {
   const keySignature = shortcutKeyInputSignature(options.keys)
   const sequences = useMemo(() => parseKeyAlternatives(options.keys), [keySignature])
@@ -615,10 +615,6 @@ export function useShortcut(options: UseShortcutOptions): { sequence: KeyStep[];
   return { sequence: sequences[0] ?? [], sequences }
 }
 
-export function useKeybindHandler<TKey extends string>(
-  options: Omit<UseKeybindHandlerOptions, "keys"> & { keys?: ShortcutKeyInput<TKey> },
-): void
-export function useKeybindHandler(options: UseKeybindHandlerOptions): void
 export function useKeybindHandler(options: UseKeybindHandlerOptions): void {
   const ctx = useKeybind()
   const scopePath = useFocusPath()

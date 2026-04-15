@@ -259,7 +259,7 @@ function EditorSurface(props: {
     }
 
     const handleKeyPress = (event: KeyEvent) => {
-      if (event.ctrl || event.meta || event.option) {
+      if (event.ctrl || event.meta || event.option || event.super) {
         return
       }
 

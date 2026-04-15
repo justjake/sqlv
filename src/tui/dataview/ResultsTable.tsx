@@ -286,7 +286,7 @@ function navigateResultsGrid(
     return undefined
   }
 
-  const edgeJump = key.ctrl || key.meta
+  const edgeJump = key.ctrl || key.meta || key.super
 
   switch (key.name) {
     case "left":
@@ -322,14 +322,14 @@ function navigateResultsGrid(
       if (!hasPlainLetterModifiers(key)) return undefined
       return { rowIndex: current.rowIndex, columnIndex: current.columnIndex + 1 }
     case "tab":
-      if (key.ctrl || key.meta || key.option) return undefined
+      if (key.ctrl || key.meta || key.option || key.super) return undefined
       return {
         rowIndex: current.rowIndex,
         columnIndex: current.columnIndex + (key.shift ? -1 : 1),
       }
     case "enter":
     case "return":
-      if (key.ctrl || key.meta || key.option) return undefined
+      if (key.ctrl || key.meta || key.option || key.super) return undefined
       return {
         rowIndex: current.rowIndex + (key.shift ? -1 : 1),
         columnIndex: current.columnIndex,
@@ -348,7 +348,7 @@ function navigateResultsGrid(
 }
 
 function hasPlainLetterModifiers(key: KeyEvent): boolean {
-  return !key.ctrl && !key.meta && !key.option
+  return !key.ctrl && !key.meta && !key.option && !key.super
 }
 
 function clampCellCoordinates(
