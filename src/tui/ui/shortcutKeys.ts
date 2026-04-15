@@ -241,7 +241,8 @@ export const shortcutNamedKeyNames = [
 // `alt` and `option` are intentionally both accepted:
 // OpenTUI always sets `meta` for Alt/Option, but only sets `option` when the
 // terminal reports an explicit Alt/Option modifier bit.
-export const shortcutModifierNames = ["ctrl", "shift", "meta", "alt", "option"] as const
+// `command` and `super` are accepted as the same modifier.
+export const shortcutModifierNames = ["ctrl", "shift", "meta", "alt", "option", "command", "super"] as const
 
 export const shortcutBareKeyNames = [
   ...shortcutLetterKeyNames,
@@ -266,17 +267,19 @@ export type ShortcutNormalizedKeyName =
 
 export type ShortcutBareKeyName = (typeof shortcutBareKeyNames)[number]
 
-// In macOS display order.
-export type Ctrl = `ctrl+`
-export type Option = `option+` // | `meta+` | `alt+`
-export type Shift = `shift+`
-export type Command = `command+`
-// No Command detected
+// In canonical macOS-style order for sqlv's current shortcut string grammar.
+export type Ctrl = "ctrl+"
+export type Option = "option+" // | "meta+" | "alt+"
+export type Shift = "shift+"
+export type Command = "command+" | "super+"
 
-export type ShortcutModifiedKey =
-  `${Ctrl | never}${Option | never}${Shift | never}${Command | never}${ShortcutBareKeyName}`
-export type ShortcutChain = [ShortcutModifiedKey, ...ShortcutModifiedKey[]]
+type Maybe<T extends string> = "" | T
+type ShortcutModifiers = `${Maybe<Ctrl>}${Maybe<Option>}${Maybe<Shift>}${Maybe<Command>}`
+export type ShortcutModifiedKey = `${ShortcutModifiers}${ShortcutBareKeyName}`
+export type ShortcutChain = readonly ShortcutModifiedKey[]
 export type ShortcutKeys = ShortcutModifiedKey | ShortcutChain
+
+// export type ShortcutKeys<TKey extends string = string> = string extends TKey ? string : ShortcutChainLiteral<TKey>
 
 export const shortcutKeyAliases = {
   enter: "return",
@@ -310,7 +313,6 @@ export const shortcutKeyAliases = {
   kpend: "end",
   kpinsert: "insert",
   kpdelete: "delete",
-  command: "super",
 } as const satisfies Record<string, ShortcutNormalizedKeyName>
 
 export function normalizeShortcutKeyName(name: string | undefined): string | undefined {
