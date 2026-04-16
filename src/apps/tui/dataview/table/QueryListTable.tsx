@@ -1,7 +1,9 @@
 import type { ReactNode } from "react"
-import { Focusable } from "../../focus/Focusable"
+
 import { useIsFocusNavigationActive, useIsHighlighted } from "../../focus/context"
+import { Focusable } from "../../focus/Focusable"
 import { useTheme } from "../../ui/theme"
+
 import { Table, type TableColumn } from "./Table"
 
 export type QueryListTableProps<Row> = {

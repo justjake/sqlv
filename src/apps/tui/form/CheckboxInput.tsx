@@ -1,8 +1,9 @@
 import type { ReactNode } from "react"
-import { Focusable } from "../focus/Focusable"
+
 import { useIsFocusNavigationActive, useIsFocused, useIsHighlighted } from "../focus/context"
-import { Text } from "../ui/Text"
+import { Focusable } from "../focus/Focusable"
 import { useShortcut } from "../ui/keybind/useShortcut"
+import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 
 export type CheckboxInputProps = {

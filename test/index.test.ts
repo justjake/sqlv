@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import * as publicApi from "../src/index"
+
 import { BunSqlAdapter } from "../src/adapters/sqlite/bun/BunSqliteAdapter"
 import { PostgresAdapter, postgres, postgresqlProtocolResolver } from "../src/adapters/postgres/PgAdapter"
 import { SqlVisor } from "../src/api/SqlVisor"
+import * as publicApi from "../src/index"
 
 describe("public API", () => {
   test("re-exports the main entrypoints", () => {

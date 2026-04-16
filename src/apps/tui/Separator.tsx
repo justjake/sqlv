@@ -1,5 +1,6 @@
 import type { MouseEvent } from "@opentui/core"
 import { useState } from "react"
+
 import { useTheme } from "./ui/theme"
 
 type SeparatorProps = {

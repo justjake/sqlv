@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+
 import { Text } from "../ui/Text"
 
 export function renderSelectOptionLabel(label: ReactNode, textColor?: string) {

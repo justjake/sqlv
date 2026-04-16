@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test"
+
+import { createEditorBuffer, createEditorChange } from "../../../src/domain/editor/buffer"
 import {
   closedEditorCompletionState,
   decideEditorCompletion,
   detectIdentifierCompletion,
 } from "../../../src/domain/editor/completion"
-import { createEditorBuffer, createEditorChange } from "../../../src/domain/editor/buffer"
 
 describe("editorCompletion", () => {
   test("detects object-name identifier completions without opening for aliases", () => {

@@ -1,9 +1,11 @@
 import type { ReactNode } from "react"
+
+import { Focusable } from "../focus/Focusable"
 import { useShortcut } from "../ui/keybind/useShortcut"
 import { useTheme } from "../ui/theme"
-import { Focusable } from "../focus/Focusable"
 import { useIsFocusNavigationActive, useIsFocused, useIsHighlighted } from "../focus/context"
 import { Text } from "../ui/Text"
+
 import { renderSelectOptionLabel } from "./selectOptionLabel"
 
 export type SelectOption<Value extends string = string> = {

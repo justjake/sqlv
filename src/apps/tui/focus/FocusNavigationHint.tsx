@@ -1,6 +1,7 @@
-import { Text } from "../ui/Text"
 import { labelizeShortcutInput } from "../ui/keybind"
+import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
+
 import { useFocusNavigationState } from "./context"
 
 const FOCUS_NAV_HINT_Z_INDEX = 1000

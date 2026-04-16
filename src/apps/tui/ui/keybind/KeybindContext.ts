@@ -1,6 +1,7 @@
-import { createContext } from "react"
 import type { KeyEvent } from "@opentui/core"
+import { createContext } from "react"
 import type { FocusPath } from "../../../framework/focus/types"
+
 import type { KeyStep } from "./shortcutSyntax"
 
 export type ShortcutRegistration = {

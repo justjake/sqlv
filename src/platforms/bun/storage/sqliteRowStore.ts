@@ -1,4 +1,3 @@
-import { jsonb_patch, sqlite as sql } from "#adapters/sqlite/sqlite"
 import { EpochMillis } from "#domain/Log"
 import {
   rowDispatcher,
@@ -15,6 +14,7 @@ import {
 import { Identifier, type SQL } from "#domain/SQL"
 import { unreachable } from "#domain/unreachable"
 import type { QueryRunner } from "#spi/QueryRunner"
+import { jsonb_patch, sqlite as sql } from "#adapters/sqlite/sqlite"
 
 export function createRowStoreTableSql(table: Identifier) {
   return sql`CREATE TABLE IF NOT EXISTS ${table} (

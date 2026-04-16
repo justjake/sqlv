@@ -1,6 +1,7 @@
-import { TextAttributes } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
+import { TextAttributes } from "@opentui/core"
 import { useEffect } from "react"
+
 import { useFocusNavigationState, useFocusTree } from "../../../src/apps/tui/focus/context"
 import { flattenTree, clampTreeIndex, TreeView } from "../../../src/apps/tui/sidebar/TreeView"
 import { IconProvider } from "../../../src/apps/tui/ui/icons"

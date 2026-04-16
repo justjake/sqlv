@@ -1,11 +1,12 @@
 import { createCliRenderer, type MouseEvent } from "@opentui/core"
 import { createRoot, flushSync, useTerminalDimensions } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { focusPath, sameFocusPath } from "../framework/focus/paths"
+
 import { createBunSqlVisor } from "#platforms/bun/createBunSqlVisor"
 import type { DiscoveredConnectionSuggestion } from "#api/SqlVisor"
 import type { Connection } from "#domain/Connection"
 import type { QueryExecution } from "#domain/Log"
+import { focusPath, sameFocusPath } from "../framework/focus/paths"
 import { AddConnectionPane } from "./connection/AddConnectionPane"
 import { ResultsTable, RESULTS_TABLE_FOCUS_ID } from "./dataview/ResultsTable"
 import { QueryListTable } from "./dataview/table/QueryListTable"
@@ -13,7 +14,6 @@ import type { TableColumn } from "./dataview/table/Table"
 import { EditorView, QUERY_EDITOR_FOCUS_ID } from "./editor/EditorView"
 import { QueryHistory, type QueryFinderEntry } from "./editor/QueryHistory"
 import { SaveQueryDialog } from "./editor/SaveQueryDialog"
-import { FocusChrome } from "./focus/FocusChrome"
 import { Focusable } from "./focus/Focusable"
 import {
   FocusProvider,
@@ -22,6 +22,7 @@ import {
   useIsFocusNavigationActive,
   useIsFocusWithin,
 } from "./focus/context"
+import { FocusChrome } from "./focus/FocusChrome"
 import { useOpaqueIdMap } from "./focus/opaqueIds"
 import { Separator } from "./Separator"
 import { SettingsPane } from "./sidebar/SettingsPane"

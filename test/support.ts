@@ -1,10 +1,10 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { BunSqlAdapter, type BunSqlConfig } from "../src/adapters/sqlite/bun/BunSqliteAdapter"
+
 import { PostgresAdapter } from "../src/adapters/postgres/PgAdapter"
+import { BunSqlAdapter, type BunSqlConfig } from "../src/adapters/sqlite/bun/BunSqliteAdapter"
 import { TursoAdapter } from "../src/adapters/sqlite/turso/TursoAdapter"
-import { createSession } from "../src/platforms/bun/storage/createLocalStorage"
 import { createNoopLogStore } from "../src/engine/runtime/createNoopLogStore"
 import {
   createEditorAnalysisSubject,
@@ -51,6 +51,7 @@ import {
   type SettingsSchema,
   type SettingsState,
 } from "../src/domain/Settings"
+import { createSession } from "../src/platforms/bun/storage/createLocalStorage"
 
 export async function createTempDir(prefix = "sqlv-test-"): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix))

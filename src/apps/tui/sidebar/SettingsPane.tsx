@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react"
-import { defaultTuiPreferences, getTuiPreferences, TUI_PREFERENCES_KEY } from "../preferences"
+
 import { SelectOptionRowField } from "../form/SelectOptionRowField"
+import { defaultTuiPreferences, getTuiPreferences, TUI_PREFERENCES_KEY } from "../preferences"
 import type { SelectOptionRowOption } from "../form/SelectOptionRowInput"
 import { Focusable } from "../focus/Focusable"
 import { IconProvider, useIconGlyph, type IconName, type IconStyle } from "../ui/icons"

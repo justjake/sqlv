@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+
 import { FocusTree } from "../../src/apps/framework/focus/FocusTree"
 import { ROOT_FOCUS_PATH } from "../../src/apps/framework/focus/paths"
 

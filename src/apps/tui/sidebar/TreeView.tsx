@@ -1,8 +1,8 @@
 import { TextAttributes, type BoxRenderable } from "@opentui/core"
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { focusPath, sameFocusPath } from "../../framework/focus/paths"
+
 import type { DiscoveredConnectionSuggestion } from "#api/SqlVisor"
-import { Focusable, type FocusableProps } from "../focus/Focusable"
+import { focusPath, sameFocusPath } from "../../framework/focus/paths"
 import {
   useFocusedDescendantPath,
   useFocusPath,
@@ -11,6 +11,7 @@ import {
   useIsFocusWithin,
   useRememberedDescendantPath,
 } from "../focus/context"
+import { Focusable, type FocusableProps } from "../focus/Focusable"
 import { useOpaqueIdMap } from "../focus/opaqueIds"
 import { useIconGlyph, type IconName } from "../ui/icons"
 import { useKeybind } from "../ui/keybind/useKeybind"

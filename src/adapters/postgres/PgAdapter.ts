@@ -1,5 +1,7 @@
 import { Client, Query, type ClientConfig, type QueryResult } from "pg"
 import { parseIntoClientConfig } from "pg-connection-string"
+
+import { aborter } from "#domain/defer"
 import {
   type Adapter,
   type ConnectionFormValues,
@@ -8,7 +10,6 @@ import {
 } from "#spi/Adapter"
 import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "#spi/Executor"
 import { findLocalPostgresPorts, probePostgresPort } from "./localDiscovery"
-import { aborter } from "#domain/defer"
 import type {
   DatabaseInfo,
   MaterializedViewInfo,
@@ -20,6 +21,7 @@ import type {
 } from "#domain/objects"
 import { SQL, sql, unsafeRawSQL, type SQLValue } from "#domain/SQL"
 import type { ExplainInput, ExplainResult } from "#domain/Explain"
+
 import type { QueryRunner } from "#spi/QueryRunner"
 
 export type PostgresArg = string | number | boolean | bigint | Uint8Array | Date | null

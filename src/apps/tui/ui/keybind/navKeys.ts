@@ -1,5 +1,7 @@
 import type { KeyEvent } from "@opentui/core"
+
 import type { ShortcutModifiedKey, ShortcutModifiers } from "../shortcutKeys"
+
 import type { ShortcutKeyInput } from "./shortcutSyntax"
 
 export const NavKeyAlias = {

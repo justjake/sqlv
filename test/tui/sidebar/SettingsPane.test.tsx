@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
+
 import { act } from "react"
+
 import { App } from "../../../src/apps/tui/index"
 import { SqlVisorProvider } from "../../../src/apps/tui/useSqlVisor"
 import { createEngineStub, createQueryState } from "../../support"

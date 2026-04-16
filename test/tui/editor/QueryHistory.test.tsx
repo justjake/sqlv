@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
+
 import { useState } from "react"
+
 import { clampHistoryIndex, QueryHistory } from "../../../src/apps/tui/editor/QueryHistory"
 import { makeConnection, makeQueryExecution, makeSavedQuery } from "../../support"
 import { createTuiRenderHarness } from "../testUtils"

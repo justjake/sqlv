@@ -1,6 +1,7 @@
 import type { BoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
 import { Fragment, type ReactNode, useMemo, useRef, useState } from "react"
+
 import { Text } from "../../ui/Text"
 
 // ── Border Characters ──────────────────────────────────────────────────────

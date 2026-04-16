@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
+
 import { Modal } from "../../src/apps/tui/ui/Modal"
 import { Text } from "../../src/apps/tui/ui/Text"
+
 import { createTuiRenderHarness } from "./testUtils"
 
 const { render } = createTuiRenderHarness()

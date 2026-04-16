@@ -1,9 +1,11 @@
 import type { BoxRenderable, MouseEvent, Renderable, ScrollBoxRenderable } from "@opentui/core"
 import { useInsertionEffect, useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from "react"
+
 import { focusPath } from "../../framework/focus/paths"
 import type { FocusApplyContext, FocusPath, FocusableRegistration } from "../../framework/focus/types"
-import { FocusHalo } from "./FocusHalo"
+
 import { FocusPathProvider, useFocusParentPath, useFocusTree } from "./context"
+import { FocusHalo } from "./FocusHalo"
 import { focusableRenderableId, renderableViewportRect, scrollViewportRect } from "./utils"
 
 type BoxProps = {

@@ -1,10 +1,12 @@
 import type { KeyEvent, Renderable } from "@opentui/core"
 import { useRenderer } from "@opentui/react"
 import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactNode } from "react"
+
 import { focusPathKey } from "../../../framework/focus/paths"
 import type { FocusDirection, FocusPath } from "../../../framework/focus/types"
 import { useFocusNavigationRestoreController, useFocusTree } from "../../focus/context"
 import { normalizeShortcutKeyName } from "../shortcutKeys"
+
 import { KeybindContext, type ShortcutRegistration } from "./KeybindContext"
 import { eventToStep, sequenceEquals, stepMatches, type KeyStep } from "./shortcutSyntax"
 

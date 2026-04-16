@@ -1,8 +1,8 @@
-import type { QueryRunner } from "#spi/QueryRunner"
 import type { ExplainInput, ExplainResult } from "#domain/Explain"
 import type { DatabaseInfo, ObjectInfo, TableInfo } from "#domain/objects"
 import { Identifier, Paginated, SQL, sql, unsafeRawSQL, type SQLValue } from "#domain/SQL"
 import { unreachable } from "#domain/unreachable"
+import type { QueryRunner } from "#spi/QueryRunner"
 
 export type SqliteArg = string | number | null
 

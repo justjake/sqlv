@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+
 import { buildObjectBrowserTree, type ObjectBrowserNode } from "../../../src/apps/tui/sidebar/objectBrowserTree"
 
 function treeShape(nodes: readonly ObjectBrowserNode[]): unknown[] {

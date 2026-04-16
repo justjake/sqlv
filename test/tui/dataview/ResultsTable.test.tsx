@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
+
 import { useEffect } from "react"
+
 import {
   ResultsTable,
   RESULTS_TABLE_FOCUS_ID,

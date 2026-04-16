@@ -1,11 +1,12 @@
 import type { InputRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
-import { focusPath, sameFocusPath } from "../../framework/focus/paths"
+
 import { findLatestSavedQueryExecution } from "#domain/queryExecution"
+import { focusPath, sameFocusPath } from "../../framework/focus/paths"
 import type { QueryExecution } from "#domain/Log"
 import type { Connection } from "#domain/Connection"
 import type { SavedQuery } from "#domain/SavedQuery"
-import { Focusable } from "../focus/Focusable"
+
 import {
   useFocusedDescendantPath,
   useFocusTree,
@@ -13,6 +14,7 @@ import {
   useIsFocusWithin,
   useRememberedDescendantPath,
 } from "../focus/context"
+import { Focusable } from "../focus/Focusable"
 import { useOpaqueIdMap } from "../focus/opaqueIds"
 import { Shortcut } from "../Shortcut"
 import { QueryListTable } from "../dataview/table/QueryListTable"

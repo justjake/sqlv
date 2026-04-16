@@ -1,7 +1,9 @@
-import { testRender } from "@opentui/react/test-utils"
 import type { TestRendererOptions } from "@opentui/core/testing"
+import { testRender } from "@opentui/react/test-utils"
 import { afterEach } from "bun:test"
+
 import { act, type ReactNode } from "react"
+
 import { FocusProvider } from "../../src/apps/tui/focus/context"
 import { KeybindProvider } from "../../src/apps/tui/ui/keybind/KeybindProvider"
 

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
+
 import { useState } from "react"
+
 import { TextField } from "../../src/apps/tui/form/TextField"
+
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, render } = createTuiRenderHarness()

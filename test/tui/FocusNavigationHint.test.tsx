@@ -1,8 +1,10 @@
-import { RGBA, TextAttributes, type CapturedFrame, type CapturedLine } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
+import { RGBA, TextAttributes, type CapturedFrame, type CapturedLine } from "@opentui/core"
 import { useEffect } from "react"
+
 import { FocusChrome, Focusable, useFocusTree } from "../../src/apps/tui/focus"
 import { labelizeShortcutInput } from "../../src/apps/tui/ui/keybind"
+
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()

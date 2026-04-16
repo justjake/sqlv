@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
+
 import type { FocusPath } from "../../framework/focus/types"
-import { Focusable } from "../focus/Focusable"
 import {
   useFocusParentPath,
   useFocusedDescendantPath,
@@ -9,8 +9,10 @@ import {
   useIsFocusWithin,
   useRememberedDescendantPath,
 } from "../focus/context"
+import { Focusable } from "../focus/Focusable"
 import { useNavKeys } from "../ui/keybind/useNavKeys"
 import { useShortcut } from "../ui/keybind/useShortcut"
+
 import { FieldLabel } from "./FieldLabel"
 
 export type FieldProps = {

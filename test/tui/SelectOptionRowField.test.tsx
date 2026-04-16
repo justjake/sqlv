@@ -1,8 +1,10 @@
-import { RGBA } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
+import { RGBA } from "@opentui/core"
 import { act, useState } from "react"
+
 import { SelectOptionRowField } from "../../src/apps/tui/form/SelectOptionRowField"
 import { Text } from "../../src/apps/tui/ui/Text"
+
 import { createTuiRenderHarness } from "./testUtils"
 
 const { render, settleDeferredRender } = createTuiRenderHarness()

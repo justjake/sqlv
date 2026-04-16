@@ -1,4 +1,3 @@
-import type { Executor } from "#spi/Executor"
 import type { QueryFlowInput, QueryRunOptions, QueryRunner } from "#spi/QueryRunner"
 import type { Connection } from "#domain/Connection"
 import { aborter } from "#domain/defer"
@@ -15,6 +14,7 @@ import {
 import { Result } from "#domain/Result"
 import { RowHandle } from "#domain/RowStore"
 import type { Paginated, SQL } from "#domain/SQL"
+import type { Executor } from "#spi/Executor"
 
 export class QueryExecutionError<Row = object> extends Error {
   constructor(

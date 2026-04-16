@@ -1,8 +1,8 @@
 import type { BoxRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
 import { useMemo, useRef, useState, type ReactNode } from "react"
+
 import { focusPath, focusPathKey } from "../../framework/focus/paths"
-import { Focusable } from "../focus/Focusable"
 import {
   useFocusedDescendantPath,
   useFocusTree,
@@ -11,11 +11,13 @@ import {
   useIsFocusWithin,
   useRememberedDescendantPath,
 } from "../focus/context"
+import { Focusable } from "../focus/Focusable"
 import { useOpaqueIdMap } from "../focus/opaqueIds"
 import { useNavKeys } from "../ui/keybind/useNavKeys"
 import { useShortcut } from "../ui/keybind/useShortcut"
 import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
+
 import { Table, type TableColumn } from "./table/Table"
 
 type CellCoordinates = {

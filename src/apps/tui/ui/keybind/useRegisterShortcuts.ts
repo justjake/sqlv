@@ -1,6 +1,8 @@
 import type { KeyEvent } from "@opentui/core"
 import { useLayoutEffect } from "react"
+
 import { useFocusPath } from "../../focus/context"
+
 import { parseKeyAlternatives, type ShortcutKeyInput } from "./shortcutSyntax"
 import { useKeybind } from "./useKeybind"
 

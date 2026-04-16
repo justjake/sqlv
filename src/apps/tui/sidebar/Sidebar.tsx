@@ -1,11 +1,14 @@
 import { useCallback, useState } from "react"
+
 import type { ConnectionSuggestionsState, DiscoveredConnectionSuggestion } from "#api/SqlVisor"
+
 import { Focusable } from "../focus/Focusable"
 import { getTuiPreferences } from "../preferences"
 import { Shortcut } from "../Shortcut"
 import { IconProvider } from "../ui/icons"
 import { Text } from "../ui/Text"
 import { useSqlVisor, useSqlVisorState } from "../useSqlVisor"
+
 import { buildObjectBrowserTree, type ObjectBrowserNode } from "./objectBrowserTree"
 import { TreeView, type TreeNode } from "./TreeView"
 

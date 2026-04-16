@@ -1,6 +1,7 @@
-import { RGBA } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
+import { RGBA } from "@opentui/core"
 import { ConfirmModal } from "../../src/apps/tui/ui/ConfirmModal"
+
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()

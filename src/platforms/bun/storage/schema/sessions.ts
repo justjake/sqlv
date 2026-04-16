@@ -1,4 +1,5 @@
 import { index, sqliteTable, text } from "drizzle-orm/sqlite-core"
+
 import { epochMillis } from "./shared"
 
 export const sessions = sqliteTable(

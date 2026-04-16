@@ -1,4 +1,5 @@
 import type { Protocol } from "#spi/Adapter"
+
 import type { EpochMillis } from "./EpochMillis"
 import type { RowStore } from "./RowStore"
 

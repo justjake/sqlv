@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+
 import { BunSqlAdapter } from "../../src/adapters/sqlite/bun/BunSqliteAdapter"
 import {
   IterateSqliteSchema,
@@ -10,7 +11,6 @@ import {
   sqlite,
   type SqliteSchemaRow,
 } from "../../src/adapters/sqlite/sqlite"
-import { createSession } from "../../src/platforms/bun/storage/createLocalStorage"
 import { createNoopLogStore } from "../../src/engine/runtime/createNoopLogStore"
 import { Storage } from "../../src/platforms/bun/storage/Storage"
 import { QueryRunnerImpl } from "../../src/engine/runtime/QueryRunnerImpl"
@@ -24,6 +24,7 @@ import { EpochMillis, type LogEntry } from "../../src/domain/Log"
 import { OrderString } from "../../src/domain/Order"
 import type { BaseRow } from "../../src/domain/RowStore"
 import { ident, unsafeRawSQL } from "../../src/domain/SQL"
+import { createSession } from "../../src/platforms/bun/storage/createLocalStorage"
 import { createBunQueryRunner, makeConnection } from "../support"
 
 type StoredRow = BaseRow & {

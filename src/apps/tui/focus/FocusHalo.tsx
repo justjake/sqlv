@@ -1,6 +1,8 @@
 import type { Renderable } from "@opentui/core"
 import { useLayoutEffect } from "react"
+
 import { useTheme } from "../ui/theme"
+
 import {
   focusPathSignature,
   useFocusHaloOverlayController,

@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises"
-import { dirname, join } from "node:path"
 import { createRequire } from "node:module"
-import { Language, Parser, Query, type QueryCapture } from "web-tree-sitter"
+import { dirname, join } from "node:path"
 import type { HighlightMeta, SimpleHighlight } from "@opentui/core"
+import { Language, Parser, Query, type QueryCapture } from "web-tree-sitter"
 import { getTreeSitterParsers } from "./parsers"
 
 const require = createRequire(import.meta.url)

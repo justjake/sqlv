@@ -1,9 +1,10 @@
-import type { CapturedFrame, CapturedLine } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
+import type { CapturedFrame, CapturedLine } from "@opentui/core"
 import { useEffect } from "react"
+
 import { FocusChrome } from "../../src/apps/tui/focus"
-import { Focusable } from "../../src/apps/tui/focus/Focusable"
 import { useFocusTree } from "../../src/apps/tui/focus/context"
+import { Focusable } from "../../src/apps/tui/focus/Focusable"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()

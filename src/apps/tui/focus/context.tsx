@@ -12,6 +12,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react"
+
 import { FocusTree } from "../../framework/focus/FocusTree"
 import {
   ROOT_FOCUS_PATH,
@@ -21,6 +22,7 @@ import {
   sameFocusPath,
 } from "../../framework/focus/paths"
 import type { FocusPath, FocusPathSuffix, FocusNavigationState } from "../../framework/focus/types"
+
 import { renderableViewportRect } from "./utils"
 
 const FOCUS_HALO_ANIMATION_MS = 110

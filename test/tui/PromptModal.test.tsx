@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
+
 import { PromptModal } from "../../src/apps/tui/ui/PromptModal"
 import { Text } from "../../src/apps/tui/ui/Text"
+
 import { createTuiRenderHarness } from "./testUtils"
 
 const { render, settleDeferredRender } = createTuiRenderHarness()

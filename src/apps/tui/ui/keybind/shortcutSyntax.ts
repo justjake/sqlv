@@ -1,4 +1,5 @@
 import type { KeyEvent } from "@opentui/core"
+
 import {
   normalizeShortcutKeyName,
   type ShortcutKeyUnion as BaseShortcutKeyUnion,

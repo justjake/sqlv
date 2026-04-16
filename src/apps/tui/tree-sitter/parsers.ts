@@ -2,6 +2,7 @@
 // Run `bun run fetch:treesitter-grammars` to refresh vendored assets.
 
 import { fileURLToPath } from "node:url"
+
 import type { FiletypeParserOptions } from "@opentui/core"
 
 const sqlHighlights = fileURLToPath(new URL("./assets/sql/highlights.scm", import.meta.url))

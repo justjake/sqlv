@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
-import { FormField, type FieldProps } from "./Field"
+
 import { CheckboxInput } from "./CheckboxInput"
+import { FormField, type FieldProps } from "./Field"
 
 export type CheckboxFieldProps = FieldProps & {
   checked: boolean

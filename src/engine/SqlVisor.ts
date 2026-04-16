@@ -1,4 +1,5 @@
 import { CancelledError, QueryClient } from "@tanstack/query-core"
+
 import {
   defaultAppState,
   type AppStateId,
@@ -6,6 +7,7 @@ import {
   type AppStateSnapshot,
   type AppStateStore,
 } from "#domain/AppState"
+import type { Connection } from "#domain/Connection"
 import {
   createEditorAnalysisSubject,
   idleEditorAnalysisState,
@@ -35,7 +37,6 @@ import { replaceTextRange, type EditorRange } from "#domain/editor/text"
 import { formatQueryText } from "#domain/formatQuery"
 import type { Json, JsonObject } from "#domain/Json"
 import { findLatestSavedQueryExecution } from "#domain/queryExecution"
-import type { Connection } from "#domain/Connection"
 import { createId } from "#domain/Id"
 import { EpochMillis, type LogEntry, type QueryExecution, type QueryFlow, type Session } from "#domain/Log"
 import type { ObjectInfo } from "#domain/objects"
@@ -53,9 +54,10 @@ import {
   type SettingsState,
 } from "#domain/Settings"
 import { unsafeRawSQL } from "#domain/SQL"
+
+import { AdapterRegistry, type Protocol, type ProtocolConfig } from "#spi/Adapter"
 import { QueryExecutionError, QueryRunnerImpl } from "./runtime/QueryRunnerImpl"
 import { KnownObjectsSuggestionProvider } from "./suggestions/KnownObjectsSuggestionProvider"
-import { AdapterRegistry, type Protocol, type ProtocolConfig } from "#spi/Adapter"
 import type { SuggestionProvider, SuggestionRequest } from "#spi/SuggestionProvider"
 
 export type {

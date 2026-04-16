@@ -1,6 +1,7 @@
 import { type BoxRenderable, type KeyEvent, type LineNumberRenderable, type TextareaRenderable } from "@opentui/core"
 import { useRenderer } from "@opentui/react"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react"
+
 import {
   getDiagnosticLogicalLine,
   getVisibleEditorAnalysis,
@@ -9,15 +10,17 @@ import {
 import { createEditorChange, type EditorChange } from "#domain/editor/buffer"
 import { type EditorCompletionItemFocusInput, type SuggestionItem } from "#domain/editor/completion"
 import { type EditorState } from "#domain/editor/state"
-import { normalizeHighlightRange } from "#domain/editor/text"
 import { selectVisibleSuggestionItems } from "#domain/editor/suggestionMenu"
+import { normalizeHighlightRange } from "#domain/editor/text"
 import type { SavedQuery } from "#domain/SavedQuery"
-import { Focusable } from "../focus/Focusable"
+
 import { useIsFocused } from "../focus/context"
+import { Focusable } from "../focus/Focusable"
 import { Shortcut } from "../Shortcut"
 import { ensureTreeSitterGrammarLoaded, highlightTreeSitterOnce } from "../tree-sitter/client"
 import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
+
 import {
   buildEditorSyntaxHighlights,
   createEditorSyntaxStyleRegistry,

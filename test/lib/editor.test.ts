@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test"
+
 import {
   createEditorAnalysisSubject,
   getDiagnosticLogicalLine,
   getVisibleEditorAnalysis,
 } from "../../src/domain/editor/analysis"
 import { createEditorBuffer } from "../../src/domain/editor/buffer"
-import { offsetToLineColumn, normalizeHighlightRange, replaceTextRange } from "../../src/domain/editor/text"
 import { selectVisibleSuggestionItems } from "../../src/domain/editor/suggestionMenu"
+import { offsetToLineColumn, normalizeHighlightRange, replaceTextRange } from "../../src/domain/editor/text"
 
 describe("domain/editor", () => {
   test("hides stale analysis results and incomplete-input-only diagnostics", () => {

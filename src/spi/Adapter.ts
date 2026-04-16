@@ -1,8 +1,9 @@
 import type { ExplainInput, ExplainResult } from "#domain/Explain"
 import type { ObjectInfo } from "#domain/objects"
 import type { Identifier, SQL } from "#domain/SQL"
-import type { QueryRunner } from "./QueryRunner"
+
 import type { ExecuteResult, Executor } from "./Executor"
+import type { QueryRunner } from "./QueryRunner"
 
 export type Feature<T> = {
   // TODO: more stuff for mcp?

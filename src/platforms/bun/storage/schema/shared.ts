@@ -1,4 +1,5 @@
 import { integer, text } from "drizzle-orm/sqlite-core"
+
 import type { EpochMillis } from "#domain/EpochMillis"
 import type { Json } from "#domain/Json"
 

@@ -1,7 +1,9 @@
-import { RGBA } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
+import { RGBA } from "@opentui/core"
 import { act } from "react"
+
 import { CheckboxField } from "../../src/apps/tui/form/CheckboxField"
+
 import { createTuiRenderHarness } from "./testUtils"
 
 const { render } = createTuiRenderHarness()

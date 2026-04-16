@@ -1,4 +1,5 @@
 import type { KeyEvent } from "@opentui/core"
+
 import type { ShortcutKeyInput } from "./shortcutSyntax"
 import { useRegisterShortcuts } from "./useRegisterShortcuts"
 

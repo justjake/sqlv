@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+
 import rule from "./layer-boundaries.ts"
 
 type CapturedReport = {

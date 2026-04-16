@@ -1,4 +1,5 @@
 import type { ExplainResult } from "../Explain"
+
 import type { EditorBuffer } from "./buffer"
 import { normalizeHighlightRange, offsetToLineColumn, type EditorRange } from "./text"
 

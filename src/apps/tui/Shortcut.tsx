@@ -1,6 +1,7 @@
 import type { KeyEvent, MouseEvent } from "@opentui/core"
 import { flushSync } from "@opentui/react"
 import { useState, type ReactNode } from "react"
+
 import { labelizeShortcutInput, type ShortcutKeyInput } from "./ui/keybind/shortcutSyntax"
 import { useShortcut } from "./ui/keybind/useShortcut"
 import { Text } from "./ui/Text"

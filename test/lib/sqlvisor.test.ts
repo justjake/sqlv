@@ -1,6 +1,5 @@
-import { QueryClient } from "@tanstack/query-core"
 import { describe, expect, test } from "bun:test"
-import { type LocalStorage, createSession } from "../../src/platforms/bun/storage/createLocalStorage"
+import { QueryClient } from "@tanstack/query-core"
 import type { AppStateRow } from "../../src/domain/AppState"
 import { createEditorAnalysisSubject } from "../../src/domain/editor/analysis"
 import { createEditorBuffer } from "../../src/domain/editor/buffer"
@@ -16,6 +15,7 @@ import { rowDispatcher, type BaseRow } from "../../src/domain/RowStore"
 import type { SavedQuery } from "../../src/domain/SavedQuery"
 import { defaultSettingsState, type AnySettingsRow } from "../../src/domain/Settings"
 import { unsafeRawSQL, type SQL } from "../../src/domain/SQL"
+import { type LocalStorage, createSession } from "../../src/platforms/bun/storage/createLocalStorage"
 import { makeAppStateRow, makeConnection, makeQueryExecution, makeSavedQuery, makeSettingsRow } from "../support"
 
 class FakeBunAdapter implements Adapter<{ path: string }, unknown, {}> {

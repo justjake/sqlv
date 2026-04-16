@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+
 import { JsonRowView } from "../../../src/apps/tui/dataview/JsonRowView"
 import { createTuiRenderHarness } from "../testUtils"
 

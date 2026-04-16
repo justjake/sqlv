@@ -1,6 +1,8 @@
-import { testRender } from "@opentui/react/test-utils"
 import { afterEach, describe, expect, test } from "bun:test"
+import { testRender } from "@opentui/react/test-utils"
 import { act, useEffect, type ReactNode } from "react"
+
+import { AddConnectionPane, ADD_CONNECTION_AREA_ID } from "../../src/apps/tui/connection/AddConnectionPane"
 import { RESULTS_TABLE_FOCUS_ID, RESULTS_TABLE_GRID_AREA_ID } from "../../src/apps/tui/dataview/ResultsTable"
 import {
   FocusProvider,
@@ -9,7 +11,6 @@ import {
   useFocusTree,
 } from "../../src/apps/tui/focus/context"
 import { App, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID } from "../../src/apps/tui/index"
-import { AddConnectionPane, ADD_CONNECTION_AREA_ID } from "../../src/apps/tui/connection/AddConnectionPane"
 import { PostgresAdapter } from "../../src/adapters/postgres/PgAdapter"
 import { onOpenNode, onSelectNode, SIDEBAR_AREA_ID, Sidebar } from "../../src/apps/tui/sidebar/Sidebar"
 import { SIDEBAR_TREE_AREA_ID } from "../../src/apps/tui/sidebar/TreeView"

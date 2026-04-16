@@ -1,13 +1,14 @@
-import type { KeyEvent } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
+import type { KeyEvent } from "@opentui/core"
 import { act, useEffect } from "react"
-import { Focusable } from "../../src/apps/tui/focus/Focusable"
+
 import { useFocusNavigationState, useFocusTree } from "../../src/apps/tui/focus/context"
+import { Focusable } from "../../src/apps/tui/focus/Focusable"
 import { Shortcut } from "../../src/apps/tui/Shortcut"
-import { normalizeShortcutKeyName } from "../../src/apps/tui/ui/shortcutKeys"
 import { type AliasedByNavKey, translateNavKey } from "../../src/apps/tui/ui/keybind/navKeys"
 import { labelizeShortcutInput, parseKeys, stepMatches } from "../../src/apps/tui/ui/keybind/shortcutSyntax"
 import { useNavKeys } from "../../src/apps/tui/ui/keybind/useNavKeys"
+import { normalizeShortcutKeyName } from "../../src/apps/tui/ui/shortcutKeys"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { ConnectionSpec } from "../../src/spi/Adapter"
+
 import { createId } from "../../src/domain/Id"
 import { EpochMillis } from "../../src/domain/Log"
 import { OrderString } from "../../src/domain/Order"
@@ -15,6 +15,7 @@ import {
   mustBeSingle,
   unreachable,
 } from "../../src/domain/unreachable"
+import type { ConnectionSpec } from "../../src/spi/Adapter"
 
 type TestRow = BaseRow & {
   count?: number
