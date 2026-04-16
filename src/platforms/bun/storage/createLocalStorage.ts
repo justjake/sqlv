@@ -1,15 +1,15 @@
 import type { Connection } from "#domain/Connection"
 import { EpochMillis, type Session } from "#domain/Log"
 import { OrderString } from "#domain/Order"
+
 import type { ProtocolConfig } from "#spi/Adapter"
 
-import type { TursoConfig } from "#adapters/sqlite/turso/TursoAdapter"
-import { DEFAULT_SQLVISOR_APP } from "#platforms/bun/paths"
+import { DEFAULT_SQLVISOR_APP } from "../paths"
 
 import {
   bootLocalStorage,
   createStorageSession,
-  defaultSecretStore,
+  defaultSecretStore as defaultSecretStoreImpl,
   defaultStoragePath,
   getExistingLocalStorageEncryptionKey as getExistingStorageEncryptionKey,
   getOrCreateLocalStorageEncryptionKey as getOrCreateStorageEncryptionKey,
@@ -18,7 +18,7 @@ import {
 import { Storage } from "./Storage"
 
 export { type SecretRef } from "./boot"
-export { defaultSecretStore }
+export const defaultSecretStore = defaultSecretStoreImpl
 
 const APP_NAME = DEFAULT_SQLVISOR_APP
 
@@ -43,7 +43,7 @@ export async function createLocalStorageConnection(
     dbPath?: string
     secrets?: SecretStore
   } = {},
-): Promise<Connection<TursoConfig>> {
+): Promise<Connection<ProtocolConfig<"turso">>> {
   const app = args.app ?? APP_NAME
   const secrets = args.secrets ?? defaultSecretStore()
   const persistPath = args.dbPath ?? defaultStorageLocation(app)
@@ -58,7 +58,7 @@ export async function createLocalStorageConnection(
   return {
     id: "__persist__",
     type: "connection",
-    name: APP_NAME,
+    name: app,
     createdAt: EpochMillis.now(),
     order: OrderString(""),
     protocol: "turso",
@@ -66,14 +66,16 @@ export async function createLocalStorageConnection(
   }
 }
 
-export async function createLocalStorage(args: {
-  allowDestructiveMigration?: boolean
-  app?: string
-  dbPath?: string
-  encryptionKey?: string
-  secrets?: SecretStore
-  session?: Session
-} = {}): Promise<LocalStorage> {
+export async function createLocalStorage(
+  args: {
+    allowDestructiveMigration?: boolean
+    app?: string
+    dbPath?: string
+    encryptionKey?: string
+    secrets?: SecretStore
+    session?: Session
+  } = {},
+): Promise<LocalStorage> {
   const app = args.app ?? APP_NAME
   const boot = await bootLocalStorage({
     allowDestructiveMigration: args.allowDestructiveMigration,

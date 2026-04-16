@@ -1,6 +1,6 @@
 import { index, sqliteTable, text } from "drizzle-orm/sqlite-core"
 
-import type { Protocol } from "#spi/Adapter"
+import type { Protocol } from "#domain/Protocol"
 
 import { epochMillis } from "./shared"
 

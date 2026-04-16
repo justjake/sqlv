@@ -2,14 +2,7 @@ import { Client, Query, type ClientConfig, type QueryResult } from "pg"
 import { parseIntoClientConfig } from "pg-connection-string"
 
 import { aborter } from "#domain/defer"
-import {
-  type Adapter,
-  type ConnectionFormValues,
-  type ConnectionSpec,
-  type ConnectionSuggestion,
-} from "#spi/Adapter"
-import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "#spi/Executor"
-import { findLocalPostgresPorts, probePostgresPort } from "./localDiscovery"
+import type { ExplainInput, ExplainResult } from "#domain/Explain"
 import type {
   DatabaseInfo,
   MaterializedViewInfo,
@@ -20,9 +13,17 @@ import type {
   ViewInfo,
 } from "#domain/objects"
 import { SQL, sql, unsafeRawSQL, type SQLValue } from "#domain/SQL"
-import type { ExplainInput, ExplainResult } from "#domain/Explain"
 
+import {
+  type Adapter,
+  type ConnectionFormValues,
+  type ConnectionSpec,
+  type ConnectionSuggestion,
+} from "#spi/Adapter"
+import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "#spi/Executor"
 import type { QueryRunner } from "#spi/QueryRunner"
+
+import { findLocalPostgresPorts, probePostgresPort } from "./localDiscovery"
 
 export type PostgresArg = string | number | boolean | bigint | Uint8Array | Date | null
 export type PostgresSQL<Row> = SQL<Row>
@@ -57,7 +58,7 @@ export const postgresqlProtocolResolver = {
   },
 }
 
-declare module "../../spi/Adapter" {
+declare module "#domain/Protocol" {
   interface ProtocolToAdapter {
     postgresql: PostgresAdapter
   }

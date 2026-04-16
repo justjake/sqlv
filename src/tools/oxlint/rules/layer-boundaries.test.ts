@@ -99,10 +99,7 @@ describe("layer-boundaries", () => {
     })
 
     test("composition root itself may import any layer (including adapters)", () => {
-      const reports = run(
-        `${ROOT}/src/platforms/bun/createBunSqlVisor.ts`,
-        "#adapters/sqlite/bun/BunSqliteAdapter",
-      )
+      const reports = run(`${ROOT}/src/platforms/bun/createBunSqlVisor.ts`, "#adapters/sqlite/bun/BunSqliteAdapter")
       expect(reports).toEqual([])
     })
 

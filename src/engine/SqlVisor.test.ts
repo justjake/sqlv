@@ -651,7 +651,7 @@ where
       subject: createEditorAnalysisSubject(createEditorBuffer("select 1", "select 1".length, 1), "conn-1"),
     })
 
-    const logEntries = await storage.storage.log.query(() => unsafeRawSQL<LogEntry>("select"))
+    const logEntries = await storage.storage.log.list()
     expect(logEntries).toContainEqual(
       expect.objectContaining({
         connectionId: "conn-1",

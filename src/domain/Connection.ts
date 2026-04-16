@@ -1,7 +1,6 @@
-import type { Protocol } from "#spi/Adapter"
-
 import type { EpochMillis } from "./Log"
 import type { OrderString } from "./Order"
+import type { Protocol } from "./Protocol"
 
 export type Connection<Config> = {
   type: "connection"

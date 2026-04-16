@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
+import { makeConnection, makeSettingsRow, createTempDir, removePath } from "../../../testSupport"
+
 import {
   createLocalStorage,
   createLocalStorageConnection,
@@ -10,7 +12,6 @@ import {
   getOrCreateLocalStorageEncryptionKey,
   type SecretRef,
 } from "./createLocalStorage"
-import { makeConnection, makeSettingsRow, createTempDir, removePath } from "../../../testSupport"
 
 describe("local storage helpers", () => {
   test("creates sessions and derives a storage path", async () => {

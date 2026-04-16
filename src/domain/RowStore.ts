@@ -33,14 +33,20 @@ export type MutableRowStore<Row extends BaseRow> = {
   delete(row: RowRef<Row>): Promise<void>
 }
 
+type RowHandleStore<Row extends BaseRow> = {
+  get(ref: RowRef<Row>): Promise<BaseRow | undefined>
+  upsert(row: Row): Promise<BaseRow>
+  update(ref: RowRef<Row>, patch: Partial<Row>): Promise<void>
+}
+
 export class RowHandle<T extends BaseRow> {
   constructor(
-    public readonly store: MutableRowStore<T>,
+    public readonly store: RowHandleStore<T>,
     public readonly ref: RowRef<T>,
   ) {}
 
   get(): Promise<T | undefined> {
-    return this.store.get(this.ref)
+    return this.store.get(this.ref) as Promise<T | undefined>
   }
 
   set(row: Omit<T, "id" | "type">): Promise<T> {
@@ -48,7 +54,7 @@ export class RowHandle<T extends BaseRow> {
       ...row,
       updatedAt: EpochMillis.now(),
       ...this.ref,
-    } as T)
+    } as T) as Promise<T>
   }
 
   update(patch: Partial<T>): Promise<void> {

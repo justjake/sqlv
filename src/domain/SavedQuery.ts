@@ -1,6 +1,5 @@
-import type { Protocol } from "#spi/Adapter"
-
 import type { EpochMillis } from "./EpochMillis"
+import type { Protocol } from "./Protocol"
 import type { MutableRowStore } from "./RowStore"
 
 export type SavedQuery = {

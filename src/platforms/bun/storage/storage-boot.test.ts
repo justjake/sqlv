@@ -3,13 +3,10 @@ import { join } from "node:path"
 
 import { sql } from "drizzle-orm"
 
-import {
-  bootLocalStorage,
-  defaultStoragePath,
-  getOrCreateLocalStorageEncryptionKey,
-} from "./boot"
-import { sessions } from "./schema/sessions"
 import { createTempDir, removePath } from "../../../testSupport"
+
+import { bootLocalStorage, defaultStoragePath, getOrCreateLocalStorageEncryptionKey } from "./boot"
+import { sessions } from "./schema/sessions"
 
 async function listTableNames(db: Awaited<ReturnType<typeof bootLocalStorage>>["db"]): Promise<string[]> {
   const rows = await db.all<{ name: string }>(

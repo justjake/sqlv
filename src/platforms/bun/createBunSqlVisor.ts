@@ -1,11 +1,13 @@
 import type { QueryClient } from "@tanstack/query-core"
 
+import { AdapterRegistry, type AnyAdapter } from "#spi/Adapter"
+import type { SuggestionProvider } from "#spi/SuggestionProvider"
+
 import { SqlVisor } from "#engine/SqlVisor"
+
 import { PostgresAdapter } from "#adapters/postgres/PgAdapter"
 import { BunSqlAdapter } from "#adapters/sqlite/bun/BunSqliteAdapter"
 import { TursoAdapter } from "#adapters/sqlite/turso/TursoAdapter"
-import { AdapterRegistry, type AnyAdapter } from "#spi/Adapter"
-import type { SuggestionProvider } from "#spi/SuggestionProvider"
 
 import { defaultStoragePath } from "./paths"
 import {

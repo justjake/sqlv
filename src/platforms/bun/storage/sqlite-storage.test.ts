@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { BunSqlAdapter } from "../../../adapters/sqlite/bun/BunSqliteAdapter"
+import { ident, unsafeRawSQL } from "#domain/SQL"
+
+import { createNoopLogStore } from "#engine/runtime/createNoopLogStore"
+import { QueryRunnerImpl } from "#engine/runtime/QueryRunnerImpl"
+
+import { BunSqlAdapter } from "#adapters/sqlite/bun/BunSqliteAdapter"
 import {
   IterateSqliteSchema,
   PragmaDatabaseList,
@@ -11,14 +16,20 @@ import {
   parseSqliteSchemaRow,
   sqlite,
   type SqliteSchemaRow,
-} from "../../../adapters/sqlite/sqlite"
-import { createNoopLogStore } from "../../../engine/runtime/createNoopLogStore"
-import { QueryRunnerImpl } from "../../../engine/runtime/QueryRunnerImpl"
+} from "#adapters/sqlite/sqlite"
+
+import {
+  makeAppStateRow,
+  makeConnection,
+  makeSavedQuery,
+  makeSettingsRow,
+  createTempDir,
+  removePath,
+} from "../../../testSupport"
+
+import { bootLocalStorage } from "./boot"
 import { createSession } from "./createLocalStorage"
 import { Storage } from "./Storage"
-import { bootLocalStorage } from "./boot"
-import { ident, unsafeRawSQL } from "../../../domain/SQL"
-import { makeAppStateRow, makeConnection, makeSavedQuery, makeSettingsRow, createTempDir, removePath } from "../../../testSupport"
 
 describe("sqlite-backed storage", () => {
   test("parses sqlite metadata rows", () => {

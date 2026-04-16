@@ -1,25 +1,23 @@
-import { stat } from "node:fs/promises"
-import { mkdir } from "node:fs/promises"
+import { mkdir, stat } from "node:fs/promises"
 import { dirname } from "node:path"
+
 import * as turso from "@tursodatabase/database"
-import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "#spi/Executor"
-import {
-  defaultStorageLocation,
-  getExistingLocalStorageEncryptionKey,
-} from "#platforms/bun/storage/createLocalStorage"
-import { findLocalSqliteDatabaseFiles, localDatabaseSuggestionName } from "../localDiscovery"
+
 import { aborter } from "#domain/defer"
 import type { ExplainInput, ExplainResult } from "#domain/Explain"
 import type { ObjectInfo } from "#domain/objects"
 import { ident, type SQL } from "#domain/SQL"
+
 import {
   type Adapter,
   type ConnectionFormValues,
   type ConnectionSpec,
   type ConnectionSuggestion,
 } from "#spi/Adapter"
+import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "#spi/Executor"
 import type { QueryRunner } from "#spi/QueryRunner"
 
+import { findLocalSqliteDatabaseFiles, localDatabaseSuggestionName } from "../localDiscovery"
 import type { SqliteArg } from "../sqlite"
 import {
   createSqliteIndexOriginResolver,
@@ -34,7 +32,7 @@ type connectArgs = Parameters<typeof turso.connect>
 type DatabaseOpts = NonNullable<connectArgs[1]>
 type NativeTursoEncryptionOpts = NonNullable<DatabaseOpts["encryption"]>
 
-declare module "../../../spi/Adapter" {
+declare module "#domain/Protocol" {
   interface ProtocolToAdapter {
     turso: TursoAdapter
   }
@@ -54,7 +52,7 @@ export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatur
   readonly treeSitterGrammar = "sql"
   readonly sqlFormatterLanguage = "sqlite"
   #searchDirectory: string
-  #systemPath: string
+  #systemPath?: string
   #loadSystemKey: () => Promise<string | undefined>
 
   constructor(
@@ -65,8 +63,8 @@ export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatur
     } = {},
   ) {
     this.#searchDirectory = args.searchDirectory ?? process.cwd()
-    this.#systemPath = args.systemPath ?? defaultStorageLocation()
-    this.#loadSystemKey = args.loadSystemKey ?? (() => getExistingLocalStorageEncryptionKey())
+    this.#systemPath = args.systemPath
+    this.#loadSystemKey = args.loadSystemKey ?? (async () => undefined)
   }
 
   describeConfig(config: TursoConfig): string {
@@ -196,6 +194,9 @@ export class TursoAdapter implements Adapter<TursoConfig, SqliteArg, TursoFeatur
   }
 
   async #findSystemConnection(): Promise<ConnectionSuggestion<TursoConfig> | undefined> {
+    if (!this.#systemPath) {
+      return undefined
+    }
     if (!(await pathExists(this.#systemPath))) {
       return undefined
     }

@@ -1,5 +1,6 @@
 import type { ExplainInput, ExplainResult } from "#domain/Explain"
 import type { ObjectInfo } from "#domain/objects"
+import type { Protocol, ProtocolToAdapter } from "#domain/Protocol"
 import type { Identifier, SQL } from "#domain/SQL"
 
 import type { ExecuteResult, Executor } from "./Executor"
@@ -84,11 +85,10 @@ export type Adapter<Config = {}, Arg = {}, F extends Record<string, Feature<unkn
 
 export type AdapterConfig<T> = T extends Adapter<infer Config, any, any> ? Config : never
 
-export interface ProtocolToAdapter {}
-export type Protocol = keyof ProtocolToAdapter
 export type ProtocolConfig<P extends Protocol> = AdapterConfig<ProtocolToAdapter[P]>
 export type RegisteredAdapter<P extends Protocol = Protocol> = Adapter<ProtocolConfig<P>, any, any> & { protocol: P }
 export type AnyAdapter = RegisteredAdapter
+export type { Protocol, ProtocolToAdapter }
 
 export class AdapterRegistry {
   #adapterMap: Partial<Record<Protocol, AnyAdapter>> = {}
