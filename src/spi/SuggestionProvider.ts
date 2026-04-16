@@ -1,7 +1,7 @@
-import type { Connection } from "../model/Connection"
-import type { EditorBuffer } from "../model/editor/buffer"
-import type { EditorCompletionContext, SuggestionItem } from "../model/editor/completion"
-import type { ObjectInfo } from "../model/objects"
+import type { Connection } from "../domain/Connection"
+import type { EditorBuffer } from "../domain/editor/buffer"
+import type { EditorCompletionContext, SuggestionItem } from "../domain/editor/completion"
+import type { ObjectInfo } from "../domain/objects"
 
 export type SuggestionContext = {
   listConnections(): Connection<any>[]

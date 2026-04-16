@@ -1,6 +1,6 @@
-import type { ExplainInput, ExplainResult } from "../model/Explain"
-import type { ObjectInfo } from "../model/objects"
-import type { Identifier, SQL } from "../model/SQL"
+import type { ExplainInput, ExplainResult } from "../domain/Explain"
+import type { ObjectInfo } from "../domain/objects"
+import type { Identifier, SQL } from "../domain/SQL"
 import type { QueryRunner } from "./QueryRunner"
 import type { ExecuteResult, Executor } from "./Executor"
 

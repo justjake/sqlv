@@ -1,5 +1,9 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "ignorePatterns": [".agents/**"],
-  "plugins": ["typescript", "unicorn", "oxc", "react"]
+  "plugins": ["typescript", "unicorn", "oxc", "react"],
+  "jsPlugins": ["./src/tools/oxlint/plugin.ts"],
+  "rules": {
+    "sqlv/layer-boundaries": "error"
+  }
 }

@@ -1,5 +1,5 @@
 import { jsonb_patch, sqlite as sql } from "../../../adapters/sqlite/sqlite"
-import { EpochMillis } from "../../../model/Log"
+import { EpochMillis } from "../../../domain/Log"
 import {
   rowDispatcher,
   type BaseRow,
@@ -11,9 +11,9 @@ import {
   type RowQuery,
   type RowUpdate,
   type RowUpsert,
-} from "../../../model/RowStore"
-import { Identifier, type SQL } from "../../../model/SQL"
-import { unreachable } from "../../../model/unreachable"
+} from "../../../domain/RowStore"
+import { Identifier, type SQL } from "../../../domain/SQL"
+import { unreachable } from "../../../domain/unreachable"
 import type { QueryRunner } from "../../../spi/QueryRunner"
 
 export function createRowStoreTableSql(table: Identifier) {

@@ -5,13 +5,13 @@ import {
   getDiagnosticLogicalLine,
   getVisibleEditorAnalysis,
   type EditorAnalysisState,
-} from "../../../model/editor/analysis"
-import { createEditorChange, type EditorChange } from "../../../model/editor/buffer"
-import { type EditorCompletionItemFocusInput, type SuggestionItem } from "../../../model/editor/completion"
-import { type EditorState } from "../../../model/editor/state"
-import { normalizeHighlightRange } from "../../../model/editor/text"
-import { selectVisibleSuggestionItems } from "../../../model/editor/suggestionMenu"
-import type { SavedQuery } from "../../../model/SavedQuery"
+} from "../../../domain/editor/analysis"
+import { createEditorChange, type EditorChange } from "../../../domain/editor/buffer"
+import { type EditorCompletionItemFocusInput, type SuggestionItem } from "../../../domain/editor/completion"
+import { type EditorState } from "../../../domain/editor/state"
+import { normalizeHighlightRange } from "../../../domain/editor/text"
+import { selectVisibleSuggestionItems } from "../../../domain/editor/suggestionMenu"
+import type { SavedQuery } from "../../../domain/SavedQuery"
 import { Focusable } from "../focus/Focusable"
 import { useIsFocused } from "../focus/context"
 import { Shortcut } from "../Shortcut"

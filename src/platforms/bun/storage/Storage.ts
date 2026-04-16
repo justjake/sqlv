@@ -1,11 +1,11 @@
-import type { AppStateStore } from "../../../model/AppState"
+import type { AppStateStore } from "../../../domain/AppState"
 import { createRowStoreTableSql, createSqliteRowStore } from "./sqliteRowStore"
-import type { Connection } from "../../../model/Connection"
-import type { LogEntry } from "../../../model/Log"
-import type { RowStore } from "../../../model/RowStore"
-import type { SavedQuery } from "../../../model/SavedQuery"
-import type { SettingsStore } from "../../../model/Settings"
-import { ident } from "../../../model/SQL"
+import type { Connection } from "../../../domain/Connection"
+import type { LogEntry } from "../../../domain/Log"
+import type { RowStore } from "../../../domain/RowStore"
+import type { SavedQuery } from "../../../domain/SavedQuery"
+import type { SettingsStore } from "../../../domain/Settings"
+import { ident } from "../../../domain/SQL"
 import type { QueryRunner } from "../../../spi/QueryRunner"
 
 const CONNECTION_TABLE = ident("connection")

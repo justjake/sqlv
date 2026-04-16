@@ -8,8 +8,8 @@
     "fetch:treesitter-grammars": "bun scripts/fetch-treesitter-grammars.ts",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint --fix .",
+    "lint": "bun ./node_modules/oxlint/bin/oxlint .",
+    "lint:fix": "bun ./node_modules/oxlint/bin/oxlint --fix .",
     "test": "bun test",
     "test:coverage": "bun test --coverage"
   },

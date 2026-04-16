@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { createSession } from "../../src/platforms/bun/storage/createLocalStorage"
 import { type Executor } from "../../src/spi/Executor"
 import { QueryRunnerImpl } from "../../src/engine/runtime/QueryRunnerImpl"
-import { EpochMillis, type FlowLogEntry, type LogEntry, type QueryExecution } from "../../src/model/Log"
-import { rowDispatcher } from "../../src/model/RowStore"
-import { Paginated, sql, unsafeRawSQL } from "../../src/model/SQL"
+import { EpochMillis, type FlowLogEntry, type LogEntry, type QueryExecution } from "../../src/domain/Log"
+import { rowDispatcher } from "../../src/domain/RowStore"
+import { Paginated, sql, unsafeRawSQL } from "../../src/domain/SQL"
 import { makeConnection } from "../support"
 
 function createMemoryLogStore() {

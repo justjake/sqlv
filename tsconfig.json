@@ -26,6 +26,18 @@
     // Some stricter flags (disabled by default)
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "noPropertyAccessFromIndexSignature": false
+    "noPropertyAccessFromIndexSignature": false,
+
+    // Layer aliases — see MODULES.md and src/tools/oxlint/layers.ts.
+    // Enforced by the `sqlv/layer-boundaries` oxlint rule.
+    "paths": {
+      "#domain/*": ["./src/domain/*"],
+      "#spi/*": ["./src/spi/*"],
+      "#engine/*": ["./src/engine/*"],
+      "#platforms/*": ["./src/platforms/*"],
+      "#adapters/*": ["./src/adapters/*"],
+      "#api/*": ["./src/api/*"],
+      "#apps/*": ["./src/apps/*"]
+    }
   }
 }

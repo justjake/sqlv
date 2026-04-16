@@ -1,4 +1,4 @@
-import type { ObjectInfo, QueryableObjectInfo } from "../../../model/objects"
+import type { ObjectInfo, QueryableObjectInfo } from "../../../domain/objects"
 
 export type ObjectBrowserNode = {
   id: string

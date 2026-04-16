@@ -3,12 +3,12 @@ import {
   createEditorAnalysisSubject,
   getDiagnosticLogicalLine,
   getVisibleEditorAnalysis,
-} from "../../src/model/editor/analysis"
-import { createEditorBuffer } from "../../src/model/editor/buffer"
-import { offsetToLineColumn, normalizeHighlightRange, replaceTextRange } from "../../src/model/editor/text"
-import { selectVisibleSuggestionItems } from "../../src/model/editor/suggestionMenu"
+} from "../../src/domain/editor/analysis"
+import { createEditorBuffer } from "../../src/domain/editor/buffer"
+import { offsetToLineColumn, normalizeHighlightRange, replaceTextRange } from "../../src/domain/editor/text"
+import { selectVisibleSuggestionItems } from "../../src/domain/editor/suggestionMenu"
 
-describe("model/editor", () => {
+describe("domain/editor", () => {
   test("hides stale analysis results and incomplete-input-only diagnostics", () => {
     const previousBuffer = createEditorBuffer("select 1")
     const nextBuffer = createEditorBuffer("select 2", "select 2".length, 1)

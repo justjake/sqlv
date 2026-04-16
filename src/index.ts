@@ -96,7 +96,7 @@ export {
   type EditorAnalysisState,
   type EditorAnalysisStatus,
   type EditorAnalysisSubject,
-} from "./model/editor/analysis"
+} from "./domain/editor/analysis"
 export {
   applyEditorBufferPatch,
   clampCursorOffset,
@@ -107,7 +107,7 @@ export {
   type EditorChange,
   type EditorChangeKind,
   type EditorTextEdit,
-} from "./model/editor/buffer"
+} from "./domain/editor/buffer"
 export {
   closedEditorCompletionState,
   decideEditorCompletion,
@@ -123,20 +123,20 @@ export {
   type EditorCompletionState,
   type EditorCompletionStatus,
   type SuggestionItem,
-} from "./model/editor/completion"
-export { createEmptyEditorState, type EditorState } from "./model/editor/state"
-export { selectVisibleSuggestionItems } from "./model/editor/suggestionMenu"
-export { normalizeHighlightRange, offsetToLineColumn, replaceTextRange, type EditorRange } from "./model/editor/text"
+} from "./domain/editor/completion"
+export { createEmptyEditorState, type EditorState } from "./domain/editor/state"
+export { selectVisibleSuggestionItems } from "./domain/editor/suggestionMenu"
+export { normalizeHighlightRange, offsetToLineColumn, replaceTextRange, type EditorRange } from "./domain/editor/text"
 export { KnownObjectsSuggestionProvider } from "./engine/suggestions/KnownObjectsSuggestionProvider"
 export { type SuggestionProvider, type SuggestionRequest } from "./spi/SuggestionProvider"
-export { type SavedQuery } from "./model/SavedQuery"
+export { type SavedQuery } from "./domain/SavedQuery"
 export {
   defaultAppState,
   type AppStateId,
   type AppStateRow,
   type AppStateSnapshot,
   type AppStateStore,
-} from "./model/AppState"
+} from "./domain/AppState"
 export {
   createSettingsRow,
   defaultSettingsState,
@@ -146,20 +146,20 @@ export {
   type SettingsSchema,
   type SettingsState,
   type SettingsStore,
-} from "./model/Settings"
-export { type QueryExecution, type QueryExecutionStatus, type QueryFlow, type QueryInitiator } from "./model/Log"
+} from "./domain/Settings"
+export { type QueryExecution, type QueryExecutionStatus, type QueryFlow, type QueryInitiator } from "./domain/Log"
 export {
   type ExplainColumn,
   type ExplainDiagnostic,
   type ExplainDiagnosticSeverity,
   type ExplainInput,
   type ExplainResult,
-} from "./model/Explain"
+} from "./domain/Explain"
 export {
   pendingQueryState,
   queryStateOrPending,
   type FetchStatus,
   type QueryState,
   type QueryStatus,
-} from "./model/QueryState"
-export { SQL, unsafeRawSQL as rawSQL, sql, type SQLSourceOptions, type SQLValue } from "./model/SQL"
+} from "./domain/QueryState"
+export { SQL, unsafeRawSQL as rawSQL, sql, type SQLSourceOptions, type SQLValue } from "./domain/SQL"

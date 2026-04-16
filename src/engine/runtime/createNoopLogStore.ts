@@ -1,6 +1,6 @@
-import type { LogEntry } from "../../model/Log"
-import { rowDispatcher, type RowAction } from "../../model/RowStore"
-import { unreachable } from "../../model/unreachable"
+import type { LogEntry } from "../../domain/Log"
+import { rowDispatcher, type RowAction } from "../../domain/RowStore"
+import { unreachable } from "../../domain/unreachable"
 
 export function createNoopLogStore() {
   return rowDispatcher<LogEntry>(async <T extends LogEntry>(action: RowAction<T>): Promise<T | T[] | undefined> => {

@@ -1,6 +1,6 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
-import type { Json } from "../../../../model/Json"
-import type { QueryExecutionStatus, QueryInitiator } from "../../../../model/Log"
+import type { Json } from "../../../../domain/Json"
+import type { QueryExecutionStatus, QueryInitiator } from "../../../../domain/Log"
 import type { Protocol } from "../../../../spi/Adapter"
 import { epochMillis, jsonText } from "./shared"
 

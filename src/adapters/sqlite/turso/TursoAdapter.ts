@@ -14,10 +14,10 @@ import {
   getExistingLocalStorageEncryptionKey,
 } from "../../../platforms/bun/storage/createLocalStorage"
 import { findLocalSqliteDatabaseFiles, localDatabaseSuggestionName } from "../localDiscovery"
-import { aborter } from "../../../model/defer"
-import type { ExplainInput, ExplainResult } from "../../../model/Explain"
-import type { ObjectInfo } from "../../../model/objects"
-import { ident, type SQL } from "../../../model/SQL"
+import { aborter } from "../../../domain/defer"
+import type { ExplainInput, ExplainResult } from "../../../domain/Explain"
+import type { ObjectInfo } from "../../../domain/objects"
+import { ident, type SQL } from "../../../domain/SQL"
 import type { QueryRunner } from "../../../spi/QueryRunner"
 import type { SqliteArg } from "../sqlite"
 import {

@@ -8,7 +8,7 @@ import { createNoopLogStore } from "../../src/engine/runtime/createNoopLogStore"
 import { AdapterRegistry } from "../../src/spi/Adapter"
 import { type ExecuteRequest, ExecuteError } from "../../src/spi/Executor"
 import { QueryRunnerImpl } from "../../src/engine/runtime/QueryRunnerImpl"
-import { sql, unsafeRawSQL } from "../../src/model/SQL"
+import { sql, unsafeRawSQL } from "../../src/domain/SQL"
 import { createTempDir, makeConnection, removePath } from "../support"
 
 describe("database adapters", () => {

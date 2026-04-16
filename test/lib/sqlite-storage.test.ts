@@ -19,11 +19,11 @@ import {
   createSqliteRowStore,
   selectStoredRows,
 } from "../../src/platforms/bun/storage/sqliteRowStore"
-import type { Connection } from "../../src/model/Connection"
-import { EpochMillis, type LogEntry } from "../../src/model/Log"
-import { OrderString } from "../../src/model/Order"
-import type { BaseRow } from "../../src/model/RowStore"
-import { ident, unsafeRawSQL } from "../../src/model/SQL"
+import type { Connection } from "../../src/domain/Connection"
+import { EpochMillis, type LogEntry } from "../../src/domain/Log"
+import { OrderString } from "../../src/domain/Order"
+import type { BaseRow } from "../../src/domain/RowStore"
+import { ident, unsafeRawSQL } from "../../src/domain/SQL"
 import { createBunQueryRunner, makeConnection } from "../support"
 
 type StoredRow = BaseRow & {

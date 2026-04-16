@@ -17,7 +17,7 @@ The repo now mostly matches this layout. When code and this document disagree, t
 ```text
 src/
   api/
-  model/
+  domain/
   spi/
   engine/
   platforms/
@@ -38,9 +38,9 @@ Examples:
 
 This is what embedders call.
 
-### `model/`
+### `domain/`
 
-Shared domain model and pure helpers.
+Shared domain layer and pure helpers.
 
 Examples:
 
@@ -51,6 +51,8 @@ Examples:
 - `SQL`
 
 This layer contains nouns, not runtime orchestration.
+
+If layer path aliases are introduced, prefer `#domain/*`.
 
 ### `spi/`
 
@@ -83,7 +85,7 @@ Examples:
 
 The engine should depend only on:
 
-- `model/`
+- `domain/`
 - `spi/`
 - `engine/deps`
 
@@ -122,7 +124,7 @@ Examples:
 
 Adapters may depend on:
 
-- `model/`
+- `domain/`
 - `spi/`
 - sibling files within their adapter family
 - external driver libraries
@@ -145,7 +147,7 @@ Examples:
 Apps may depend on:
 
 - `api/`
-- `model/`
+- `domain/`
 - shared app framework modules
 - renderer/framework libraries
 
@@ -163,7 +165,7 @@ src/
     AdapterRegistry.ts
     init.ts
 
-  model/
+  domain/
     sql/
     connection/
     query/
@@ -252,24 +254,24 @@ src/
 Allowed dependency flow:
 
 ```text
-model -> nothing
+domain -> nothing
 
-spi -> model
+spi -> domain
 
-engine/deps -> model + spi
-engine/workspace -> model
-engine/services -> model + spi + engine/deps
-engine/composition -> engine/* + model + spi
+engine/deps -> domain + spi
+engine/workspace -> domain
+engine/services -> domain + spi + engine/deps
+engine/composition -> engine/* + domain + spi
 
-platforms/* -> model + spi + engine/deps + external libs
+platforms/* -> domain + spi + engine/deps + external libs
 
-adapters/* -> model + spi + sibling adapter-family files + external libs
+adapters/* -> domain + spi + sibling adapter-family files + external libs
 
-api/* -> model + spi + engine/*
+api/* -> domain + spi + engine/*
 platform creation entrypoints -> api + engine + platforms + adapters
 
-apps/framework/* -> api + model + external libs
-apps/* -> api + model + apps/framework + external libs
+apps/framework/* -> api + domain + external libs
+apps/* -> api + domain + apps/framework + external libs
 ```
 
 Forbidden sideways dependencies:
@@ -428,7 +430,7 @@ platforms/
 Important rule:
 
 - Drizzle schema is storage schema
-- `model/` types are domain types
+- `domain/` types are domain types
 - repository implementations map between them
 
 Do not use Drizzle table types as domain types.
@@ -438,7 +440,7 @@ If multiple SQL-backed platforms eventually share the exact same schema, that sc
 ## Naming Summary
 
 - `api/`: public host API
-- `model/`: shared domain model
+- `domain/`: shared domain layer
 - `spi/`: public extension contracts
 - `engine/`: private platform-neutral orchestration
 - `platforms/`: private concrete runtime/platform implementations
@@ -456,7 +458,7 @@ A module is in the wrong layer if it mixes concerns like:
 
 When in doubt:
 
-- keep domain concepts in `model/`
+- keep domain concepts in `domain/`
 - keep host-facing convenience in `api/`
 - keep adapter contracts in `spi/`
 - keep behavioral logic in `engine/`

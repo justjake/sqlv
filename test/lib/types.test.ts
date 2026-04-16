@@ -1,20 +1,20 @@
 import { describe, expect, test } from "bun:test"
 import type { ConnectionSpec } from "../../src/spi/Adapter"
-import { createId } from "../../src/model/Id"
-import { EpochMillis } from "../../src/model/Log"
-import { OrderString } from "../../src/model/Order"
-import { pendingQueryState, queryStateOrPending } from "../../src/model/QueryState"
-import { Err, Ok, Result, UnwrapError } from "../../src/model/Result"
-import { RowHandle, rowDispatcher, type BaseRow } from "../../src/model/RowStore"
-import { Argument, Identifier, Paginated, ident, namedArg, sql, unsafeRawSQL } from "../../src/model/SQL"
-import { aborter, asyncDefer, cleanup, defer } from "../../src/model/defer"
+import { createId } from "../../src/domain/Id"
+import { EpochMillis } from "../../src/domain/Log"
+import { OrderString } from "../../src/domain/Order"
+import { pendingQueryState, queryStateOrPending } from "../../src/domain/QueryState"
+import { Err, Ok, Result, UnwrapError } from "../../src/domain/Result"
+import { RowHandle, rowDispatcher, type BaseRow } from "../../src/domain/RowStore"
+import { Argument, Identifier, Paginated, ident, namedArg, sql, unsafeRawSQL } from "../../src/domain/SQL"
+import { aborter, asyncDefer, cleanup, defer } from "../../src/domain/defer"
 import {
   mustBeArray,
   mustBeDefined,
   mustBeOptionalSingle,
   mustBeSingle,
   unreachable,
-} from "../../src/model/unreachable"
+} from "../../src/domain/unreachable"
 
 type TestRow = BaseRow & {
   count?: number

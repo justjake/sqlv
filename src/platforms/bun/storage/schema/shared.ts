@@ -1,6 +1,6 @@
 import { integer, text } from "drizzle-orm/sqlite-core"
-import type { EpochMillis } from "../../../../model/EpochMillis"
-import type { Json } from "../../../../model/Json"
+import type { EpochMillis } from "../../../../domain/EpochMillis"
+import type { Json } from "../../../../domain/Json"
 
 export function epochMillis(name: string) {
   return integer(name, { mode: "number" }).$type<EpochMillis>()

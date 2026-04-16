@@ -8,7 +8,7 @@ import {
 } from "../../spi/Adapter"
 import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "../../spi/Executor"
 import { findLocalPostgresPorts, probePostgresPort } from "./localDiscovery"
-import { aborter } from "../../model/defer"
+import { aborter } from "../../domain/defer"
 import type {
   DatabaseInfo,
   MaterializedViewInfo,
@@ -17,9 +17,9 @@ import type {
   SchemaInfo,
   TableInfo,
   ViewInfo,
-} from "../../model/objects"
-import { SQL, sql, unsafeRawSQL, type SQLValue } from "../../model/SQL"
-import type { ExplainInput, ExplainResult } from "../../model/Explain"
+} from "../../domain/objects"
+import { SQL, sql, unsafeRawSQL, type SQLValue } from "../../domain/SQL"
+import type { ExplainInput, ExplainResult } from "../../domain/Explain"
 import type { QueryRunner } from "../../spi/QueryRunner"
 
 export type PostgresArg = string | number | boolean | bigint | Uint8Array | Date | null

@@ -10,8 +10,8 @@ import {
   createEditorAnalysisSubject,
   idleEditorAnalysisState,
   type EditorAnalysisState,
-} from "../src/model/editor/analysis"
-import { applyEditorBufferPatch, type EditorBufferPatch, type EditorChange } from "../src/model/editor/buffer"
+} from "../src/domain/editor/analysis"
+import { applyEditorBufferPatch, type EditorBufferPatch, type EditorChange } from "../src/domain/editor/buffer"
 import {
   closedEditorCompletionState,
   decideEditorCompletion,
@@ -19,11 +19,11 @@ import {
   type EditorCompletionItemFocusInput,
   type EditorCompletionItemRef,
   type EditorCompletionState,
-} from "../src/model/editor/completion"
-import { createEmptyEditorState, type EditorState } from "../src/model/editor/state"
-import { replaceTextRange } from "../src/model/editor/text"
+} from "../src/domain/editor/completion"
+import { createEmptyEditorState, type EditorState } from "../src/domain/editor/state"
+import { replaceTextRange } from "../src/domain/editor/text"
 import { AdapterRegistry, type Protocol } from "../src/spi/Adapter"
-import { findLatestSavedQueryExecution } from "../src/model/queryExecution"
+import { findLatestSavedQueryExecution } from "../src/domain/queryExecution"
 import { QueryRunnerImpl } from "../src/engine/runtime/QueryRunnerImpl"
 import {
   type AddConnectionInput,
@@ -35,22 +35,22 @@ import {
   type SqlVisor,
   type SqlVisorState,
 } from "../src/api/SqlVisor"
-import { defaultAppState, type AppStateRow, type AppStateSnapshot } from "../src/model/AppState"
-import type { ExplainResult } from "../src/model/Explain"
-import type { JsonObject } from "../src/model/Json"
-import type { Connection } from "../src/model/Connection"
-import { EpochMillis, type QueryExecution, type QueryInitiator } from "../src/model/Log"
-import type { ObjectInfo } from "../src/model/objects"
-import { OrderString } from "../src/model/Order"
-import { pendingQueryState, type QueryState } from "../src/model/QueryState"
-import type { SavedQuery } from "../src/model/SavedQuery"
+import { defaultAppState, type AppStateRow, type AppStateSnapshot } from "../src/domain/AppState"
+import type { ExplainResult } from "../src/domain/Explain"
+import type { JsonObject } from "../src/domain/Json"
+import type { Connection } from "../src/domain/Connection"
+import { EpochMillis, type QueryExecution, type QueryInitiator } from "../src/domain/Log"
+import type { ObjectInfo } from "../src/domain/objects"
+import { OrderString } from "../src/domain/Order"
+import { pendingQueryState, type QueryState } from "../src/domain/QueryState"
+import type { SavedQuery } from "../src/domain/SavedQuery"
 import {
   defaultSettingsState,
   type SettingsId,
   type SettingsRow,
   type SettingsSchema,
   type SettingsState,
-} from "../src/model/Settings"
+} from "../src/domain/Settings"
 
 export async function createTempDir(prefix = "sqlv-test-"): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix))

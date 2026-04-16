@@ -3,7 +3,7 @@ import { BunSqlAdapter } from "../../src/adapters/sqlite/bun/BunSqliteAdapter"
 import { createSession } from "../../src/platforms/bun/storage/createLocalStorage"
 import { createNoopLogStore } from "../../src/engine/runtime/createNoopLogStore"
 import { QueryRunnerImpl } from "../../src/engine/runtime/QueryRunnerImpl"
-import { unsafeRawSQL } from "../../src/model/SQL"
+import { unsafeRawSQL } from "../../src/domain/SQL"
 import { loadSqliteExampleErrorCases } from "../sqlite/exampleErrors"
 import { makeConnection } from "../support"
 

@@ -49,7 +49,7 @@ The engine is intended to be the public API boundary. The TUI should consume eng
 ### TUI
 
 - The TUI is a host for `SqlVisor`, not a second state model.
-- Prefer pushing domain behavior into `src/engine`, `src/model`, and `src/spi`, and keep `src/apps/tui` focused on rendering, input binding, and presentation-specific concerns.
+- Prefer pushing domain behavior into `src/engine`, `src/domain`, and `src/spi`, and keep `src/apps/tui` focused on rendering, input binding, and presentation-specific concerns.
 
 ## Repo Conventions
 
@@ -71,7 +71,7 @@ Do not add compatibility layers unless the user explicitly asks for one.
 The intended direction is an easy public engine interface around the existing complexity. Keep that in mind when making changes:
 
 - prefer domain concepts over transport/mechanism concepts
-- avoid leaking React/OpenTUI details into `src/engine`, `src/model`, or `src/spi`
+- avoid leaking React/OpenTUI details into `src/engine`, `src/domain`, or `src/spi`
 - avoid leaking low-level TanStack mechanisms such as observers into the public engine surface unless explicitly intended
 
 ### Cleanup Bias

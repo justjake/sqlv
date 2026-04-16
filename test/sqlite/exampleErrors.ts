@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { dirname, extname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import type { EditorRange } from "../../src/model/editor/text"
+import type { EditorRange } from "../../src/domain/editor/text"
 
 export type SqliteExampleErrorCase = {
   id: string
