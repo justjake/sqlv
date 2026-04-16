@@ -197,40 +197,42 @@ function TreeViewBody(props: Omit<TreeViewProps, "focusableProps">) {
 
   useNavKeys({
     enabled: shortcutsEnabled,
-    up(key) {
-      key.preventDefault()
-      key.stopPropagation()
-      focusPrevRow()
-    },
-    down(key) {
-      key.preventDefault()
-      key.stopPropagation()
-      focusNextRow()
-    },
-    left(key) {
-      if (currentRow?.isExpandable && currentRow.isExpanded) {
+    handlers: {
+      activate(key) {
         key.preventDefault()
         key.stopPropagation()
-        setRowExpanded(currentRow, false)
-        return
-      }
-      if (currentRow?.parentRowKey) {
+        toggleCurrentRow()
+      },
+      down(key) {
         key.preventDefault()
         key.stopPropagation()
-        tree.focusPath(treeRowPath(treePath, currentRow.parentRowKey))
-      }
-    },
-    right(key) {
-      if (currentRow?.isExpandable && !currentRow.isExpanded) {
+        focusNextRow()
+      },
+      left(key) {
+        if (currentRow?.isExpandable && currentRow.isExpanded) {
+          key.preventDefault()
+          key.stopPropagation()
+          setRowExpanded(currentRow, false)
+          return
+        }
+        if (currentRow?.parentRowKey) {
+          key.preventDefault()
+          key.stopPropagation()
+          tree.focusPath(treeRowPath(treePath, currentRow.parentRowKey))
+        }
+      },
+      right(key) {
+        if (currentRow?.isExpandable && !currentRow.isExpanded) {
+          key.preventDefault()
+          key.stopPropagation()
+          setRowExpanded(currentRow, true)
+        }
+      },
+      up(key) {
         key.preventDefault()
         key.stopPropagation()
-        setRowExpanded(currentRow, true)
-      }
-    },
-    activate(key) {
-      key.preventDefault()
-      key.stopPropagation()
-      toggleCurrentRow()
+        focusPrevRow()
+      },
     },
   })
 

@@ -24,7 +24,7 @@ import { SettingsPane } from "./sidebar/SettingsPane"
 import { SIDEBAR_AREA_ID, Sidebar } from "./sidebar/Sidebar"
 import { SIDEBAR_TREE_AREA_ID, treeRowFocusId } from "./sidebar/TreeView"
 import { ConfirmModal } from "./ui/ConfirmModal"
-import { KeybindProvider, useKeybindHandler, useShortcut } from "./ui/keybind"
+import { KeybindProvider, useNavKeys, useShortcut } from "./ui/keybind"
 import { Modal } from "./ui/Modal"
 import { ModalPresenterProvider, usePresentModal, usePresentedModalCount } from "./ui/presentModal"
 import { Text } from "./ui/Text"
@@ -692,37 +692,30 @@ function RecentQueryViewBody(props: {
     tree.focusPath(recentQueryRowPath(query.queryId))
   }
 
-  useKeybindHandler({
+  useNavKeys({
     enabled: !navigationActive && focusedWithin && queries.length > 0,
+    handlers: {
+      down(key) {
+        key.preventDefault()
+        key.stopPropagation()
+        focusRow(Math.min(queries.length - 1, currentIndex + 1))
+      },
+      up(key) {
+        key.preventDefault()
+        key.stopPropagation()
+        focusRow(Math.max(0, currentIndex - 1))
+      },
+    },
+  })
+
+  useShortcut({
+    enabled: !navigationActive && focusedWithin && queries.length > 0 && !!currentQuery,
+    keys: { or: ["enter", "return"] },
     onKey(key) {
-      const plainVimMove = !key.ctrl && !key.shift && !key.meta && !key.option && !key.super
-      switch (key.name) {
-        case "up":
-        case "k":
-          if (key.name === "k" && !plainVimMove) {
-            return
-          }
-          key.preventDefault()
-          key.stopPropagation()
-          focusRow(Math.max(0, currentIndex - 1))
-          return
-        case "down":
-        case "j":
-          if (key.name === "j" && !plainVimMove) {
-            return
-          }
-          key.preventDefault()
-          key.stopPropagation()
-          focusRow(Math.min(queries.length - 1, currentIndex + 1))
-          return
-        case "enter":
-        case "return":
-          key.preventDefault()
-          key.stopPropagation()
-          if (currentQuery) {
-            onActivate(currentQuery)
-          }
-          return
+      key.preventDefault()
+      key.stopPropagation()
+      if (currentQuery) {
+        onActivate(currentQuery)
       }
     },
   })

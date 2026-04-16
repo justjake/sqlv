@@ -159,66 +159,68 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
   }
 
   useNavKeys({
-    "command+down"(key) {
-      const current = currentCell()
-      moveTo(key, { rowIndex: rows.length - 1, columnIndex: current.columnIndex })
-    },
-    "command+left"(key) {
-      const current = currentCell()
-      moveTo(key, { rowIndex: current.rowIndex, columnIndex: 0 })
-    },
-    "command+right"(key) {
-      const current = currentCell()
-      moveTo(key, { rowIndex: current.rowIndex, columnIndex: columnKeys.length - 1 })
-    },
-    "command+up"(key) {
-      const current = currentCell()
-      moveTo(key, { rowIndex: 0, columnIndex: current.columnIndex })
-    },
-    "ctrl+down"(key) {
-      const current = currentCell()
-      moveTo(key, { rowIndex: rows.length - 1, columnIndex: current.columnIndex })
-    },
-    "ctrl+left"(key) {
-      const current = currentCell()
-      moveTo(key, { rowIndex: current.rowIndex, columnIndex: 0 })
-    },
-    "ctrl+right"(key) {
-      const current = currentCell()
-      moveTo(key, { rowIndex: current.rowIndex, columnIndex: columnKeys.length - 1 })
-    },
-    "ctrl+up"(key) {
-      const current = currentCell()
-      moveTo(key, { rowIndex: 0, columnIndex: current.columnIndex })
-    },
     enabled: shortcutsEnabled,
-    left(key) {
-      moveBy(key, 0, -1)
-    },
-    "option+down"(key) {
-      const current = currentCell()
-      moveTo(key, { rowIndex: rows.length - 1, columnIndex: current.columnIndex })
-    },
-    "option+left"(key) {
-      const current = currentCell()
-      moveTo(key, { rowIndex: current.rowIndex, columnIndex: 0 })
-    },
-    "option+right"(key) {
-      const current = currentCell()
-      moveTo(key, { rowIndex: current.rowIndex, columnIndex: columnKeys.length - 1 })
-    },
-    "option+up"(key) {
-      const current = currentCell()
-      moveTo(key, { rowIndex: 0, columnIndex: current.columnIndex })
-    },
-    right(key) {
-      moveBy(key, 0, 1)
-    },
-    up(key) {
-      moveBy(key, -1, 0)
-    },
-    down(key) {
-      moveBy(key, 1, 0)
+    handlers: {
+      "command+down"(key) {
+        const current = currentCell()
+        moveTo(key, { rowIndex: rows.length - 1, columnIndex: current.columnIndex })
+      },
+      "command+left"(key) {
+        const current = currentCell()
+        moveTo(key, { rowIndex: current.rowIndex, columnIndex: 0 })
+      },
+      "command+right"(key) {
+        const current = currentCell()
+        moveTo(key, { rowIndex: current.rowIndex, columnIndex: columnKeys.length - 1 })
+      },
+      "command+up"(key) {
+        const current = currentCell()
+        moveTo(key, { rowIndex: 0, columnIndex: current.columnIndex })
+      },
+      "ctrl+down"(key) {
+        const current = currentCell()
+        moveTo(key, { rowIndex: rows.length - 1, columnIndex: current.columnIndex })
+      },
+      "ctrl+left"(key) {
+        const current = currentCell()
+        moveTo(key, { rowIndex: current.rowIndex, columnIndex: 0 })
+      },
+      "ctrl+right"(key) {
+        const current = currentCell()
+        moveTo(key, { rowIndex: current.rowIndex, columnIndex: columnKeys.length - 1 })
+      },
+      "ctrl+up"(key) {
+        const current = currentCell()
+        moveTo(key, { rowIndex: 0, columnIndex: current.columnIndex })
+      },
+      down(key) {
+        moveBy(key, 1, 0)
+      },
+      left(key) {
+        moveBy(key, 0, -1)
+      },
+      "option+down"(key) {
+        const current = currentCell()
+        moveTo(key, { rowIndex: rows.length - 1, columnIndex: current.columnIndex })
+      },
+      "option+left"(key) {
+        const current = currentCell()
+        moveTo(key, { rowIndex: current.rowIndex, columnIndex: 0 })
+      },
+      "option+right"(key) {
+        const current = currentCell()
+        moveTo(key, { rowIndex: current.rowIndex, columnIndex: columnKeys.length - 1 })
+      },
+      "option+up"(key) {
+        const current = currentCell()
+        moveTo(key, { rowIndex: 0, columnIndex: current.columnIndex })
+      },
+      right(key) {
+        moveBy(key, 0, 1)
+      },
+      up(key) {
+        moveBy(key, -1, 0)
+      },
     },
   })
 

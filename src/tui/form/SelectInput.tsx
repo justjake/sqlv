@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { useKeybindHandler } from "../ui/keybind"
+import { useShortcut } from "../ui/keybind"
 import { useTheme } from "../ui/theme"
 import { Focusable, useIsFocusNavigationActive, useIsFocused, useIsHighlighted } from "../focus"
 import { Text } from "../ui/Text"
@@ -49,21 +49,23 @@ function SelectInputBody<Value extends string>(props: SelectInputProps<Value>) {
   const backgroundColor = active ? theme.formFieldBackgroundActive : theme.formFieldBackground
   const displayLabel = props.options.find((option) => option.value === props.value)?.label ?? props.value
 
-  useKeybindHandler({
+  useShortcut({
     enabled: inputFocused && interactive,
-    detect(event) {
-      return event.name === "left" || event.name === "right" || event.name === "enter" || event.name === "return"
-    },
+    keys: { or: ["right", "enter", "return"] },
     onKey(event) {
-      if (event.name === "right" || event.name === "enter" || event.name === "return") {
-        event.preventDefault()
-        event.stopPropagation()
-        cycleOption(1)
-      } else if (event.name === "left") {
-        event.preventDefault()
-        event.stopPropagation()
-        cycleOption(-1)
-      }
+      event.preventDefault()
+      event.stopPropagation()
+      cycleOption(1)
+    },
+  })
+
+  useShortcut({
+    enabled: inputFocused && interactive,
+    keys: "left",
+    onKey(event) {
+      event.preventDefault()
+      event.stopPropagation()
+      cycleOption(-1)
     },
   })
 

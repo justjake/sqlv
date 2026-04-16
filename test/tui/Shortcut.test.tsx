@@ -74,17 +74,19 @@ function GlobalShortcutHarness(props: { onHit: (value: string) => void }) {
 
 function NavKeysRegistrar(props: {
   onHit: (value: string) => void
-  prevent?: readonly AliasedByNavKey[]
+  preventAliases?: readonly AliasedByNavKey[]
 }) {
   useNavKeys({
-    activate: () => props.onHit("activate"),
-    "ctrl+up": () => props.onHit("ctrl+up"),
-    down: () => props.onHit("down"),
-    esc: () => props.onHit("esc"),
-    left: () => props.onHit("left"),
-    prevent: props.prevent,
-    right: () => props.onHit("right"),
-    up: () => props.onHit("up"),
+    handlers: {
+      activate: () => props.onHit("activate"),
+      "ctrl+up": () => props.onHit("ctrl+up"),
+      down: () => props.onHit("down"),
+      esc: () => props.onHit("esc"),
+      left: () => props.onHit("left"),
+      right: () => props.onHit("right"),
+      up: () => props.onHit("up"),
+    },
+    preventAliases: props.preventAliases,
   })
 
   return null
@@ -92,7 +94,7 @@ function NavKeysRegistrar(props: {
 
 function NavKeysHarness(props: {
   onHit: (value: string) => void
-  prevent?: readonly AliasedByNavKey[]
+  preventAliases?: readonly AliasedByNavKey[]
 }) {
   const tree = useFocusTree()
 
@@ -104,7 +106,7 @@ function NavKeysHarness(props: {
 
   return (
     <Focusable focusable focusableId="nav">
-      <NavKeysRegistrar onHit={props.onHit} prevent={props.prevent} />
+      <NavKeysRegistrar onHit={props.onHit} preventAliases={props.preventAliases} />
       <text>Nav</text>
     </Focusable>
   )
@@ -244,7 +246,7 @@ describe("Shortcut", () => {
 
   test("useNavKeys can suppress selected aliases", async () => {
     const hits: string[] = []
-    const ui = await render(<NavKeysHarness onHit={(value) => hits.push(value)} prevent={["h", "ctrl+k"]} />)
+    const ui = await render(<NavKeysHarness onHit={(value) => hits.push(value)} preventAliases={["h", "ctrl+k"]} />)
 
     await settleDeferredRender(ui)
 

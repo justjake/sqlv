@@ -14,10 +14,13 @@
     "test:coverage": "bun test --coverage"
   },
   "dependencies": {
+    "@libsql/client": "^0.10.0",
     "@opentui/core": "^0.1.97",
     "@opentui/react": "^0.1.97",
     "@tanstack/query-core": "5.99.0",
     "@tursodatabase/database": "0.6.0-pre.17",
+    "drizzle-kit": "0.31.10",
+    "drizzle-orm": "0.45.2",
     "pg": "^8.20.0",
     "pg-connection-string": "^2.12.0",
     "react": "^19.2.4",

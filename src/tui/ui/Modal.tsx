@@ -1,6 +1,6 @@
 import { useTerminalDimensions } from "@opentui/react"
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
-import { useKeybindHandler } from "./keybind"
+import { useShortcut } from "./keybind"
 import { DEFAULT_MODAL_Z_INDEX, resolveModalViewportBounds } from "./modalShared"
 import { useIsFocusNavigationActive } from "../focus"
 import { Text } from "./Text"
@@ -50,7 +50,7 @@ export function Modal(props: ModalProps) {
   const showChrome = props.title !== undefined || props.onClose !== undefined
   const focusNavigable = props.focusNavigable ?? false
 
-  useKeybindHandler({
+  useShortcut({
     enabled: !!props.onClose && !focusNavigable,
     global: true,
     keys: "esc",

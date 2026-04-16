@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Focusable, useIsFocusNavigationActive, useIsFocused, useIsHighlighted } from "../focus"
 import { Text } from "../ui/Text"
-import { useKeybindHandler } from "../ui/keybind"
+import { useShortcut } from "../ui/keybind"
 import { useTheme } from "../ui/theme"
 import { renderSelectOptionLabel } from "./selectOptionLabel"
 
@@ -86,14 +86,27 @@ function SelectOptionRowInputBody<Value extends string>(props: SelectOptionRowIn
     }
   }, [lastSelectedKey, props.options])
 
-  useKeybindHandler({
+  useShortcut({
     enabled: inputFocused && interactive,
-    detect(event) {
-      return event.name === "left" || event.name === "right" || event.name === "enter" || event.name === "return"
-    },
+    keys: { or: ["right", "enter", "return"] },
     onKey(event) {
-      const step = event.name === "left" ? -1 : 1
-      const nextOption = stepRadioSelectOption(props.options, lastSelectedKey, step)
+      const nextOption = stepRadioSelectOption(props.options, lastSelectedKey, 1)
+      if (!nextOption || nextOption.key === lastSelectedKey) {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+      setLastSelectedKey(nextOption.key)
+      props.onChange?.(nextOption.value)
+    },
+  })
+
+  useShortcut({
+    enabled: inputFocused && interactive,
+    keys: "left",
+    onKey(event) {
+      const nextOption = stepRadioSelectOption(props.options, lastSelectedKey, -1)
       if (!nextOption || nextOption.key === lastSelectedKey) {
         return
       }

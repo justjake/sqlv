@@ -2,7 +2,7 @@ import type { InputRenderable } from "@opentui/core"
 import { useEffect, useRef, useState } from "react"
 import { Focusable, useIsFocusWithin } from "../focus"
 import { Shortcut } from "../Shortcut"
-import { useKeybindHandler } from "../ui/keybind"
+import { useShortcut } from "../ui/keybind"
 import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 
@@ -30,24 +30,23 @@ export function SaveQueryDialog(props: SaveQueryDialogProps) {
     setName(initialName ?? "")
   }, [initialName])
 
-  useKeybindHandler({
-    enabled: focusedWithin && !saving,
+  useShortcut({
+    enabled: focusedWithin && !saving && !!name.trim(),
+    keys: { or: ["enter", "return"] },
     onKey(event) {
-      switch (event.name) {
-        case "enter":
-        case "return":
-          if (!name.trim()) {
-            return
-          }
-          event.preventDefault()
-          event.stopPropagation()
-          void onSave(name)
-          return
-        case "escape":
-          event.preventDefault()
-          event.stopPropagation()
-          onCancel()
-      }
+      event.preventDefault()
+      event.stopPropagation()
+      void onSave(name)
+    },
+  })
+
+  useShortcut({
+    enabled: focusedWithin && !saving,
+    keys: "esc",
+    onKey(event) {
+      event.preventDefault()
+      event.stopPropagation()
+      onCancel()
     },
   })
 

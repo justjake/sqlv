@@ -9,7 +9,7 @@ import {
   useIsFocusWithin,
   useRememberedDescendantPath,
 } from "../focus"
-import { useKeybindHandler, useNavKeys } from "../ui/keybind"
+import { useNavKeys, useShortcut } from "../ui/keybind"
 import { FieldLabel } from "./FieldLabel"
 
 export type FieldProps = {
@@ -48,33 +48,33 @@ function FormFieldBody(props: FormFieldProps & { parentPath: FocusPath }) {
     (!focusWithinParent && rememberedDescendantPath !== undefined)
 
   useNavKeys({
-    down(key) {
-      if (!props.down) {
-        return
-      }
-
-      key.preventDefault()
-      key.stopPropagation()
-      props.down()
-    },
     enabled: inputFocused && !navigationActive && (props.up !== undefined || props.down !== undefined),
-    prevent: ["j", "k"],
-    up(key) {
-      if (!props.up) {
-        return
-      }
+    handlers: {
+      down(key) {
+        if (!props.down) {
+          return
+        }
 
-      key.preventDefault()
-      key.stopPropagation()
-      props.up()
+        key.preventDefault()
+        key.stopPropagation()
+        props.down()
+      },
+      up(key) {
+        if (!props.up) {
+          return
+        }
+
+        key.preventDefault()
+        key.stopPropagation()
+        props.up()
+      },
     },
+    preventAliases: ["j", "k"],
   })
 
-  useKeybindHandler({
+  useShortcut({
     enabled: inputFocused && !navigationActive && (props.up !== undefined || props.down !== undefined),
-    detect(event) {
-      return event.name === "tab"
-    },
+    keys: { or: ["tab", "shift+tab"] },
     onKey(event) {
       if (event.shift) {
         if (!props.up) {

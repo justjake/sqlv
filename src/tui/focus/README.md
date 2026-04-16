@@ -32,9 +32,9 @@ If focus navigation relied only on ordinary widget-local keyboard handlers:
 - focus navigation would only work when the "right" subtree happened to be focused
 - modal escape handling would become inconsistent
 
-So the TUI layer installs one top-priority global handler in [`../ui/keybind.tsx`](../ui/keybind.tsx) using `renderer.keyInput.prependListener("keypress", ...)`.
+So the TUI layer installs one top-priority global handler in [`../ui/keybind/KeybindProvider.tsx`](../ui/keybind/KeybindProvider.tsx) using `renderer.keyInput.prependListener("keypress", ...)`.
 
-That handler is intentionally shared by shortcuts and focus navigation. `useShortcut()` no longer installs flat `useKeyboard()` listeners in leaf components; it registers declarative shortcut metadata, and the router dispatches by focus ancestry using the focus tree. For complex local keymaps that do not map cleanly to a single shortcut chord, the TUI layer uses `useKeybindHandler()` so those widgets still participate in the same scoped router instead of subscribing to `useKeyboard()` directly.
+That handler is intentionally shared by shortcuts and focus navigation. `useShortcut()` no longer installs flat `useKeyboard()` listeners in leaf components; it registers declarative shortcut metadata, and the router dispatches by focus ancestry using the focus tree. Widgets with directional behavior layer `useNavKeys()` on top of the same router instead of subscribing to `useKeyboard()` directly.
 
 That makes focus navigation a renderer-level concern:
 

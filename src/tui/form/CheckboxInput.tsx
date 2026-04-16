@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 import { Focusable, useIsFocusNavigationActive, useIsFocused, useIsHighlighted } from "../focus"
 import { Text } from "../ui/Text"
-import { useKeybindHandler } from "../ui/keybind"
+import { useShortcut } from "../ui/keybind"
 import { useTheme } from "../ui/theme"
 
 export type CheckboxInputProps = {
@@ -45,7 +45,7 @@ function CheckboxInputBody(props: CheckboxInputProps) {
   const indicatorColor = props.disabled ? theme.mutedFg : active ? theme.focusPrimaryFg : undefined
   const labelColor = props.disabled ? theme.mutedFg : undefined
 
-  useKeybindHandler({
+  useShortcut({
     enabled: inputFocused && interactive,
     keys: { or: ["space", "return"] },
     onKey(event) {
