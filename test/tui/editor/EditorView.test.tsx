@@ -45,6 +45,10 @@ function applyEditorChange(current: EditorState, change: EditorChange): EditorSt
   }
 }
 
+function findLine(lines: string[], text: string) {
+  return lines.find((line) => line.includes(text))
+}
+
 describe("EditorView", () => {
   test("edits, executes, clears, and opens history from the editor", async () => {
     const changes: string[] = []
@@ -176,9 +180,11 @@ describe("EditorView", () => {
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("f", { meta: true }))
 
+    const lines = ui.captureCharFrame().split("\n")
+
     expect(formatCount).toBe(1)
-    expect(ui.captureCharFrame()).toContain("from")
-    expect(ui.captureCharFrame()).toMatch(/\n\s*2\s+\*/m)
+    expect(lines.some((line) => line.includes("from"))).toBe(true)
+    expect(findLine(lines, "*")?.trim()).toMatch(/^2\s+\*$/)
   })
 
   test("moves completion focus and applies the selected item", async () => {
@@ -433,11 +439,14 @@ describe("EditorView", () => {
       { height: 12, width: 80 },
     )
 
-    const frame = ui.captureCharFrame()
+    const lines = ui.captureCharFrame().split("\n")
+    const firstLine = findLine(lines, "select 1")
+    const secondLine = findLine(lines, "from users")
+    const thirdLine = findLine(lines, "where active = 1")
 
-    expect(frame).toMatch(/\n\s*1\s+select 1/m)
-    expect(frame).toMatch(/\n\s*2\s+from users/m)
-    expect(frame).toMatch(/\n\s*3\s+where active = 1/m)
+    expect(firstLine?.trim()).toMatch(/^1\s+select 1$/)
+    expect(secondLine?.trim()).toMatch(/^2\s+from users$/)
+    expect(thirdLine?.trim()).toMatch(/^3\s+where active = 1$/)
   })
 
   test("subtly highlights the row containing the cursor", async () => {

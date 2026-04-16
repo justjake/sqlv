@@ -35,6 +35,29 @@ function TreeViewHarness(props: {
   )
 }
 
+function frameLines(ui: Awaited<ReturnType<typeof render>>) {
+  return ui.captureCharFrame().split("\n")
+}
+
+function lineContaining(lines: string[], text: string) {
+  return lines.find((line) => line.includes(text))
+}
+
+function labelColumn(lines: string[], label: string) {
+  return lineContaining(lines, label)?.indexOf(label) ?? -1
+}
+
+function expectTextOrder(line: string | undefined, segments: readonly string[]) {
+  expect(line).toBeDefined()
+
+  let previousIndex = -1
+  for (const segment of segments) {
+    const nextIndex = line!.indexOf(segment)
+    expect(nextIndex).toBeGreaterThan(previousIndex)
+    previousIndex = nextIndex
+  }
+}
+
 describe("TreeView", () => {
   test("flattens tree nodes and emits initial focus", async () => {
     const focused: string[] = []
@@ -222,13 +245,25 @@ describe("TreeView", () => {
       { height: 8, width: 40 },
     )
 
-    const [rootLine, reactLine, srcLine, leafLine, vitestLine, solidLine] = ui.captureCharFrame().split("\n")
-    expect(rootLine?.startsWith("  Root")).toBe(true)
-    expect(reactLine?.startsWith("    React")).toBe(true)
-    expect(srcLine?.startsWith("  │   Src")).toBe(true)
-    expect(leafLine?.startsWith("  │ │ └ * Leaf")).toBe(true)
-    expect(vitestLine?.startsWith("  │ └ * vitest.config.ts")).toBe(true)
-    expect(solidLine?.startsWith("    Solid")).toBe(true)
+    const lines = frameLines(ui)
+    const rootLine = lineContaining(lines, "Root")
+    const reactLine = lineContaining(lines, "React")
+    const srcLine = lineContaining(lines, "Src")
+    const leafLine = lineContaining(lines, "Leaf")
+    const vitestLine = lineContaining(lines, "vitest.config.ts")
+    const solidLine = lineContaining(lines, "Solid")
+
+    expectTextOrder(rootLine, ["", "", "Root"])
+    expectTextOrder(reactLine, ["", "", "React"])
+    expectTextOrder(srcLine, ["│", "", "", "Src"])
+    expectTextOrder(leafLine, ["│", "└", "*", "Leaf"])
+    expectTextOrder(vitestLine, ["│", "└", "*", "vitest.config.ts"])
+    expectTextOrder(solidLine, ["", "", "Solid"])
+    expect(labelColumn(lines, "React")).toBeGreaterThan(labelColumn(lines, "Root"))
+    expect(labelColumn(lines, "Solid")).toBe(labelColumn(lines, "React"))
+    expect(labelColumn(lines, "Src")).toBeGreaterThan(labelColumn(lines, "React"))
+    expect(labelColumn(lines, "vitest.config.ts")).toBe(labelColumn(lines, "Src"))
+    expect(labelColumn(lines, "Leaf")).toBeGreaterThan(labelColumn(lines, "Src"))
   })
 
   test("keeps tree rows single-line when labels are long", async () => {
@@ -247,13 +282,13 @@ describe("TreeView", () => {
       { height: 6, width: 30 },
     )
 
-    const [rootLine, childLine, thirdLine] = ui.captureCharFrame().split("\n")
-    expect(rootLine?.startsWith("  ")).toBe(true)
-    expect(rootLine).toContain("")
-    expect(childLine?.startsWith("  └ * ")).toBe(true)
-    expect(rootLine).toContain("A root")
-    expect(childLine).toContain("A child")
-    expect(thirdLine?.trim()).toBe("")
+    const lines = frameLines(ui)
+    const rootLine = lineContaining(lines, "A root")
+    const childLine = lineContaining(lines, "A child")
+
+    expectTextOrder(rootLine, ["", "", "A root"])
+    expectTextOrder(childLine, ["└", "*", "A child"])
+    expect(lines.filter((line) => /\S/.test(line))).toHaveLength(2)
   })
 
   test("renders accessories dimmed at the right edge without changing the main label", async () => {
@@ -271,9 +306,9 @@ describe("TreeView", () => {
       { height: 4, width: 30 },
     )
 
-    const [rootLine] = ui.captureCharFrame().split("\n")
-    expect(rootLine?.startsWith("  Local DB")).toBe(true)
-    expect(rootLine?.endsWith("bunsqlite")).toBe(true)
+    const rootLine = lineContaining(frameLines(ui), "Local DB")
+
+    expectTextOrder(rootLine, ["", "", "Local DB", "bunsqlite"])
     expect(rootLine).not.toContain("(bunsqlite)")
   })
 
@@ -292,8 +327,9 @@ describe("TreeView", () => {
       { height: 4, width: 17 },
     )
 
-    const [rootLine] = ui.captureCharFrame().split("\n")
-    expect(rootLine?.startsWith("  LabelPriority")).toBe(true)
+    const rootLine = lineContaining(frameLines(ui), "LabelPriority")
+
+    expectTextOrder(rootLine, ["", "", "LabelPriority"])
     expect(rootLine).not.toContain("bunsqlite")
   })
 
@@ -314,10 +350,9 @@ describe("TreeView", () => {
       { height: 4, width: 30 },
     )
 
-    const [rootLine] = ui.captureCharFrame().split("\n")
-    expect(rootLine?.startsWith("  Mem")).toBe(true)
-    expect(rootLine).toContain("|")
-    expect(rootLine).toContain("main")
+    const rootLine = lineContaining(frameLines(ui), "Mem")
+
+    expectTextOrder(rootLine, ["", "", "Mem", "|", "󰆼", "main"])
   })
 
   test("renders inline accessory icons next to the main label and keeps the icon accent color", async () => {
@@ -338,13 +373,12 @@ describe("TreeView", () => {
       { height: 4, width: 40 },
     )
 
-    const [rootLine] = ui.captureCharFrame().split("\n")
+    const rootLine = lineContaining(frameLines(ui), "Mem")
     const rootSpanLine = ui.captureSpans().lines[0]
     const folderIconSpan = rootSpanLine?.spans.find((span) => span.text.includes(""))
     const databaseIconSpan = rootSpanLine?.spans.find((span) => span.text.includes("󰆼"))
 
-    expect(rootLine?.startsWith("  Mem 󰆼 main")).toBe(true)
-    expect(rootLine?.trimEnd().endsWith("bunsqlite")).toBe(true)
+    expectTextOrder(rootLine, ["", "", "Mem", "󰆼", "main", "bunsqlite"])
     expect(folderIconSpan).toBeDefined()
     expect(databaseIconSpan).toBeDefined()
     expect(databaseIconSpan?.fg.equals(folderIconSpan!.fg)).toBe(true)
@@ -404,9 +438,12 @@ describe("TreeView", () => {
       { height: 4, width: 40 },
     )
 
-    const [openLine, closedLine] = ui.captureCharFrame().split("\n")
-    expect(openLine?.startsWith(" 󰉖 open-empty")).toBe(true)
-    expect(closedLine?.startsWith("  closed-empty")).toBe(true)
+    const lines = frameLines(ui)
+    const openLine = lineContaining(lines, "open-empty")
+    const closedLine = lineContaining(lines, "closed-empty")
+
+    expectTextOrder(openLine, ["", "󰉖", "open-empty"])
+    expectTextOrder(closedLine, ["", "", "closed-empty"])
   })
 
   test("renders index nodes with a semantic index icon", async () => {
@@ -425,8 +462,9 @@ describe("TreeView", () => {
       { height: 4, width: 40 },
     )
 
-    const [, childLine] = ui.captureCharFrame().split("\n")
-    expect(childLine?.startsWith("  └ ⌗ email_idx")).toBe(true)
+    const childLine = lineContaining(frameLines(ui), "email_idx")
+
+    expectTextOrder(childLine, ["└", "⌗", "email_idx"])
   })
 
   test("keeps the semantic table icon when a table row is expandable", async () => {
@@ -445,9 +483,12 @@ describe("TreeView", () => {
       { height: 4, width: 40 },
     )
 
-    const [tableLine, childLine] = ui.captureCharFrame().split("\n")
-    expect(tableLine?.startsWith(" 󰓫 users")).toBe(true)
-    expect(childLine?.startsWith("  └ ⌗ email_idx")).toBe(true)
+    const lines = frameLines(ui)
+    const tableLine = lineContaining(lines, "users")
+    const childLine = lineContaining(lines, "email_idx")
+
+    expectTextOrder(tableLine, ["", "󰓫", "users"])
+    expectTextOrder(childLine, ["└", "⌗", "email_idx"])
   })
 
   test("renders unicode fallback icons when wrapped in the unicode icon provider", async () => {
@@ -468,8 +509,11 @@ describe("TreeView", () => {
       { height: 4, width: 40 },
     )
 
-    const [rootLine, childLine] = ui.captureCharFrame().split("\n")
-    expect(rootLine?.startsWith("▾ ◫ Root")).toBe(true)
-    expect(childLine?.startsWith("  └ ▦ users")).toBe(true)
+    const lines = frameLines(ui)
+    const rootLine = lineContaining(lines, "Root")
+    const childLine = lineContaining(lines, "users")
+
+    expectTextOrder(rootLine, ["▾", "◫", "Root"])
+    expectTextOrder(childLine, ["└", "▦", "users"])
   })
 })

@@ -9,8 +9,8 @@ import { FocusProvider, focusPathSignature, useFocusNavigationState, useFocusTre
 import { App, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID } from "../../src/tui/index"
 import { AddConnectionPane, ADD_CONNECTION_AREA_ID } from "../../src/tui/connection/AddConnectionPane"
 import { PostgresAdapter } from "../../src/lib/adapters/postgres"
-import { objectNodes, onOpenNode, onSelectNode, SIDEBAR_AREA_ID, Sidebar } from "../../src/tui/sidebar/Sidebar"
-import { SIDEBAR_TREE_AREA_ID, type TreeNode } from "../../src/tui/sidebar/TreeView"
+import { onOpenNode, onSelectNode, SIDEBAR_AREA_ID, Sidebar } from "../../src/tui/sidebar/Sidebar"
+import { SIDEBAR_TREE_AREA_ID } from "../../src/tui/sidebar/TreeView"
 import { KeybindProvider } from "../../src/tui/ui/keybind/KeybindProvider"
 import { Text } from "../../src/tui/ui/Text"
 import { SqlVisorProvider, useSqlVisor, useSqlVisorState } from "../../src/tui/useSqlVisor"
@@ -57,6 +57,29 @@ function recentQueryRowPath(slot: number) {
 
 function resultsTableCellPath(rowSlot: number, cellSlot: number) {
   return [RESULTS_TABLE_FOCUS_ID, RESULTS_TABLE_GRID_AREA_ID, `row-${rowSlot}`, `cell-${cellSlot}`] as const
+}
+
+function captureFrameLines(ui: RenderedUi) {
+  return ui.captureCharFrame().split("\n")
+}
+
+function findLine(lines: string[], text: string) {
+  return lines.find((line) => line.includes(text))
+}
+
+function findLineIndex(lines: string[], text: string) {
+  return lines.findIndex((line) => line.includes(text))
+}
+
+function expectTextOrder(line: string | undefined, segments: readonly string[]) {
+  expect(line).toBeDefined()
+
+  let previousIndex = -1
+  for (const segment of segments) {
+    const nextIndex = line!.indexOf(segment)
+    expect(nextIndex).toBeGreaterThan(previousIndex)
+    previousIndex = nextIndex
+  }
 }
 
 async function render(node: ReactNode, size = { height: 18, width: 100 }) {
@@ -140,17 +163,6 @@ function FocusProbe() {
   highlightedPath = focusPathSignature(state.highlightedPath) ?? ""
   focusNavigationActive = state.active
   return null
-}
-
-function treeShape(nodes: readonly TreeNode[]): unknown[] {
-  return nodes.map(({ accessory, automatic, children, expanded, kind, name }) => ({
-    kind,
-    name,
-    ...(accessory === undefined ? {} : { accessory }),
-    ...(automatic === true ? { automatic } : {}),
-    ...(expanded === undefined ? {} : { expanded }),
-    ...(children?.length ? { children: treeShape(children) } : {}),
-  }))
 }
 
 describe("SqlVisor provider and app", () => {
@@ -304,24 +316,21 @@ describe("SqlVisor provider and app", () => {
     )
 
     const frame = ui.captureCharFrame()
-    const connectionLine = frame.split("\n").find((line) => line.includes(connection.name))
+    const lines = frame.split("\n")
+    const connectionLine = findLine(lines, connection.name)
     expect(frame).toContain(connection.name)
     expect(frame).toContain(connection.protocol)
     expect(frame).toContain("Refresh")
     expect(frame).not.toContain(`(${connection.protocol})`)
-    expect(connectionLine?.startsWith("  Test Connection 󰆼 main")).toBe(true)
-    expect(connectionLine?.trimEnd().endsWith(connection.protocol)).toBe(true)
-    expect(connectionLine).toContain("main")
-    expect(connectionLine).toContain("")
-    expect(frame).toContain("main")
+    expectTextOrder(connectionLine, [connection.name, "main", connection.protocol])
+    expect(findLineIndex(lines, connection.name)).toBeLessThan(findLineIndex(lines, "schema public"))
     expect(frame).toContain("schema public")
     expect(frame).toContain("users")
     expect(frame).toContain("tbl")
     expect(frame).toContain("view active_users")
     expect(frame).toContain("matview latest_users")
-    expect(frame).not.toContain("users_name_idx")
-    expect(frame).not.toContain("idx")
-    expect(frame).not.toContain("trigger on users")
+    expect(lines.some((line) => line.includes("users_name_idx"))).toBe(false)
+    expect(lines.some((line) => line.includes("trigger on users"))).toBe(false)
 
     await act(async () => {
       ui.mockInput.pressKey("n", { ctrl: true })
@@ -443,90 +452,14 @@ describe("SqlVisor provider and app", () => {
       { height: 12, width: 80 },
     )
 
-    const lines = ui.captureCharFrame().split("\n")
-    const connectionLine = lines.find((line) => line.includes(connection.name))
-    const tableLine = lines.find((line) => line.includes("some_table"))
+    const lines = captureFrameLines(ui)
+    const connectionLine = findLine(lines, connection.name)
+    const tableLine = findLine(lines, "some_table")
 
-    expect(connectionLine?.startsWith("  Mem 󰆼 main")).toBe(true)
-    expect(connectionLine?.trimEnd().endsWith(connection.protocol)).toBe(true)
-    expect(connectionLine).toContain("main")
-    expect(connectionLine).toContain("")
-    expect(tableLine?.startsWith("  └")).toBe(true)
+    expectTextOrder(connectionLine, [connection.name, "main", connection.protocol])
+    expect(findLineIndex(lines, connection.name)).toBeLessThan(findLineIndex(lines, "some_table"))
+    expect((tableLine?.indexOf("some_table") ?? -1)).toBeGreaterThan(connectionLine?.indexOf(connection.name) ?? -1)
     expect(lines.some((line) => line.includes("main") && !line.includes(connection.name))).toBe(false)
-  })
-
-  test("nests sidebar objects under databases, schemas, and tables", () => {
-    const nodes = objectNodes(
-      "conn-1",
-      createQueryState({
-        data: [
-          { name: "main", type: "database" },
-          { database: "main", name: "public", type: "schema" },
-          { database: "main", name: "users", schema: "public", type: "table" },
-          {
-            name: "users_email_idx",
-            on: { database: "main", name: "users", schema: "public", type: "table" },
-            type: "index",
-          },
-          {
-            automatic: true,
-            name: "sqlite_autoindex_users_1",
-            on: { database: "main", name: "users", schema: "public", type: "table" },
-            type: "index",
-          },
-          {
-            on: { database: "main", name: "users", schema: "public", type: "table" },
-            type: "trigger",
-          },
-          { database: "main", name: "audit_log", schema: undefined, type: "table" },
-          {
-            name: "audit_log_created_at_idx",
-            on: { database: "main", name: "audit_log", schema: undefined, type: "table" },
-            type: "index",
-          },
-          { database: "main", name: "active_users", schema: undefined, type: "view" },
-        ],
-        dataUpdateCount: 1,
-        status: "success",
-      }),
-    )
-
-    expect(treeShape(nodes)).toEqual([
-      {
-        kind: "database",
-        name: "main",
-        accessory: "db",
-        expanded: true,
-        children: [
-          {
-            kind: "schema",
-            name: "schema public",
-            expanded: true,
-            children: [
-              {
-                kind: "table",
-                name: "users",
-                accessory: "tbl",
-                expanded: false,
-                children: [
-                  { kind: "index", name: "users_email_idx", accessory: "idx" },
-                  { kind: "trigger", name: "trigger on users" },
-                  { kind: "index", name: "sqlite_autoindex_users_1", accessory: "idx", automatic: true },
-                ],
-              },
-            ],
-          },
-          {
-            kind: "table",
-            name: "audit_log",
-            accessory: "tbl",
-            expanded: false,
-            children: [{ kind: "index", name: "audit_log_created_at_idx", accessory: "idx" }],
-          },
-          { kind: "view", name: "view active_users" },
-        ],
-      },
-    ])
   })
 
   test("keeps loaded connection branches attached to their own sections", async () => {

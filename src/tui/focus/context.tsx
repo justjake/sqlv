@@ -25,20 +25,8 @@ import {
 import type { FocusPath, FocusPathSuffix, FocusNavigationState } from "../../lib/focus/types"
 import { renderableViewportRect } from "./utils"
 
-const FOCUS_HALO_ANIMATION_MS = 120
-const FOCUS_HALO_GHOST_ALPHA_MULTIPLIER = 0.8
-const FOCUS_HALO_EDGE_ALPHA_MULTIPLIER = 2.3
-const FOCUS_HALO_EDGE_BRIGHTEN = 0.5
-const FOCUS_HALO_EDGE_START = 0.08
-const FOCUS_HALO_EDGE_END = 0.78
-
-type FocusHaloOverlayLayer = {
-  backgroundColor: string
-  height: number
-  width: number
-  x: number
-  y: number
-}
+const FOCUS_HALO_ANIMATION_MS = 110
+const FOCUS_HALO_ANIMATION_EASE = "outCirc"
 
 type FocusHaloOverlayTarget = {
   backgroundColor: string
@@ -49,8 +37,6 @@ type FocusHaloOverlayTarget = {
 
 type FocusHaloOverlayPresentation = {
   backgroundColor: string
-  edgeLight: FocusHaloOverlayLayer | null
-  ghost: FocusHaloOverlayLayer | null
   height: number
   ownerPathKey: string
   width: number
@@ -344,7 +330,6 @@ export function FocusHaloOverlay() {
     } else {
       stopAnimation()
 
-      const animationStart = createTransitionFocusHaloPresentation(nextPresentation, previousPresentation, previousPresentation, 0)
       const animatedRect = {
         height: previousPresentation.height,
         width: previousPresentation.width,
@@ -352,31 +337,29 @@ export function FocusHaloOverlay() {
         y: previousPresentation.y,
       }
       const timeline = new Timeline({ autoplay: false })
+      const finishAnimation = () => {
+        if (animationRef.current === timeline) {
+          animationRef.current = null
+        }
+        setPresentationState(nextPresentation)
+        timeline.pause()
+        engine.unregister(timeline)
+      }
 
       animationRef.current = timeline
       engine.register(timeline)
-      setPresentationState(animationStart)
+      setPresentationState(withFocusHaloRect(nextPresentation, animatedRect))
       timeline.add(animatedRect, {
         duration: FOCUS_HALO_ANIMATION_MS,
-        ease: "inOutSine",
+        ease: FOCUS_HALO_ANIMATION_EASE,
         height: nextPresentation.height,
+        onComplete: finishAnimation,
+        onUpdate: () => {
+          setPresentationState(withFocusHaloRect(nextPresentation, animatedRect))
+        },
         width: nextPresentation.width,
         x: nextPresentation.x,
         y: nextPresentation.y,
-        onComplete: () => {
-          if (animationRef.current === timeline) {
-            animationRef.current = null
-          }
-          setPresentationState(nextPresentation)
-          timeline.pause()
-          engine.unregister(timeline)
-        },
-        onUpdate: (animation) => {
-          const frame = animation.targets[0] as typeof animatedRect
-          setPresentationState(
-            createTransitionFocusHaloPresentation(nextPresentation, previousPresentation, frame, animation.progress),
-          )
-        },
       })
       timeline.play()
     }
@@ -393,16 +376,6 @@ export function FocusHaloOverlay() {
 
   return (
     <box height="100%" left={0} position="absolute" top={0} width="100%" zIndex={presentation.zIndex}>
-      {presentation.ghost && (
-        <box
-          backgroundColor={presentation.ghost.backgroundColor}
-          height={presentation.ghost.height}
-          left={presentation.ghost.x}
-          position="absolute"
-          top={presentation.ghost.y}
-          width={presentation.ghost.width}
-        />
-      )}
       <box
         backgroundColor={presentation.backgroundColor}
         height={presentation.height}
@@ -410,18 +383,7 @@ export function FocusHaloOverlay() {
         position="absolute"
         top={presentation.y}
         width={presentation.width}
-      >
-        {presentation.edgeLight && (
-          <box
-            backgroundColor={presentation.edgeLight.backgroundColor}
-            height={presentation.edgeLight.height}
-            left={presentation.edgeLight.x - presentation.x}
-            position="absolute"
-            top={presentation.edgeLight.y - presentation.y}
-            width={presentation.edgeLight.width}
-          />
-        )}
-      </box>
+      />
     </box>
   )
 }
@@ -492,29 +454,12 @@ function sameFocusHaloRect(a: FocusHaloOverlayPresentation, b: FocusHaloOverlayP
   return a.height === b.height && a.width === b.width && a.x === b.x && a.y === b.y
 }
 
-function createTransitionFocusHaloPresentation(
-  nextPresentation: FocusHaloOverlayPresentation,
-  previousPresentation: FocusHaloOverlayPresentation,
-  rect: { height: number; width: number; x: number; y: number },
-  progress: number,
-): FocusHaloOverlayPresentation {
-  const currentPresentation = withFocusHaloRect(nextPresentation, rect)
-
-  return {
-    ...currentPresentation,
-    edgeLight: createFocusHaloEdgeLight(currentPresentation, previousPresentation, nextPresentation, progress),
-    ghost: createFocusHaloGhost(previousPresentation, progress),
-  }
-}
-
 function withFocusHaloRect(
   target: Pick<FocusHaloOverlayTarget, "backgroundColor" | "ownerPathKey" | "zIndex">,
   rect: { height: number; width: number; x: number; y: number },
 ): FocusHaloOverlayPresentation {
   return {
     backgroundColor: target.backgroundColor,
-    edgeLight: null,
-    ghost: null,
     height: Math.max(1, Math.round(rect.height)),
     ownerPathKey: target.ownerPathKey,
     width: Math.max(1, Math.round(rect.width)),
@@ -522,116 +467,4 @@ function withFocusHaloRect(
     y: Math.round(rect.y),
     zIndex: target.zIndex,
   }
-}
-
-function createFocusHaloGhost(
-  previousPresentation: FocusHaloOverlayPresentation,
-  progress: number,
-): FocusHaloOverlayLayer | null {
-  const alphaMultiplier = FOCUS_HALO_GHOST_ALPHA_MULTIPLIER * (1 - clamp(progress, 0, 1))
-  if (alphaMultiplier <= 0.04) {
-    return null
-  }
-
-  return {
-    ...focusHaloRect(previousPresentation),
-    backgroundColor: scaleHexAlpha(previousPresentation.backgroundColor, alphaMultiplier),
-  }
-}
-
-function createFocusHaloEdgeLight(
-  currentPresentation: FocusHaloOverlayPresentation,
-  previousPresentation: FocusHaloOverlayPresentation,
-  nextPresentation: FocusHaloOverlayPresentation,
-  progress: number,
-): FocusHaloOverlayLayer | null {
-  const dx = nextPresentation.x - previousPresentation.x
-  const dy = nextPresentation.y - previousPresentation.y
-  if (dx === 0 && dy === 0) {
-    return null
-  }
-
-  const phase = clamp(
-    (progress - FOCUS_HALO_EDGE_START) / (FOCUS_HALO_EDGE_END - FOCUS_HALO_EDGE_START),
-    0,
-    1,
-  )
-  const intensity = Math.sin(Math.PI * phase)
-  if (intensity <= 0.05) {
-    return null
-  }
-
-  const backgroundColor = scaleHexAlpha(
-    brightenHexColor(currentPresentation.backgroundColor, FOCUS_HALO_EDGE_BRIGHTEN),
-    FOCUS_HALO_EDGE_ALPHA_MULTIPLIER * intensity,
-  )
-
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    return {
-      backgroundColor,
-      height: currentPresentation.height,
-      width: 1,
-      x: dx >= 0 ? currentPresentation.x + currentPresentation.width - 1 : currentPresentation.x,
-      y: currentPresentation.y,
-    }
-  }
-
-  return {
-    backgroundColor,
-    height: 1,
-    width: currentPresentation.width,
-    x: currentPresentation.x,
-    y: dy >= 0 ? currentPresentation.y + currentPresentation.height - 1 : currentPresentation.y,
-  }
-}
-
-function focusHaloRect(rect: Pick<FocusHaloOverlayPresentation, "height" | "width" | "x" | "y">) {
-  return {
-    height: rect.height,
-    width: rect.width,
-    x: rect.x,
-    y: rect.y,
-  }
-}
-
-function brightenHexColor(color: string, amount: number): string {
-  if (!/^#[\da-fA-F]{6}([\da-fA-F]{2})?$/.test(color)) {
-    return color
-  }
-
-  const alphaSuffix = color.length > 7 ? color.slice(7, 9) : ""
-  const r = parseInt(color.slice(1, 3), 16)
-  const g = parseInt(color.slice(3, 5), 16)
-  const b = parseInt(color.slice(5, 7), 16)
-  const bump = (channel: number) => Math.min(255, Math.round(channel + (255 - channel) * amount))
-  return `#${bump(r).toString(16).padStart(2, "0")}${bump(g).toString(16).padStart(2, "0")}${bump(b).toString(16).padStart(2, "0")}${alphaSuffix}`
-}
-
-function scaleHexAlpha(color: string, multiplier: number): string {
-  const alpha = readHexAlpha(color)
-  if (alpha === undefined) {
-    return color
-  }
-
-  return withHexAlpha(color, alpha * multiplier)
-}
-
-function readHexAlpha(color: string): number | undefined {
-  if (!/^#[\da-fA-F]{6}([\da-fA-F]{2})?$/.test(color)) {
-    return undefined
-  }
-
-  return color.length > 7 ? parseInt(color.slice(7, 9), 16) : 0xff
-}
-
-function withHexAlpha(color: string, alpha: number): string {
-  if (!/^#[\da-fA-F]{6}([\da-fA-F]{2})?$/.test(color)) {
-    return color
-  }
-
-  return `${color.slice(0, 7)}${clamp(Math.round(alpha), 0, 0xff).toString(16).padStart(2, "0")}`
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value))
 }

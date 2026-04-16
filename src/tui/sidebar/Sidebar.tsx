@@ -1,11 +1,11 @@
 import { useCallback, useState } from "react"
 import type { ConnectionSuggestionsState, DiscoveredConnectionSuggestion } from "../../lib/SqlVisor"
-import type { ObjectInfo, QueryableObjectInfo } from "../../lib/types/objects"
 import { Focusable } from "../focus/Focusable"
 import { Shortcut } from "../Shortcut"
 import { IconProvider, resolveIconStyle } from "../ui/icons"
 import { Text } from "../ui/Text"
 import { useSqlVisor, useSqlVisorState } from "../useSqlVisor"
+import { buildObjectBrowserTree, type ObjectBrowserNode } from "./objectBrowserTree"
 import { TreeView, type TreeNode } from "./TreeView"
 
 type SidebarProps = {
@@ -44,7 +44,9 @@ export function Sidebar(props: SidebarProps) {
   const treeNodes: TreeNode[] = connections.map((connection) => {
     const connectionObjectsState = state.objectsByConnectionId[connection.id]
     const hasConnectionObjectsState = Object.hasOwn(state.objectsByConnectionId, connection.id)
-    const connectionChildren = connectionObjectsState ? objectNodes(connection.id, connectionObjectsState) : undefined
+    const connectionChildren = connectionObjectsState
+      ? objectStateToSidebarTreeNodes(connection.id, connectionObjectsState)
+      : undefined
     const collapsedDatabase = collapseSingleDatabaseNode(connectionChildren)
 
     return {
@@ -127,7 +129,7 @@ export function onSelectNode(engine: ReturnType<typeof useSqlVisor>, node: TreeN
   }
 }
 
-export function objectNodes(
+function objectStateToSidebarTreeNodes(
   connectionId: string,
   state: ReturnType<typeof useSqlVisorState>["objectsByConnectionId"][string] | undefined,
 ): TreeNode[] {
@@ -155,181 +157,19 @@ export function objectNodes(
     return []
   }
 
-  const entries = objects.map((object, index) => createObjectTreeEntry(connectionId, object, index))
-  const entryById = new Map(entries.map((entry) => [entry.nodeId, entry]))
-  const roots: MutableObjectTreeNode[] = []
-
-  for (const entry of entries) {
-    const parent = entry.parentIds
-      .map((parentId) => entryById.get(parentId))
-      .find((candidate): candidate is ObjectTreeEntry => candidate !== undefined)
-
-    if (parent) {
-      parent.node.children.push(entry.node)
-      continue
-    }
-
-    roots.push(entry.node)
-  }
-
-  sortObjectTreeNodes(roots)
-  return roots.map(finalizeObjectTreeNode)
+  return buildObjectBrowserTree(objects).map((node) => objectBrowserNodeToSidebarTreeNode(connectionId, node))
 }
 
-export function objectLabel(object: ObjectInfo): string {
-  switch (object.type) {
-    case "database":
-      return object.name
-    case "schema":
-      return `schema ${object.name}`
-    case "table":
-      return object.name
-    case "view":
-      return `view ${object.name}`
-    case "matview":
-      return `matview ${object.name}`
-    case "index":
-      return object.name
-    case "trigger":
-      return `trigger on ${object.on.name}`
-  }
-}
-
-type MutableObjectTreeNode = Omit<TreeNode, "children"> & {
-  children: MutableObjectTreeNode[]
-}
-
-type ObjectTreeEntry = {
-  nodeId: string
-  node: MutableObjectTreeNode
-  parentIds: string[]
-}
-
-const MISSING_OBJECT_PARENT_KEY = "<none>"
-
-function createObjectTreeEntry(connectionId: string, object: ObjectInfo, index: number): ObjectTreeEntry {
-  const nodeId = objectNodeId(object, index)
-  const defaultExpanded = objectDefaultExpanded(object)
-
+function objectBrowserNodeToSidebarTreeNode(connectionId: string, node: ObjectBrowserNode): TreeNode {
   return {
-    nodeId,
-    node: {
-      key: nodeId,
-      connectionId,
-      kind: object.type,
-      accessory: objectAccessory(object),
-      automatic: object.automatic,
-      name: objectLabel(object),
-      ...(defaultExpanded === undefined ? {} : { expanded: defaultExpanded }),
-      children: [],
-    },
-    parentIds: objectParentIds(object),
-  }
-}
-
-function finalizeObjectTreeNode(node: MutableObjectTreeNode): TreeNode {
-  const { children, ...treeNode } = node
-
-  if (children.length === 0) {
-    return treeNode
-  }
-
-  return {
-    ...treeNode,
-    children: children.map(finalizeObjectTreeNode),
-  }
-}
-
-function objectParentIds(object: ObjectInfo): string[] {
-  switch (object.type) {
-    case "database":
-      return []
-    case "schema":
-      return object.database ? [databaseNodeId(object.database)] : []
-    case "table":
-    case "view":
-    case "matview":
-      return [
-        ...(object.schema ? [schemaNodeId(object.database, object.schema)] : []),
-        ...(object.database ? [databaseNodeId(object.database)] : []),
-      ]
-    case "index":
-    case "trigger":
-      return [
-        queryableNodeId(object.on),
-        ...(object.on.schema ? [schemaNodeId(object.on.database, object.on.schema)] : []),
-        ...(object.on.database ? [databaseNodeId(object.on.database)] : []),
-      ]
-  }
-}
-
-function objectNodeId(object: ObjectInfo, index: number): string {
-  switch (object.type) {
-    case "database":
-      return databaseNodeId(object.name)
-    case "schema":
-      return schemaNodeId(object.database, object.name)
-    case "table":
-    case "view":
-    case "matview":
-      return queryableNodeId(object)
-    case "index":
-      return `index:${queryableNodeId(object.on)}:${object.name}:${index}`
-    case "trigger":
-      return `trigger:${queryableNodeId(object.on)}:${index}`
-  }
-}
-
-function objectDefaultExpanded(object: ObjectInfo): boolean | undefined {
-  switch (object.type) {
-    case "database":
-    case "schema":
-      return true
-    case "table":
-      return false
-    case "view":
-    case "matview":
-    case "index":
-    case "trigger":
-      return undefined
-  }
-}
-
-function databaseNodeId(name: string): string {
-  return `database:${name}`
-}
-
-function schemaNodeId(database: string | undefined, name: string): string {
-  return `schema:${database ?? MISSING_OBJECT_PARENT_KEY}:${name}`
-}
-
-function queryableNodeId(object: QueryableObjectInfo): string {
-  return `${object.type}:${object.database ?? MISSING_OBJECT_PARENT_KEY}:${object.schema ?? MISSING_OBJECT_PARENT_KEY}:${object.name}`
-}
-
-function objectAccessory(object: ObjectInfo): string | undefined {
-  switch (object.type) {
-    case "database":
-      return "db"
-    case "table":
-      return "tbl"
-    case "index":
-      return "idx"
-    case "schema":
-    case "view":
-    case "matview":
-    case "trigger":
-      return undefined
-  }
-}
-
-function sortObjectTreeNodes(nodes: MutableObjectTreeNode[]) {
-  nodes.sort((a, b) => Number(a.automatic === true) - Number(b.automatic === true))
-
-  for (const node of nodes) {
-    if (node.children.length > 0) {
-      sortObjectTreeNodes(node.children)
-    }
+    key: node.id,
+    connectionId,
+    kind: node.kind,
+    accessory: node.badge,
+    automatic: node.automatic,
+    name: node.label,
+    expanded: node.defaultExpanded,
+    children: node.children.map((child) => objectBrowserNodeToSidebarTreeNode(connectionId, child)),
   }
 }
 
