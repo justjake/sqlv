@@ -1,7 +1,8 @@
+import type { SuggestionItem } from "../editor/completion"
 import type { SqlVisor } from "../SqlVisor"
 import type { Connection } from "../types/Connection"
 import type { QueryableObjectInfo } from "../types/objects"
-import type { SuggestionItem, SuggestionProvider, SuggestionRequest } from "./types"
+import type { SuggestionProvider, SuggestionRequest } from "./types"
 
 type RankedSuggestion = {
   item: SuggestionItem
@@ -15,8 +16,11 @@ export class KnownObjectsSuggestionProvider implements SuggestionProvider {
   async getSuggestions(request: SuggestionRequest): Promise<SuggestionItem[]> {
     const state = request.engine.getState()
     const connections = state.connections.data ?? []
-    const targetConnections = resolveConnections(request.engine, request.scope.kind === "selected-connection" ? request.scope.connectionId : undefined)
-    const normalizedQuery = normalize(request.trigger.query ?? "")
+    const targetConnections = resolveConnections(
+      request.engine,
+      request.completion.scope.kind === "selected-connection" ? request.completion.scope.connectionId : undefined,
+    )
+    const normalizedQuery = normalize(request.completion.query)
     const ranked: RankedSuggestion[] = []
 
     for (const connection of targetConnections.length > 0 ? targetConnections : connections) {

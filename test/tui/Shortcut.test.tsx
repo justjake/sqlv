@@ -1,24 +1,26 @@
 import type { KeyEvent } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
 import { act, useEffect } from "react"
-import { Focusable, useFocusNavigationState, useFocusTree } from "../../src/tui/focus"
+import { Focusable } from "../../src/tui/focus/Focusable"
+import { useFocusNavigationState, useFocusTree } from "../../src/tui/focus/context"
 import { Shortcut } from "../../src/tui/Shortcut"
 import { normalizeShortcutKeyName } from "../../src/tui/ui/shortcutKeys"
-import {
-  labelizeShortcutInput,
-  parseKeys,
-  stepMatches,
-  translateNavKey,
-  useNavKeys,
-  type AliasedByNavKey,
-} from "../../src/tui/ui/keybind"
+import { type AliasedByNavKey, translateNavKey } from "../../src/tui/ui/keybind/navKeys"
+import { labelizeShortcutInput, parseKeys, stepMatches } from "../../src/tui/ui/keybind/shortcutSyntax"
+import { useNavKeys } from "../../src/tui/ui/keybind/useNavKeys"
 import { createTuiRenderHarness } from "./testUtils"
 
-const { dispatchInput, focusedPathLine, render, settleDeferredRender } = createTuiRenderHarness()
+const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()
+let focusedPath: readonly string[] | undefined
+let highlightedPath: readonly string[] | undefined
+let focusNavigationActive = false
 
 function FocusNavigationHarness() {
   const tree = useFocusTree()
   const state = useFocusNavigationState()
+  focusedPath = state.focusedPath
+  highlightedPath = state.highlightedPath
+  focusNavigationActive = state.active
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -28,7 +30,6 @@ function FocusNavigationHarness() {
 
   return (
     <box flexDirection="column">
-      <text>{`focused:${state.focusedPath?.join("/") ?? "none"} highlighted:${state.highlightedPath?.join("/") ?? "none"} nav:${state.active ? "on" : "off"}`}</text>
       <Focusable focusableId="root" flexDirection="column">
         <box flexDirection="row">
           <Focusable focusable focusableId="top-left">
@@ -383,21 +384,29 @@ describe("Shortcut", () => {
     const ui = await render(<FocusNavigationHarness />, { height: 8, width: 80 })
 
     await settleDeferredRender(ui)
-    expect(focusedPathLine(ui)).toContain("focused:root/top-left highlighted:root/top-left nav:off")
+    expect(focusedPath).toEqual(["root", "top-left"])
+    expect(highlightedPath).toEqual(["root", "top-left"])
+    expect(focusNavigationActive).toBe(false)
 
     await dispatchInput(ui, () => ui.mockInput.pressEscape())
-    expect(focusedPathLine(ui)).toContain("highlighted:root/top-left nav:on")
+    expect(focusedPath).toEqual(["root", "top-left"])
+    expect(highlightedPath).toEqual(["root", "top-left"])
+    expect(focusNavigationActive).toBe(true)
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("l"))
-    expect(focusedPathLine(ui)).toContain("highlighted:root/top-right nav:on")
+    expect(highlightedPath).toEqual(["root", "top-right"])
+    expect(focusNavigationActive).toBe(true)
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("j"))
-    expect(focusedPathLine(ui)).toContain("highlighted:root/bottom-right nav:on")
+    expect(highlightedPath).toEqual(["root", "bottom-right"])
+    expect(focusNavigationActive).toBe(true)
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("h"))
-    expect(focusedPathLine(ui)).toContain("highlighted:root/bottom-left nav:on")
+    expect(highlightedPath).toEqual(["root", "bottom-left"])
+    expect(focusNavigationActive).toBe(true)
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("k"))
-    expect(focusedPathLine(ui)).toContain("highlighted:root/top-left nav:on")
+    expect(highlightedPath).toEqual(["root", "top-left"])
+    expect(focusNavigationActive).toBe(true)
   })
 })

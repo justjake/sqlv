@@ -1,6 +1,7 @@
 import type { BoxRenderable, MouseEvent, Renderable, ScrollBoxRenderable } from "@opentui/core"
 import { useInsertionEffect, useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from "react"
-import { focusPath, type FocusApplyContext, type FocusPath, type FocusableRegistration } from "../../lib/focus"
+import { focusPath } from "../../lib/focus/paths"
+import type { FocusApplyContext, FocusPath, FocusableRegistration } from "../../lib/focus/types"
 import { FocusHalo } from "./FocusHalo"
 import { FocusPathProvider, useFocusParentPath, useFocusTree } from "./context"
 import { focusableRenderableId, renderableViewportRect, scrollViewportRect } from "./utils"
@@ -161,6 +162,7 @@ export function Focusable(props: FocusableProps) {
         {showNavigationHalo && (
           <FocusHalo
             baseZIndex={typeof boxProps.zIndex === "number" ? boxProps.zIndex : undefined}
+            getRenderable={() => renderableRef?.current ?? wrapperRef.current}
             renderable={renderableRef?.current ?? wrapperRef.current}
           />
         )}

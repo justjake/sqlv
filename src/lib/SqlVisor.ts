@@ -4,23 +4,39 @@ import { PostgresAdapter } from "./adapters/postgres"
 import { sqlite } from "./adapters/sqlite"
 import { TursoAdapter } from "./adapters/TursoAdapter"
 import { createLocalPersistence, type LocalPersistence, type PersistenceStore } from "./createLocalPersistence"
-import { replaceTextRange } from "./editor"
+import {
+  createEditorAnalysisSubject,
+  idleEditorAnalysisState,
+  type EditorAnalysisState,
+  type EditorAnalysisSubject,
+} from "./editor/analysis"
+import {
+  applyEditorBufferPatch,
+  clampCursorOffset,
+  type EditorBuffer,
+  type EditorBufferPatch,
+  type EditorChange,
+} from "./editor/buffer"
+import {
+  closedEditorCompletionState,
+  decideEditorCompletion,
+  type EditorCompletionContext,
+  type EditorCompletionItemFocusInput,
+  type EditorCompletionItemRef,
+  type EditorCompletionScope,
+  type EditorCompletionScopeMode,
+  type EditorCompletionState,
+  type SuggestionItem,
+} from "./editor/completion"
+import { createEmptyEditorState, type EditorState } from "./editor/state"
+import { replaceTextRange, type EditorRange } from "./editor/text"
 import { formatQueryText } from "./formatQuery"
 import { AdapterRegistry, type AnyAdapter, type Protocol, type ProtocolConfig } from "./interface/Adapter"
 import { QueryExecutionError, QueryRunnerImpl } from "./QueryRunnerImpl"
 import { KnownObjectsSuggestionProvider } from "./suggestions/KnownObjectsSuggestionProvider"
-import type {
-  EditorRange,
-  EditorSuggestionMenuTrigger,
-  EditorSuggestionScope,
-  EditorSuggestionScopeMode,
-  SuggestionItem,
-  SuggestionProvider,
-  SuggestionRequest,
-} from "./suggestions/types"
+import type { SuggestionProvider, SuggestionRequest } from "./suggestions/types"
 import { selectStoredRows } from "./sqliteRowStore"
 import type { Connection } from "./types/Connection"
-import type { ExplainResult } from "./types/Explain"
 import { createId } from "./types/Id"
 import { EpochMillis, type LogEntry, type QueryExecution, type QueryFlow, type Session } from "./types/Log"
 import type { ObjectInfo } from "./types/objects"
@@ -37,50 +53,20 @@ import {
 } from "./types/Settings"
 import { unsafeRawSQL } from "./types/SQL"
 
-export type EditorSuggestionMenuItemRef = {
-  id: string
-}
-
-export type EditorSuggestionMenuItemFocusInput =
-  | EditorSuggestionMenuItemRef
-  | {
-      delta: number
-    }
-  | {
-      index: number
-    }
-
-export type EditorSuggestionMenuStatus = "closed" | "loading" | "ready" | "error"
-export type EditorAnalysisStatus = "idle" | "loading" | "ready" | "error"
-
-export type EditorSuggestionMenuState = {
-  open: boolean
-  status: EditorSuggestionMenuStatus
-  trigger?: EditorSuggestionMenuTrigger
-  query: string
-  replacementRange?: EditorRange
-  scope?: EditorSuggestionScope
-  items: SuggestionItem[]
-  focusedItemId?: string
-  error?: string
-}
-
-export type EditorAnalysisState = {
-  status: EditorAnalysisStatus
-  requestedText?: string
-  connectionId?: string
-  result?: ExplainResult
-  error?: string
-}
-
-export type EditorState = {
-  text: string
-  cursorOffset: number
-  savedQueryId?: string
-  treeSitterGrammar?: string
-  suggestionScopeMode: EditorSuggestionScopeMode
-  suggestionMenu: EditorSuggestionMenuState
-  analysis: EditorAnalysisState
+export type {
+  EditorAnalysisState,
+  EditorAnalysisSubject,
+  EditorBuffer,
+  EditorChange,
+  EditorCompletionContext,
+  EditorCompletionItemFocusInput,
+  EditorCompletionItemRef,
+  EditorCompletionScope,
+  EditorCompletionScopeMode,
+  EditorCompletionState,
+  EditorState,
+  EditorRange,
+  SuggestionItem,
 }
 
 export type DetailView =
@@ -151,12 +137,6 @@ export type RunQueryInput = {
   connectionId?: string
 }
 
-export type RequestEditorAnalysisInput = {
-  text?: string
-  connectionId?: string
-  parentFlowId?: string
-}
-
 export type SaveQueryAsNewInput = {
   name: string
   text?: string
@@ -172,14 +152,6 @@ export type SaveSavedQueryChangesInput = {
 export type RestoreSavedQueryResult = {
   savedQuery: SavedQuery
   queryExecutionId?: string
-}
-
-export type OpenEditorSuggestionMenuInput = {
-  documentText: string
-  cursorOffset: number
-  replacementRange: EditorRange
-  trigger: EditorSuggestionMenuTrigger
-  scope?: EditorSuggestionScope
 }
 
 export type SqlVisorCreateOptions = {
@@ -258,14 +230,7 @@ export class SqlVisor {
       connections: pendingQueryState<Connection<any>[]>(),
       connectionSuggestions: pendingQueryState<DiscoveredConnectionSuggestion[]>(),
       selectedConnectionId: undefined,
-      editor: {
-        analysis: idleEditorAnalysisState(),
-        text: "",
-        cursorOffset: 0,
-        savedQueryId: undefined,
-        suggestionScopeMode: "all-connections",
-        suggestionMenu: closedEditorSuggestionMenuState(),
-      },
+      editor: createEmptyEditorState(),
       history: [],
       savedQueries: [],
       settings: defaultSettingsState(),
@@ -411,24 +376,65 @@ export class SqlVisor {
     this.#applySelectedConnection(connectionId)
   }
 
-  setEditorState(
-    patch: Partial<Pick<EditorState, "text" | "cursorOffset">> & {
+  setEditorBuffer(
+    patch: EditorBufferPatch & {
       savedQueryId?: string | null
     },
   ) {
+    const buffer = applyEditorBufferPatch(this.#state.editor.buffer, patch)
+    if (buffer === this.#state.editor.buffer && patch.savedQueryId === undefined) {
+      return
+    }
+
     this.#setState({
       editor: {
         ...this.#state.editor,
-        text: patch.text ?? this.#state.editor.text,
-        cursorOffset: patch.cursorOffset ?? this.#state.editor.cursorOffset,
+        buffer,
         savedQueryId:
           patch.savedQueryId === undefined ? this.#state.editor.savedQueryId : (patch.savedQueryId ?? undefined),
       },
     })
   }
 
+  applyEditorChange(change: EditorChange) {
+    if (change.next === this.#state.editor.buffer) {
+      return
+    }
+
+    const completionDecision = decideEditorCompletion({
+      change,
+      completion: this.#state.editor.completion,
+      scopeMode: this.#state.editor.completionScopeMode,
+      selectedConnectionId: this.#state.selectedConnectionId,
+    })
+
+    if (completionDecision.kind === "open") {
+      this.#openEditorCompletion(completionDecision.context, change.next)
+      return
+    }
+
+    if (completionDecision.kind === "close") {
+      this.#abortSuggestionRequest()
+      this.#setState({
+        editor: {
+          ...this.#state.editor,
+          buffer: change.next,
+          completion: closedEditorCompletionState(),
+        },
+      })
+      return
+    }
+
+    this.#setState({
+      editor: {
+        ...this.#state.editor,
+        buffer: change.next,
+      },
+    })
+  }
+
   formatEditorQuery(): boolean {
-    const text = this.#state.editor.text
+    const text = this.#state.editor.buffer.text
     if (!text.trim()) {
       return false
     }
@@ -444,9 +450,9 @@ export class SqlVisor {
       return false
     }
 
-    this.closeEditorSuggestionMenu()
-    this.setEditorState({
-      cursorOffset: clampCursorOffset(this.#state.editor.cursorOffset, formattedText.length),
+    this.closeEditorCompletion()
+    this.setEditorBuffer({
+      cursorOffset: clampCursorOffset(this.#state.editor.buffer.cursorOffset, formattedText.length),
       text: formattedText,
     })
     return true
@@ -454,7 +460,7 @@ export class SqlVisor {
 
   async saveQueryAsNew(input: SaveQueryAsNewInput): Promise<SavedQuery> {
     const name = input.name.trim()
-    const text = input.text ?? this.#state.editor.text
+    const text = input.text ?? this.#state.editor.buffer.text
     if (!name) {
       throw new Error("Saved query name is required.")
     }
@@ -497,7 +503,7 @@ export class SqlVisor {
     }
 
     const name = input.name === undefined ? current.name : input.name.trim()
-    const text = input.text ?? this.#state.editor.text
+    const text = input.text ?? this.#state.editor.buffer.text
     if (!name) {
       throw new Error("Saved query name is required.")
     }
@@ -553,12 +559,13 @@ export class SqlVisor {
     this.#setState({ detailView })
   }
 
-  requestEditorAnalysis(input: RequestEditorAnalysisInput = {}) {
-    const text = input.text ?? this.#state.editor.text
-    const connectionId = input.connectionId ?? this.#state.selectedConnectionId
+  requestEditorAnalysis(parentFlowId?: string) {
+    const buffer = this.#state.editor.buffer
+    const connectionId = this.#state.selectedConnectionId
+    const subject = createEditorAnalysisSubject(buffer, connectionId)
     this.#abortEditorAnalysisRequest()
 
-    if (!text.trim() || !connectionId) {
+    if (!subject.text.trim() || !connectionId) {
       this.#setState({
         editor: {
           ...this.#state.editor,
@@ -575,13 +582,12 @@ export class SqlVisor {
         editor: {
           ...this.#state.editor,
           analysis: {
-            connectionId,
-            requestedText: text,
             result: {
               diagnostics: [],
               status: "unsupported",
             },
             status: "ready",
+            subject,
           },
         },
       })
@@ -596,11 +602,10 @@ export class SqlVisor {
       editor: {
         ...this.#state.editor,
         analysis: {
-          connectionId,
           error: undefined,
-          requestedText: text,
           result: undefined,
           status: "loading",
+          subject,
         },
       },
     })
@@ -608,9 +613,8 @@ export class SqlVisor {
     void this.#loadEditorAnalysis(requestId, {
       abortSignal: abortController.signal,
       connection,
-      connectionId,
-      parentFlowId: input.parentFlowId,
-      text,
+      parentFlowId,
+      subject,
     })
   }
 
@@ -639,9 +643,9 @@ export class SqlVisor {
     this.#applySelectedConnection(restoredConnectionId, {
       persistSidebarSelection: restoredConnectionId !== undefined,
     })
-    this.closeEditorSuggestionMenu()
+    this.closeEditorCompletion()
     this.cancelEditorAnalysis()
-    this.setEditorState({
+    this.setEditorBuffer({
       cursorOffset: execution.sql.source.length,
       savedQueryId: execution.savedQueryId ?? null,
       text: execution.sql.source,
@@ -665,9 +669,9 @@ export class SqlVisor {
       this.#syncQueryState()
     }
 
-    this.closeEditorSuggestionMenu()
+    this.closeEditorCompletion()
     this.cancelEditorAnalysis()
-    this.setEditorState({
+    this.setEditorBuffer({
       cursorOffset: savedQuery.text.length,
       savedQueryId: savedQuery.id,
       text: savedQuery.text,
@@ -733,12 +737,12 @@ export class SqlVisor {
   }
 
   runQuery(input: RunQueryInput = {}): QueryRef {
-    const text = input.text ?? this.#state.editor.text
+    const text = input.text ?? this.#state.editor.buffer.text
     const connectionId = input.connectionId ?? this.#state.selectedConnectionId
     const savedQueryId = this.#state.editor.savedQueryId
 
     if (input.text !== undefined) {
-      this.setEditorState({
+      this.setEditorBuffer({
         cursorOffset: input.text.length,
         text: input.text,
       })
@@ -846,116 +850,79 @@ export class SqlVisor {
     return queryRef
   }
 
-  openEditorSuggestionMenu(input: OpenEditorSuggestionMenuInput) {
-    const scope = this.#resolveEditorSuggestionScope(input.scope)
-    this.#abortSuggestionRequest()
-
-    const requestId = ++this.#suggestionRequestSerial
-    const abortController = new AbortController()
-    this.#suggestionAbortController = abortController
-    const previousFocusedItemId = this.#state.editor.suggestionMenu.focusedItemId
-    const query = input.trigger.query ?? ""
-
-    this.#setState({
-      editor: {
-        ...this.#state.editor,
-        cursorOffset: input.cursorOffset,
-        text: input.documentText,
-        suggestionMenu: {
-          error: undefined,
-          focusedItemId: previousFocusedItemId,
-          items: [],
-          open: true,
-          query,
-          replacementRange: input.replacementRange,
-          scope,
-          status: "loading",
-          trigger: input.trigger,
-        },
-      },
-    })
-
-    const request: SuggestionRequest = {
-      abortSignal: abortController.signal,
-      cursorOffset: input.cursorOffset,
-      documentText: input.documentText,
-      engine: this,
-      replacementRange: input.replacementRange,
-      scope,
-      trigger: input.trigger,
-    }
-
-    void this.#loadSuggestionItems(requestId, request)
+  openEditorCompletion(context: EditorCompletionContext) {
+    this.#openEditorCompletion(context, this.#state.editor.buffer)
   }
 
-  closeEditorSuggestionMenu() {
+  closeEditorCompletion() {
     this.#abortSuggestionRequest()
     this.#setState({
       editor: {
         ...this.#state.editor,
-        suggestionMenu: closedEditorSuggestionMenuState(),
+        completion: closedEditorCompletionState(),
       },
     })
   }
 
-  focusEditorSuggestionMenuItem(input: EditorSuggestionMenuItemFocusInput) {
-    const menu = this.#state.editor.suggestionMenu
-    if (!menu.open || menu.items.length === 0) {
+  focusEditorCompletionItem(input: EditorCompletionItemFocusInput) {
+    const completion = this.#state.editor.completion
+    if (completion.status === "closed" || completion.items.length === 0) {
       return
     }
 
-    let nextFocusedItemId = menu.focusedItemId ?? menu.items[0]?.id
+    let nextFocusedItemId = completion.focusedItemId ?? completion.items[0]?.id
 
     if ("id" in input) {
-      if (menu.items.some((item) => item.id === input.id)) {
+      if (completion.items.some((item) => item.id === input.id)) {
         nextFocusedItemId = input.id
       }
     } else if ("index" in input) {
-      nextFocusedItemId = menu.items[clamp(input.index, menu.items.length)]?.id
+      nextFocusedItemId = completion.items[clamp(input.index, completion.items.length)]?.id
     } else if ("delta" in input) {
-      const currentIndex = menu.items.findIndex((item) => item.id === menu.focusedItemId)
+      const currentIndex = completion.items.findIndex((item) => item.id === completion.focusedItemId)
       const baseIndex = currentIndex >= 0 ? currentIndex : 0
-      nextFocusedItemId = menu.items[clamp(baseIndex + input.delta, menu.items.length)]?.id
+      nextFocusedItemId = completion.items[clamp(baseIndex + input.delta, completion.items.length)]?.id
     }
 
-    if (!nextFocusedItemId || nextFocusedItemId === menu.focusedItemId) {
+    if (!nextFocusedItemId || nextFocusedItemId === completion.focusedItemId) {
       return
     }
 
     this.#setState({
       editor: {
         ...this.#state.editor,
-        suggestionMenu: {
-          ...menu,
+        completion: {
+          ...completion,
           focusedItemId: nextFocusedItemId,
         },
       },
     })
   }
 
-  applyEditorSuggestionMenuItem(ref?: EditorSuggestionMenuItemRef): boolean {
-    const menu = this.#state.editor.suggestionMenu
+  applyEditorCompletionItem(ref?: EditorCompletionItemRef): boolean {
+    const completion = this.#state.editor.completion
     const item =
-      (ref ? menu.items.find((candidate) => candidate.id === ref.id) : undefined) ??
-      menu.items.find((candidate) => candidate.id === menu.focusedItemId) ??
-      menu.items[0]
+      (ref ? completion.items.find((candidate) => candidate.id === ref.id) : undefined) ??
+      completion.items.find((candidate) => candidate.id === completion.focusedItemId) ??
+      completion.items[0]
 
-    if (!menu.open || !menu.replacementRange || !item) {
+    if (completion.status === "closed" || !completion.context || !item) {
       return false
     }
 
-    const nextText = replaceTextRange(this.#state.editor.text, menu.replacementRange, item.insertText)
-    const cursorOffset = menu.replacementRange.start + item.insertText.length
-    const suggestionScopeMode = item.connectionId ? "selected-connection" : this.#state.editor.suggestionScopeMode
+    const nextText = replaceTextRange(this.#state.editor.buffer.text, completion.context.replaceRange, item.insertText)
+    const completionScopeMode = item.connectionId ? "selected-connection" : this.#state.editor.completionScopeMode
 
     this.#abortSuggestionRequest()
     this.#setState({
       editor: {
         ...this.#state.editor,
-        cursorOffset,
-        suggestionMenu: closedEditorSuggestionMenuState(),
-        suggestionScopeMode,
-        text: nextText,
+        buffer: applyEditorBufferPatch(this.#state.editor.buffer, {
+          cursorOffset: completion.context.replaceRange.start + item.insertText.length,
+          text: nextText,
+        }),
+        completion: closedEditorCompletionState(),
+        completionScopeMode,
       },
     })
 
@@ -964,6 +931,38 @@ export class SqlVisor {
     }
 
     return true
+  }
+
+  #openEditorCompletion(context: EditorCompletionContext, buffer: EditorBuffer) {
+    this.#abortSuggestionRequest()
+
+    const requestId = ++this.#suggestionRequestSerial
+    const abortController = new AbortController()
+    this.#suggestionAbortController = abortController
+    const previousFocusedItemId = this.#state.editor.completion.focusedItemId
+
+    this.#setState({
+      editor: {
+        ...this.#state.editor,
+        buffer,
+        completion: {
+          context,
+          error: undefined,
+          focusedItemId: previousFocusedItemId,
+          items: [],
+          status: "loading",
+        },
+      },
+    })
+
+    const request: SuggestionRequest = {
+      abortSignal: abortController.signal,
+      buffer,
+      completion: context,
+      engine: this,
+    }
+
+    void this.#loadSuggestionItems(requestId, request)
   }
 
   async loadConnectionObjects(connectionId: string): Promise<ObjectInfo[]> {
@@ -1083,23 +1082,6 @@ export class SqlVisor {
     return connection
   }
 
-  #resolveEditorSuggestionScope(scope: EditorSuggestionScope | undefined): EditorSuggestionScope {
-    if (scope) {
-      return scope
-    }
-
-    if (this.#state.editor.suggestionScopeMode === "selected-connection" && this.#state.selectedConnectionId) {
-      return {
-        connectionId: this.#state.selectedConnectionId,
-        kind: "selected-connection",
-      }
-    }
-
-    return {
-      kind: "all-connections",
-    }
-  }
-
   async #loadSuggestionItems(requestId: number, request: SuggestionRequest) {
     try {
       const providerResults = await Promise.all(
@@ -1111,19 +1093,18 @@ export class SqlVisor {
       }
 
       const items = providerResults.flat()
-      const focusedItemId = items.some((item) => item.id === this.#state.editor.suggestionMenu.focusedItemId)
-        ? this.#state.editor.suggestionMenu.focusedItemId
+      const focusedItemId = items.some((item) => item.id === this.#state.editor.completion.focusedItemId)
+        ? this.#state.editor.completion.focusedItemId
         : items[0]?.id
 
       this.#setState({
         editor: {
           ...this.#state.editor,
-          suggestionMenu: {
-            ...this.#state.editor.suggestionMenu,
+          completion: {
+            ...this.#state.editor.completion,
             error: undefined,
             focusedItemId,
             items,
-            open: true,
             status: "ready",
           },
         },
@@ -1140,12 +1121,11 @@ export class SqlVisor {
       this.#setState({
         editor: {
           ...this.#state.editor,
-          suggestionMenu: {
-            ...this.#state.editor.suggestionMenu,
+          completion: {
+            ...this.#state.editor.completion,
             error: error.message,
             focusedItemId: undefined,
             items: [],
-            open: true,
             status: "error",
           },
         },
@@ -1170,12 +1150,11 @@ export class SqlVisor {
     args: {
       abortSignal: AbortSignal
       connection: Connection<any>
-      connectionId: string
       parentFlowId?: string
-      text: string
+      subject: EditorAnalysisSubject
     },
   ) {
-    const { abortSignal, connection, connectionId, parentFlowId, text } = args
+    const { abortSignal, connection, parentFlowId, subject } = args
     const adapter = this.registry.get(connection.protocol)
     if (!adapter.explain) {
       return
@@ -1196,7 +1175,7 @@ export class SqlVisor {
 
       const result = await adapter.explain(db.withFlow(flow), {
         abortSignal,
-        text,
+        text: subject.text,
       })
 
       if (abortSignal.aborted || requestId !== this.#editorAnalysisRequestSerial) {
@@ -1207,11 +1186,10 @@ export class SqlVisor {
         editor: {
           ...this.#state.editor,
           analysis: {
-            connectionId,
             error: undefined,
-            requestedText: text,
             result,
             status: "ready",
+            subject,
           },
         },
       })
@@ -1228,11 +1206,10 @@ export class SqlVisor {
         editor: {
           ...this.#state.editor,
           analysis: {
-            connectionId,
             error: error.message,
-            requestedText: text,
             result: undefined,
             status: "error",
+            subject,
           },
         },
       })
@@ -1479,10 +1456,6 @@ function createQueryClient(): QueryClient {
   })
 }
 
-function clampCursorOffset(value: number, max: number): number {
-  return Math.min(Math.max(value, 0), max)
-}
-
 function createSyntheticQueryExecution(args: {
   id: string
   initiator: "user" | "system"
@@ -1658,21 +1631,6 @@ function partialConfigMatches(actual: unknown, partial: unknown): boolean {
   }
 
   return Object.entries(partial).every(([key, value]) => partialConfigMatches((actual as Record<string, unknown>)[key], value))
-}
-
-function closedEditorSuggestionMenuState(): EditorSuggestionMenuState {
-  return {
-    items: [],
-    open: false,
-    query: "",
-    status: "closed",
-  }
-}
-
-function idleEditorAnalysisState(): EditorAnalysisState {
-  return {
-    status: "idle",
-  }
 }
 
 function clamp(index: number, length: number): number {

@@ -1,30 +1,29 @@
 import { createCliRenderer, type MouseEvent } from "@opentui/core"
 import { createRoot, flushSync, useTerminalDimensions } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { sameFocusPath } from "../lib/focus"
-import { SqlVisor, type ActiveQuery, type DetailView, type DiscoveredConnectionSuggestion, type QueryExecution } from "../index"
+import { focusPath, sameFocusPath } from "../lib/focus/paths"
+import { SqlVisor, type ActiveQuery, type DetailView, type DiscoveredConnectionSuggestion } from "../lib/SqlVisor"
 import type { Connection } from "../lib/types/Connection"
+import type { QueryExecution } from "../lib/types/Log"
 import { AddConnectionPane } from "./connection/AddConnectionPane"
 import { ResultsTable, RESULTS_TABLE_FOCUS_ID } from "./dataview/ResultsTable"
-import { QueryListTable, type TableColumn } from "./dataview/table"
+import { QueryListTable } from "./dataview/table/QueryListTable"
+import type { TableColumn } from "./dataview/table/Table"
 import { EditorView, QUERY_EDITOR_FOCUS_ID } from "./editor/EditorView"
 import { QueryHistory, type QueryFinderEntry } from "./editor/QueryHistory"
 import { SaveQueryDialog } from "./editor/SaveQueryDialog"
-import {
-  Focusable,
-  FocusNavigationHint,
-  FocusProvider,
-  useFocusedDescendantPath,
-  useFocusTree,
-  useIsFocusNavigationActive,
-  useIsFocusWithin,
-} from "./focus"
+import { FocusChrome } from "./focus/FocusChrome"
+import { Focusable } from "./focus/Focusable"
+import { FocusProvider, useFocusedDescendantPath, useFocusTree, useIsFocusNavigationActive, useIsFocusWithin } from "./focus/context"
+import { useOpaqueIdMap } from "./focus/opaqueIds"
 import { Separator } from "./Separator"
 import { SettingsPane } from "./sidebar/SettingsPane"
 import { SIDEBAR_AREA_ID, Sidebar } from "./sidebar/Sidebar"
-import { SIDEBAR_TREE_AREA_ID, treeRowFocusId } from "./sidebar/TreeView"
+import { SIDEBAR_TREE_AREA_ID } from "./sidebar/TreeView"
 import { ConfirmModal } from "./ui/ConfirmModal"
-import { KeybindProvider, useNavKeys, useShortcut } from "./ui/keybind"
+import { KeybindProvider } from "./ui/keybind/KeybindProvider"
+import { useNavKeys } from "./ui/keybind/useNavKeys"
+import { useShortcut } from "./ui/keybind/useShortcut"
 import { Modal } from "./ui/Modal"
 import { ModalPresenterProvider, usePresentModal, usePresentedModalCount } from "./ui/presentModal"
 import { Text } from "./ui/Text"
@@ -70,6 +69,7 @@ const EMPTY_RECENT_QUERY_ROW_COUNT = 3
 
 export const RECENT_QUERY_FOCUS_ID = "recent-query-view"
 export const RECENT_QUERY_AREA_ID = "recent-query-list"
+const RECENT_QUERY_AREA_PATH = [RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID] as const
 
 export function App() {
   return (
@@ -163,8 +163,8 @@ function AppBody() {
   }
 
   const handleRequestEditorAnalysis = useCallback(
-    (input?: Parameters<SqlVisor["requestEditorAnalysis"]>[0]) => {
-      engine.requestEditorAnalysis(input)
+    () => {
+      engine.requestEditorAnalysis()
     },
     [engine],
   )
@@ -275,7 +275,7 @@ function AppBody() {
       queueMicrotask(() => {
         const nextSelectedConnectionId = engine.getState().selectedConnectionId
         if (nextSelectedConnectionId) {
-          tree.focusPath([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(nextSelectedConnectionId)])
+          tree.focusPath([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID])
           return
         }
 
@@ -404,23 +404,20 @@ function AppBody() {
         <box flexDirection="column" flexBasis={editorHeight}>
           {pane === "editor" && (
             <EditorView
-              analysisConnectionId={state.selectedConnectionId}
               autoFocus
               editor={state.editor}
-              onApplySuggestionMenuItem={() => engine.applyEditorSuggestionMenuItem()}
+              onApplyCompletionItem={() => engine.applyEditorCompletionItem()}
               onCancelAnalysis={handleCancelEditorAnalysis}
-              onCloseSuggestionMenu={() => engine.closeEditorSuggestionMenu()}
-              onEditorChange={(patch) => engine.setEditorState(patch)}
+              onChange={(change) => engine.applyEditorChange(change)}
+              onCloseCompletion={() => engine.closeEditorCompletion()}
               onExecute={handleExecute}
-              onFocusSuggestionMenuItem={(input) => engine.focusEditorSuggestionMenuItem(input)}
+              onFocusCompletionItem={(input) => engine.focusEditorCompletionItem(input)}
               onFormatQuery={() => engine.formatEditorQuery()}
               onHistory={() => setPane("history")}
-              onOpenSuggestionMenu={(input) => engine.openEditorSuggestionMenu(input)}
               onRequestAnalysis={handleRequestEditorAnalysis}
               onSaveAsNew={handleOpenSaveDialog}
               onSaveChanges={currentSavedQuery ? handleSaveChanges : undefined}
               savedQuery={currentSavedQuery}
-              selectedConnectionId={state.selectedConnectionId}
             />
           )}
           {pane === "history" && (
@@ -479,7 +476,7 @@ function AppBody() {
         />
       )}
       {settingsOpen && <SettingsModal onClose={handleCloseSettings} termHeight={termHeight} termWidth={termWidth} />}
-      <FocusNavigationHint />
+      <FocusChrome />
     </box>
   )
 }
@@ -587,6 +584,18 @@ function RecentQueryViewBody(props: {
   const navigationActive = useIsFocusNavigationActive()
   const focusedDescendantPath = useFocusedDescendantPath()
   const [now, setNow] = useState(Date.now)
+  const queryIds = useMemo(() => queries.map((query) => query.queryId), [queries])
+  const queryFocusIds = useOpaqueIdMap(queryIds, "query")
+  const queryPaths = useMemo(() => {
+    const next = new Map<string, readonly string[]>()
+    for (const queryId of queryIds) {
+      const focusableId = queryFocusIds.get(queryId)
+      if (focusableId) {
+        next.set(queryId, focusPath(RECENT_QUERY_AREA_PATH, focusableId))
+      }
+    }
+    return next
+  }, [queryFocusIds, queryIds])
 
   useEffect(() => {
     if (!queries.some((query) => query.isActive)) {
@@ -596,7 +605,7 @@ function RecentQueryViewBody(props: {
     return () => clearInterval(interval)
   }, [queries])
 
-  const focusedQueryId = resolveRecentQueryId(focusedDescendantPath)
+  const focusedQueryId = resolveFocusedRecentQueryId(focusedDescendantPath, queryPaths)
   const currentQueryId = focusedQueryId ?? selectedQueryId ?? queries[0]?.queryId
   const selectedIndex = queries.findIndex((query) => query.queryId === currentQueryId)
   const currentIndex = selectedIndex >= 0 ? selectedIndex : 0
@@ -680,16 +689,20 @@ function RecentQueryViewBody(props: {
       return
     }
     queueMicrotask(() => {
-      tree.focusPath(recentQueryRowPath(query.queryId))
+      const queryPath = queryPaths.get(query.queryId)
+      if (queryPath) {
+        tree.focusPath(queryPath)
+      }
     })
-  }, [currentQuery, focusedDescendantPath, focusedWithin, queries, selectedQueryId, tree])
+  }, [currentQuery, focusedDescendantPath, focusedWithin, queries, queryPaths, selectedQueryId, tree])
 
   function focusRow(nextIndex: number) {
     const query = queries[nextIndex]
-    if (!query) {
+    const queryPath = query ? queryPaths.get(query.queryId) : undefined
+    if (!queryPath) {
       return
     }
-    tree.focusPath(recentQueryRowPath(query.queryId))
+    tree.focusPath(queryPath)
   }
 
   useNavKeys({
@@ -728,10 +741,10 @@ function RecentQueryViewBody(props: {
           columns={columns}
           width={width}
           getRowKey={(row) => (row.kind === "query" ? row.query.queryId : row.id)}
-          getRowFocusableId={(row) => (row.kind === "query" ? recentQueryFocusId(row.query.queryId) : undefined)}
+          getRowFocusableId={(row) => (row.kind === "query" ? queryFocusIds.get(row.query.queryId) : undefined)}
           isRowDimmed={(row) => (row.kind === "query" ? row.dimmed : false)}
           isRowFocused={(row) =>
-            row.kind === "query" ? sameFocusPath(recentQueryRowPath(row.query.queryId), focusedDescendantPath) : false
+            row.kind === "query" ? sameFocusPath(queryPaths.get(row.query.queryId), focusedDescendantPath) : false
           }
           isRowSelected={(row) => (row.kind === "query" ? row.query.queryId === selectedQueryId : false)}
         />
@@ -913,27 +926,16 @@ function recentQueryStatusColor(query: RecentQuery, theme: ReturnType<typeof use
   }
 }
 
-export function recentQueryFocusId(queryId: string): string {
-  return `query-${queryId}`
-}
-
-function recentQueryRowPath(queryId: string): readonly [string, string, string] {
-  return [RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(queryId)]
-}
-
-function resolveRecentQueryId(path: readonly string[] | undefined): string | undefined {
-  const queryId = path?.[2]
-  if (
-    !path ||
-    path.length !== 3 ||
-    path[0] !== RECENT_QUERY_FOCUS_ID ||
-    path[1] !== RECENT_QUERY_AREA_ID ||
-    !queryId?.startsWith("query-")
-  ) {
-    return undefined
+function resolveFocusedRecentQueryId(
+  path: readonly string[] | undefined,
+  queryPaths: ReadonlyMap<string, readonly string[]>,
+): string | undefined {
+  for (const [queryId, queryPath] of queryPaths) {
+    if (sameFocusPath(queryPath, path)) {
+      return queryId
+    }
   }
-
-  return queryId.slice("query-".length)
+  return undefined
 }
 
 function formatTime(epochMs: number): string {

@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react"
 import type { ConnectionSuggestionsState, DiscoveredConnectionSuggestion } from "../../lib/SqlVisor"
 import type { ObjectInfo, QueryableObjectInfo } from "../../lib/types/objects"
-import { Focusable } from "../focus"
+import { Focusable } from "../focus/Focusable"
 import { Shortcut } from "../Shortcut"
 import { IconProvider, resolveIconStyle } from "../ui/icons"
 import { Text } from "../ui/Text"

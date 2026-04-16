@@ -1,6 +1,6 @@
 import { flushSync } from "@opentui/react"
 import { createContext, createElement, useCallback, useContext, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react"
-import { useFocusTree } from "../focus"
+import { useFocusTree } from "../focus/context"
 import { ResolvableProvider, type InferResolvableComponentResult } from "./resolvable"
 
 type PresentModalComponent = (props: any) => ReactNode

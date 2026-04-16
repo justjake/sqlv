@@ -1,15 +1,9 @@
 import type { ReactNode } from "react"
-import type { FocusPath } from "../../lib/focus"
-import {
-  Focusable,
-  useFocusParentPath,
-  useFocusedDescendantPath,
-  useHighlightedDescendantPath,
-  useIsFocusNavigationActive,
-  useIsFocusWithin,
-  useRememberedDescendantPath,
-} from "../focus"
-import { useNavKeys, useShortcut } from "../ui/keybind"
+import type { FocusPath } from "../../lib/focus/types"
+import { Focusable } from "../focus/Focusable"
+import { useFocusParentPath, useFocusedDescendantPath, useHighlightedDescendantPath, useIsFocusNavigationActive, useIsFocusWithin, useRememberedDescendantPath } from "../focus/context"
+import { useNavKeys } from "../ui/keybind/useNavKeys"
+import { useShortcut } from "../ui/keybind/useShortcut"
 import { FieldLabel } from "./FieldLabel"
 
 export type FieldProps = {

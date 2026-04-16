@@ -1,6 +1,6 @@
 import { useTerminalDimensions } from "@opentui/react"
 import type { ReactNode } from "react"
-import { Focusable } from "../focus"
+import { Focusable } from "../focus/Focusable"
 import { DEFAULT_MODAL_Z_INDEX, resolveModalViewportBounds } from "./modalShared"
 import { Text } from "./Text"
 import { useTheme } from "./theme"

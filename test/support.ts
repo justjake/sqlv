@@ -6,15 +6,30 @@ import { PostgresAdapter } from "../src/lib/adapters/postgres"
 import { TursoAdapter } from "../src/lib/adapters/TursoAdapter"
 import { createSession } from "../src/lib/createLocalPersistence"
 import { createNoopLogStore } from "../src/lib/createNoopLogStore"
+import {
+  createEditorAnalysisSubject,
+  idleEditorAnalysisState,
+  type EditorAnalysisState,
+} from "../src/lib/editor/analysis"
+import {
+  applyEditorBufferPatch,
+  type EditorBufferPatch,
+  type EditorChange,
+} from "../src/lib/editor/buffer"
+import {
+  closedEditorCompletionState,
+  decideEditorCompletion,
+  type EditorCompletionContext,
+  type EditorCompletionItemFocusInput,
+  type EditorCompletionItemRef,
+  type EditorCompletionState,
+} from "../src/lib/editor/completion"
+import { createEmptyEditorState, type EditorState } from "../src/lib/editor/state"
+import { replaceTextRange } from "../src/lib/editor/text"
 import { AdapterRegistry, type Protocol } from "../src/lib/interface/Adapter"
 import { QueryRunnerImpl } from "../src/lib/QueryRunnerImpl"
 import {
   type AddConnectionInput,
-  type RequestEditorAnalysisInput,
-  type EditorState,
-  type EditorSuggestionMenuItemFocusInput,
-  type EditorSuggestionMenuItemRef,
-  type OpenEditorSuggestionMenuInput,
   type QueryRef,
   type RestoreSavedQueryResult,
   type RunQueryInput,
@@ -165,29 +180,31 @@ export function makeSettingsRow<Id extends SettingsId>(
   }
 }
 
+type EditorStatePatch = Partial<Omit<EditorState, "analysis" | "buffer" | "completion">> & {
+  analysis?: Partial<EditorAnalysisState>
+  buffer?: EditorBufferPatch
+  completion?: Partial<EditorCompletionState>
+}
+
 type SqlVisorStatePatch = Partial<Omit<SqlVisorState, "editor" | "settings">> & {
-  editor?: Partial<EditorState>
+  editor?: EditorStatePatch
   settings?: Partial<SettingsState>
 }
 
 export function createSqlVisorState(patch: SqlVisorStatePatch = {}): SqlVisorState {
+  const baseEditor = createEmptyEditorState()
   const editor: EditorState = {
+    ...baseEditor,
+    ...patch.editor,
     analysis: {
-      status: "idle",
+      ...baseEditor.analysis,
       ...patch.editor?.analysis,
     },
-    cursorOffset: 0,
-    savedQueryId: patch.editor?.savedQueryId,
-    suggestionMenu: {
-      items: [],
-      open: false,
-      query: "",
-      status: "closed",
-      ...patch.editor?.suggestionMenu,
+    buffer: applyEditorBufferPatch(baseEditor.buffer, patch.editor?.buffer ?? {}),
+    completion: {
+      ...baseEditor.completion,
+      ...patch.editor?.completion,
     },
-    suggestionScopeMode: "all-connections",
-    text: "",
-    ...patch.editor,
   }
   const emptyDetailView: SqlVisorState["detailView"] = {
     kind: "empty",
@@ -216,19 +233,20 @@ export function createSqlVisorState(patch: SqlVisorStatePatch = {}): SqlVisorSta
 
 type EngineMethodOverrides = {
   addConnection?: (input: AddConnectionInput) => Promise<Connection<any>>
-  applyEditorSuggestionMenuItem?: (ref?: EditorSuggestionMenuItemRef) => boolean
+  applyEditorChange?: (change: EditorChange) => void
+  applyEditorCompletionItem?: (ref?: EditorCompletionItemRef) => boolean
   cancelEditorAnalysis?: () => void
   cancelQuery?: (query: QueryRef) => void
   cancelRunningQueries?: () => void
-  closeEditorSuggestionMenu?: () => void
+  closeEditorCompletion?: () => void
   deleteConnection?: (connectionId: string) => Promise<void>
   formatEditorQuery?: () => boolean
-  focusEditorSuggestionMenuItem?: (input: EditorSuggestionMenuItemFocusInput) => void
+  focusEditorCompletionItem?: (input: EditorCompletionItemFocusInput) => void
   getQueryState?: (query: QueryRef) => QueryState<QueryExecution>
   loadConnectionObjects?: (connectionId: string) => Promise<ObjectInfo[]>
-  openEditorSuggestionMenu?: (input: OpenEditorSuggestionMenuInput) => void
+  openEditorCompletion?: (context: EditorCompletionContext) => void
   refreshConnectionSuggestions?: () => Promise<any[]>
-  requestEditorAnalysis?: (input?: RequestEditorAnalysisInput) => void
+  requestEditorAnalysis?: (parentFlowId?: string) => void
   restoreSavedQuery?: (savedQueryId: string) => RestoreSavedQueryResult | undefined
   runQuery?: (input?: RunQueryInput) => QueryRef
   restoreHistoryEntry?: (entryId: string) => void
@@ -237,9 +255,7 @@ type EngineMethodOverrides = {
   saveQueryAsNew?: (input: SaveQueryAsNewInput) => Promise<SavedQuery>
   saveSavedQueryChanges?: (input?: SaveSavedQueryChangesInput) => Promise<SavedQuery>
   replaceSettings?: <Id extends SettingsId>(id: Id, settings: SettingsSchema[Id]) => Promise<SettingsSchema[Id]>
-  setEditorState?: (
-    patch: Partial<Pick<EditorState, "text" | "cursorOffset">> & { savedQueryId?: string | null },
-  ) => void
+  setEditorBuffer?: (patch: EditorBufferPatch & { savedQueryId?: string | null }) => void
   updateSettings?: <Id extends SettingsId>(id: Id, patch: Partial<SettingsSchema[Id]>) => Promise<SettingsSchema[Id]>
 }
 
@@ -258,18 +274,19 @@ export function createEngineStub(
 
   const calls: {
     addConnection: AddConnectionInput[]
-    applyEditorSuggestionMenuItem: Array<EditorSuggestionMenuItemRef | undefined>
+    applyEditorChange: EditorChange[]
+    applyEditorCompletionItem: Array<EditorCompletionItemRef | undefined>
     cancelEditorAnalysis: number
     cancelQuery: QueryRef[]
     cancelRunningQueries: number
-    closeEditorSuggestionMenu: number
+    closeEditorCompletion: number
     deleteConnection: string[]
     formatEditorQuery: number
-    focusEditorSuggestionMenuItem: EditorSuggestionMenuItemFocusInput[]
+    focusEditorCompletionItem: EditorCompletionItemFocusInput[]
     loadConnectionObjects: string[]
-    openEditorSuggestionMenu: OpenEditorSuggestionMenuInput[]
+    openEditorCompletion: EditorCompletionContext[]
     refreshConnectionSuggestions: number
-    requestEditorAnalysis: Array<RequestEditorAnalysisInput | undefined>
+    requestEditorAnalysis: Array<string | undefined>
     restoreHistoryEntry: string[]
     restoreQueryExecution: string[]
     restoreSavedQuery: string[]
@@ -278,20 +295,21 @@ export function createEngineStub(
     saveSavedQueryChanges: Array<SaveSavedQueryChangesInput | undefined>
     replaceSettings: Array<{ id: SettingsId; settings: object }>
     selectConnection: Array<string | undefined>
-    setEditorState: Array<Partial<Pick<EditorState, "text" | "cursorOffset">> & { savedQueryId?: string | null }>
+    setEditorBuffer: Array<EditorBufferPatch & { savedQueryId?: string | null }>
     updateSettings: Array<{ id: SettingsId; patch: object }>
   } = {
     addConnection: [],
-    applyEditorSuggestionMenuItem: [],
+    applyEditorChange: [],
+    applyEditorCompletionItem: [],
     cancelEditorAnalysis: 0,
     cancelQuery: [],
     cancelRunningQueries: 0,
-    closeEditorSuggestionMenu: 0,
+    closeEditorCompletion: 0,
     deleteConnection: [],
     formatEditorQuery: 0,
-    focusEditorSuggestionMenuItem: [],
+    focusEditorCompletionItem: [],
     loadConnectionObjects: [],
-    openEditorSuggestionMenu: [],
+    openEditorCompletion: [],
     refreshConnectionSuggestions: 0,
     requestEditorAnalysis: [],
     restoreHistoryEntry: [],
@@ -302,13 +320,20 @@ export function createEngineStub(
     saveSavedQueryChanges: [],
     replaceSettings: [],
     selectConnection: [],
-    setEditorState: [],
+    setEditorBuffer: [],
     updateSettings: [],
   }
 
   const notify = () => {
     for (const listener of listeners) {
       listener()
+    }
+  }
+
+  const setEditorState = (patch: EditorStatePatch) => {
+    state = {
+      ...state,
+      editor: mergeEditorState(state.editor, patch),
     }
   }
 
@@ -400,7 +425,7 @@ export function createEngineStub(
         id: queryRef.queryId,
         connectionId: input.connectionId ?? state.selectedConnectionId ?? "conn-1",
         savedQueryId: state.editor.savedQueryId,
-        sql: input.text ?? state.editor.text,
+        sql: input.text ?? state.editor.buffer.text,
         rows: [],
       })
       const queryState = createQueryState({
@@ -452,13 +477,16 @@ export function createEngineStub(
                 message: entry.error ?? "Query failed.",
                 title: entry.status === "cancelled" ? "Query Cancelled" : "Query Error",
               },
-        editor: {
-          ...state.editor,
+      }
+      setEditorState({
+        analysis: idleEditorAnalysisState(),
+        buffer: {
           cursorOffset: entry.sql.source.length,
-          savedQueryId: entry.savedQueryId,
           text: entry.sql.source,
         },
-      }
+        completion: closedEditorCompletionState(),
+        savedQueryId: entry.savedQueryId ?? undefined,
+      })
       notify()
     },
     restoreSavedQuery(savedQueryId: string) {
@@ -495,13 +523,16 @@ export function createEngineStub(
                   message: "No query run selected",
                   title: "Results",
                 },
-        editor: {
-          ...state.editor,
+      }
+      setEditorState({
+        analysis: idleEditorAnalysisState(),
+        buffer: {
           cursorOffset: savedQuery.text.length,
-          savedQueryId: savedQuery.id,
           text: savedQuery.text,
         },
-      }
+        completion: closedEditorCompletionState(),
+        savedQueryId: savedQuery.id,
+      })
       notify()
       return {
         savedQuery,
@@ -571,7 +602,7 @@ export function createEngineStub(
         protocol:
           input.protocol ??
           state.connections.data?.find((connection) => connection.id === state.selectedConnectionId)?.protocol,
-        text: input.text ?? state.editor.text,
+        text: input.text ?? state.editor.buffer.text,
       })
       state = {
         ...state,
@@ -606,7 +637,7 @@ export function createEngineStub(
           input?.protocol ??
           state.connections.data?.find((connection) => connection.id === state.selectedConnectionId)?.protocol ??
           current.protocol,
-        text: input?.text ?? state.editor.text,
+        text: input?.text ?? state.editor.buffer.text,
         updatedAt: EpochMillis.now(),
       } satisfies SavedQuery
       state = {
@@ -659,15 +690,9 @@ export function createEngineStub(
         return
       }
 
-      state = {
-        ...state,
-        editor: {
-          ...state.editor,
-          analysis: {
-            status: "idle",
-          },
-        },
-      }
+      setEditorState({
+        analysis: idleEditorAnalysisState(),
+      })
       notify()
     },
     cancelActiveQueries() {
@@ -693,108 +718,121 @@ export function createEngineStub(
       }
       notify()
     },
-    setEditorState(patch: Partial<Pick<EditorState, "text" | "cursorOffset">> & { savedQueryId?: string | null }) {
-      calls.setEditorState.push(patch)
-      if (overrides.setEditorState) {
-        overrides.setEditorState(patch)
+    setEditorBuffer(patch: EditorBufferPatch & { savedQueryId?: string | null }) {
+      calls.setEditorBuffer.push(patch)
+      if (overrides.setEditorBuffer) {
+        overrides.setEditorBuffer(patch)
         return
       }
 
-      const nextText = patch.text ?? state.editor.text
-      const nextCursorOffset = patch.cursorOffset ?? state.editor.cursorOffset
-      state = {
-        ...state,
-        editor: {
-          ...state.editor,
-          cursorOffset: nextCursorOffset,
-          savedQueryId:
-            patch.savedQueryId === undefined ? state.editor.savedQueryId : (patch.savedQueryId ?? undefined),
-          text: nextText,
-        },
-      }
+      setEditorState({
+        buffer: patch,
+        savedQueryId:
+          patch.savedQueryId === undefined ? state.editor.savedQueryId : (patch.savedQueryId ?? undefined),
+      })
       notify()
     },
-    openEditorSuggestionMenu(input: OpenEditorSuggestionMenuInput) {
-      calls.openEditorSuggestionMenu.push(input)
-      if (overrides.openEditorSuggestionMenu) {
-        overrides.openEditorSuggestionMenu(input)
+    applyEditorChange(change: EditorChange) {
+      calls.applyEditorChange.push(change)
+      if (overrides.applyEditorChange) {
+        overrides.applyEditorChange(change)
         return
       }
 
-      state = {
-        ...state,
-        editor: {
-          ...state.editor,
-          cursorOffset: input.cursorOffset,
-          text: input.documentText,
-          suggestionMenu: {
+      const completionDecision = decideEditorCompletion({
+        change,
+        completion: state.editor.completion,
+        scopeMode: state.editor.completionScopeMode,
+        selectedConnectionId: state.selectedConnectionId,
+      })
+
+      if (completionDecision.kind === "open") {
+        setEditorState({
+          buffer: {
+            cursorOffset: change.next.cursorOffset,
+            text: change.next.text,
+          },
+          completion: {
+            context: completionDecision.context,
             error: undefined,
             focusedItemId: undefined,
             items: [],
-            open: true,
-            query: input.trigger.query ?? "",
-            replacementRange: input.replacementRange,
-            scope: input.scope,
             status: "ready",
-            trigger: input.trigger,
           },
-        },
+        })
+      } else if (completionDecision.kind === "close") {
+        setEditorState({
+          buffer: {
+            cursorOffset: change.next.cursorOffset,
+            text: change.next.text,
+          },
+          completion: closedEditorCompletionState(),
+        })
+      } else {
+        setEditorState({
+          buffer: {
+            cursorOffset: change.next.cursorOffset,
+            text: change.next.text,
+          },
+        })
       }
+
       notify()
     },
-    requestEditorAnalysis(input?: RequestEditorAnalysisInput) {
-      calls.requestEditorAnalysis.push(input)
-      if (overrides.requestEditorAnalysis) {
-        overrides.requestEditorAnalysis(input)
+    openEditorCompletion(context: EditorCompletionContext) {
+      calls.openEditorCompletion.push(context)
+      if (overrides.openEditorCompletion) {
+        overrides.openEditorCompletion(context)
         return
       }
 
-      const nextText = input?.text ?? state.editor.text
-      const connectionId = input?.connectionId ?? state.selectedConnectionId
-      const result: ExplainResult | undefined = nextText.trim()
+      setEditorState({
+        completion: {
+          context,
+          error: undefined,
+          focusedItemId: undefined,
+          items: [],
+          status: "ready",
+        },
+      })
+      notify()
+    },
+    requestEditorAnalysis(parentFlowId?: string) {
+      calls.requestEditorAnalysis.push(parentFlowId)
+      if (overrides.requestEditorAnalysis) {
+        overrides.requestEditorAnalysis(parentFlowId)
+        return
+      }
+
+      const subject = createEditorAnalysisSubject(state.editor.buffer, state.selectedConnectionId)
+      const result: ExplainResult | undefined = subject.text.trim()
         ? {
             diagnostics: [],
             status: "ok",
           }
         : undefined
 
-      state = {
-        ...state,
-        editor: {
-          ...state.editor,
-          analysis: result
-            ? {
-                connectionId,
-                requestedText: nextText,
-                result,
-                status: "ready",
-              }
-            : {
-                status: "idle",
-              },
-        },
-      }
+      setEditorState({
+        analysis: result
+          ? {
+              result,
+              status: "ready",
+              subject,
+            }
+          : idleEditorAnalysisState(),
+      })
       notify()
     },
-    closeEditorSuggestionMenu() {
-      calls.closeEditorSuggestionMenu += 1
-      if (overrides.closeEditorSuggestionMenu) {
-        overrides.closeEditorSuggestionMenu()
+    closeEditorCompletion() {
+      calls.closeEditorCompletion += 1
+      if (overrides.closeEditorCompletion) {
+        overrides.closeEditorCompletion()
         return
       }
 
-      state = {
-        ...state,
-        editor: {
-          ...state.editor,
-          suggestionMenu: {
-            items: [],
-            open: false,
-            query: "",
-            status: "closed",
-          },
-        },
-      }
+      setEditorState({
+        completion: closedEditorCompletionState(),
+      })
       notify()
     },
     formatEditorQuery() {
@@ -803,106 +841,86 @@ export function createEngineStub(
         return overrides.formatEditorQuery()
       }
 
-      if (!state.editor.text.trim()) {
+      if (!state.editor.buffer.text.trim()) {
         return false
       }
 
-      const formattedText = state.editor.text
+      const formattedText = state.editor.buffer.text
         .replace(/\s+/g, " ")
         .replace(/\s*,\s*/g, ", ")
         .replace(/\s*=\s*/g, " = ")
         .trim()
 
-      if (formattedText === state.editor.text) {
+      if (formattedText === state.editor.buffer.text) {
         return false
       }
 
-      state = {
-        ...state,
-        editor: {
-          ...state.editor,
-          cursorOffset: Math.min(state.editor.cursorOffset, formattedText.length),
-          suggestionMenu: {
-            items: [],
-            open: false,
-            query: "",
-            status: "closed",
-          },
+      setEditorState({
+        buffer: {
+          cursorOffset: Math.min(state.editor.buffer.cursorOffset, formattedText.length),
           text: formattedText,
         },
-      }
+        completion: closedEditorCompletionState(),
+      })
       notify()
       return true
     },
-    focusEditorSuggestionMenuItem(input: EditorSuggestionMenuItemFocusInput) {
-      calls.focusEditorSuggestionMenuItem.push(input)
-      if (overrides.focusEditorSuggestionMenuItem) {
-        overrides.focusEditorSuggestionMenuItem(input)
+    focusEditorCompletionItem(input: EditorCompletionItemFocusInput) {
+      calls.focusEditorCompletionItem.push(input)
+      if (overrides.focusEditorCompletionItem) {
+        overrides.focusEditorCompletionItem(input)
         return
       }
 
-      const menu = state.editor.suggestionMenu
-      if (!menu.open || menu.items.length === 0) {
+      const completion = state.editor.completion
+      if (completion.status === "closed" || completion.items.length === 0) {
         return
       }
 
-      let focusedItemId = menu.focusedItemId ?? menu.items[0]?.id
+      let focusedItemId = completion.focusedItemId ?? completion.items[0]?.id
       if ("id" in input) {
-        focusedItemId = menu.items.some((item) => item.id === input.id) ? input.id : focusedItemId
+        focusedItemId = completion.items.some((item) => item.id === input.id) ? input.id : focusedItemId
       } else if ("index" in input) {
-        focusedItemId = menu.items[clampIndex(input.index, menu.items.length)]?.id
+        focusedItemId = completion.items[clampIndex(input.index, completion.items.length)]?.id
       } else {
-        const currentIndex = menu.items.findIndex((item) => item.id === menu.focusedItemId)
-        const nextIndex = clampIndex((currentIndex >= 0 ? currentIndex : 0) + input.delta, menu.items.length)
-        focusedItemId = menu.items[nextIndex]?.id
+        const currentIndex = completion.items.findIndex((item) => item.id === completion.focusedItemId)
+        const nextIndex = clampIndex((currentIndex >= 0 ? currentIndex : 0) + input.delta, completion.items.length)
+        focusedItemId = completion.items[nextIndex]?.id
       }
 
-      state = {
-        ...state,
-        editor: {
-          ...state.editor,
-          suggestionMenu: {
-            ...menu,
-            focusedItemId,
-          },
+      setEditorState({
+        completion: {
+          ...completion,
+          focusedItemId,
         },
-      }
+      })
       notify()
     },
-    applyEditorSuggestionMenuItem(ref?: EditorSuggestionMenuItemRef) {
-      calls.applyEditorSuggestionMenuItem.push(ref)
-      if (overrides.applyEditorSuggestionMenuItem) {
-        return overrides.applyEditorSuggestionMenuItem(ref)
+    applyEditorCompletionItem(ref?: EditorCompletionItemRef) {
+      calls.applyEditorCompletionItem.push(ref)
+      if (overrides.applyEditorCompletionItem) {
+        return overrides.applyEditorCompletionItem(ref)
       }
 
-      const menu = state.editor.suggestionMenu
+      const completion = state.editor.completion
       const item =
-        (ref ? menu.items.find((candidate) => candidate.id === ref.id) : undefined) ??
-        menu.items.find((candidate) => candidate.id === menu.focusedItemId) ??
-        menu.items[0]
-      if (!menu.open || !menu.replacementRange || !item) {
+        (ref ? completion.items.find((candidate) => candidate.id === ref.id) : undefined) ??
+        completion.items.find((candidate) => candidate.id === completion.focusedItemId) ??
+        completion.items[0]
+      if (completion.status === "closed" || !completion.context || !item) {
         return false
       }
 
+      setEditorState({
+        buffer: {
+          cursorOffset: completion.context.replaceRange.start + item.insertText.length,
+          text: replaceTextRange(state.editor.buffer.text, completion.context.replaceRange, item.insertText),
+        },
+        completion: closedEditorCompletionState(),
+        completionScopeMode: item.connectionId ? "selected-connection" : state.editor.completionScopeMode,
+      })
       state = {
         ...state,
-        editor: {
-          ...state.editor,
-          cursorOffset: menu.replacementRange.start + item.insertText.length,
-          suggestionMenu: {
-            items: [],
-            open: false,
-            query: "",
-            status: "closed",
-          },
-          suggestionScopeMode: item.connectionId ? "selected-connection" : state.editor.suggestionScopeMode,
-          text: replaceTextRange(
-            state.editor.text,
-            menu.replacementRange.start,
-            menu.replacementRange.end,
-            item.insertText,
-          ),
-        },
         selectedConnectionId: item.connectionId ?? state.selectedConnectionId,
       }
       notify()
@@ -910,12 +928,7 @@ export function createEngineStub(
     },
     __notify: notify,
     __setState(patch: SqlVisorStatePatch) {
-      const nextEditor = patch.editor
-        ? {
-            ...state.editor,
-            ...patch.editor,
-          }
-        : state.editor
+      const nextEditor = patch.editor ? mergeEditorState(state.editor, patch.editor) : state.editor
       const nextSettings = patch.settings
         ? {
             ...state.settings,
@@ -933,19 +946,20 @@ export function createEngineStub(
   } satisfies Pick<
     SqlVisor,
     | "addConnection"
-    | "applyEditorSuggestionMenuItem"
+    | "applyEditorChange"
+    | "applyEditorCompletionItem"
     | "cancelEditorAnalysis"
     | "cancelQuery"
     | "cancelRunningQueries"
     | "cancelActiveQueries"
-    | "closeEditorSuggestionMenu"
+    | "closeEditorCompletion"
     | "deleteConnection"
     | "formatEditorQuery"
-    | "focusEditorSuggestionMenuItem"
+    | "focusEditorCompletionItem"
     | "getQueryState"
     | "getState"
     | "loadConnectionObjects"
-    | "openEditorSuggestionMenu"
+    | "openEditorCompletion"
     | "refreshConnectionSuggestions"
     | "requestEditorAnalysis"
     | "registry"
@@ -957,7 +971,7 @@ export function createEngineStub(
     | "selectConnection"
     | "saveQueryAsNew"
     | "saveSavedQueryChanges"
-    | "setEditorState"
+    | "setEditorBuffer"
     | "subscribe"
     | "updateSettings"
   > & {
@@ -973,8 +987,14 @@ export function createEngineStub(
   }
 }
 
-function replaceTextRange(text: string, start: number, end: number, replacement: string): string {
-  return text.slice(0, start) + replacement + text.slice(end)
+function mergeEditorState(current: EditorState, patch: EditorStatePatch): EditorState {
+  return {
+    ...current,
+    ...patch,
+    analysis: patch.analysis ? { ...current.analysis, ...patch.analysis } : current.analysis,
+    buffer: patch.buffer ? applyEditorBufferPatch(current.buffer, patch.buffer) : current.buffer,
+    completion: patch.completion ? { ...current.completion, ...patch.completion } : current.completion,
+  }
 }
 
 function clampIndex(index: number, length: number): number {

@@ -76,6 +76,19 @@ The intended direction is an easy public engine interface around the existing co
 
 If you notice stale abstractions, duplicate representations, or unused compatibility leftovers, prefer removing them rather than preserving them "just in case."
 
+### Module Boundaries
+
+- Do not use `index.ts` or other barrel modules without duress.
+- Prefer direct file imports for internal code.
+- Keep barrel files only when they are serving a real boundary such as the package public API.
+
+### Focus Path Discipline
+
+- Treat `Focusable` paths as opaque values.
+- You may compare paths against paths, but do not inspect individual path segment values for application logic.
+- Do not store domain information in `focusableId` values or other focus path segments.
+- If UI state needs to correlate domain objects with focus, keep an explicit mapping outside the path instead of encoding or parsing IDs.
+
 ### Verification
 
 Useful repo commands:

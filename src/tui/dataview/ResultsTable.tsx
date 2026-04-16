@@ -1,19 +1,15 @@
 import type { BoxRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
 import { useMemo, useRef, useState, type ReactNode } from "react"
-import {
-  Focusable,
-  useFocusedDescendantPath,
-  useIsFocusNavigationActive,
-  useIsFocused,
-  useIsFocusWithin,
-  useRememberedDescendantPath,
-  useFocusTree,
-} from "../focus"
-import { useNavKeys, useShortcut } from "../ui/keybind"
+import { focusPath, focusPathKey } from "../../lib/focus/paths"
+import { Focusable } from "../focus/Focusable"
+import { useFocusedDescendantPath, useFocusTree, useIsFocusNavigationActive, useIsFocused, useIsFocusWithin, useRememberedDescendantPath } from "../focus/context"
+import { useOpaqueIdMap } from "../focus/opaqueIds"
+import { useNavKeys } from "../ui/keybind/useNavKeys"
+import { useShortcut } from "../ui/keybind/useShortcut"
 import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
-import { Table, type TableColumn } from "./table"
+import { Table, type TableColumn } from "./table/Table"
 
 type CellCoordinates = {
   rowIndex: number
@@ -24,14 +20,7 @@ type DisplayRow = Record<string, string>
 
 export const RESULTS_TABLE_FOCUS_ID = "results-table"
 export const RESULTS_TABLE_GRID_AREA_ID = "grid"
-
-export function resultsTableRowFocusId(rowIndex: number): string {
-  return `row-${rowIndex}`
-}
-
-export function resultsTableCellFocusId(columnIndex: number): string {
-  return `cell-${columnIndex}`
-}
+const RESULTS_TABLE_GRID_PATH = [RESULTS_TABLE_FOCUS_ID, RESULTS_TABLE_GRID_AREA_ID] as const
 
 export function ResultsTable(props: { rows: object[]; width?: number }) {
   return (
@@ -97,29 +86,42 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
   }, [preferredColumnWidths, viewportWidth])
   const shouldScroll = preferredTableWidth > viewportWidth
   const tableWidth = shouldScroll ? preferredTableWidth : viewportWidth
-  const rowIndexById = useMemo(() => {
-    const next = new Map<string, number>()
-    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-      next.set(resultsTableRowFocusId(rowIndex), rowIndex)
+  const rowKeys = useMemo(() => rows.map((_row, rowIndex) => rowIndex), [rows])
+  const rowFocusIds = useOpaqueIdMap(rowKeys, "row")
+  const columnFocusIds = useOpaqueIdMap(columnKeys, "cell")
+  const cellCoordinatesByPathKey = useMemo(() => {
+    const next = new Map<string, CellCoordinates>()
+    for (const rowIndex of rowKeys) {
+      const rowFocusId = rowFocusIds.get(rowIndex)
+      if (!rowFocusId) {
+        continue
+      }
+
+      const rowPath = focusPath(RESULTS_TABLE_GRID_PATH, rowFocusId)
+      for (const [columnIndex, columnKey] of columnKeys.entries()) {
+        const columnFocusId = columnFocusIds.get(columnKey)
+        if (!columnFocusId) {
+          continue
+        }
+
+        const cellPath = focusPath(rowPath, columnFocusId)
+        const cellPathKey = focusPathKey(cellPath)
+        if (cellPathKey) {
+          next.set(cellPathKey, { rowIndex, columnIndex })
+        }
+      }
     }
     return next
-  }, [rows.length])
-  const columnIndexById = useMemo(() => {
-    const next = new Map<string, number>()
-    for (let columnIndex = 0; columnIndex < columnKeys.length; columnIndex += 1) {
-      next.set(resultsTableCellFocusId(columnIndex), columnIndex)
-    }
-    return next
-  }, [columnKeys.length])
+  }, [columnFocusIds, columnKeys, rowFocusIds, rowKeys])
 
   const cellCount = rows.length * columnKeys.length
   const activeCell = useMemo(
-    () => resolveFocusedCellCoordinates(focusedCellPath, rowIndexById, columnIndexById),
-    [columnIndexById, focusedCellPath, rowIndexById],
+    () => resolveFocusedCellCoordinates(focusedCellPath, cellCoordinatesByPathKey),
+    [cellCoordinatesByPathKey, focusedCellPath],
   )
   const rememberedCell = useMemo(
-    () => resolveFocusedCellCoordinates(rememberedCellPath, rowIndexById, columnIndexById),
-    [columnIndexById, rememberedCellPath, rowIndexById],
+    () => resolveFocusedCellCoordinates(rememberedCellPath, cellCoordinatesByPathKey),
+    [cellCoordinatesByPathKey, rememberedCellPath],
   )
 
   function focusCell(coords: CellCoordinates): boolean {
@@ -128,7 +130,8 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
     }
 
     const next = clampCellCoordinates(coords, rows.length, columnKeys.length)
-    return tree.focusPath(resultsTableCellPath(next.rowIndex, next.columnIndex))
+    const nextPath = resultsTableCellPath(next.rowIndex, next.columnIndex, columnKeys, rowFocusIds, columnFocusIds)
+    return nextPath ? tree.focusPath(nextPath) : false
   }
 
   const focusCellRef = useRef(focusCell)
@@ -289,8 +292,8 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
         ),
         Cell: ({ rowIndex, columnWidth }) => (
           <ResultsCell
-            columnIndex={columnIndex}
             columnWidth={columnWidth}
+            focusableId={requiredOpaqueFocusId(columnFocusIds, key)}
             remembered={!focusedWithin && sameCellCoordinates(rememberedCell, rowIndex, columnIndex)}
             value={displayRows[rowIndex]?.[key] ?? ""}
           />
@@ -298,7 +301,7 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
       }
     }
     return cols
-  }, [columnKeys, displayRows, focusedWithin, preferredColumnWidths, rememberedCell, shouldScroll])
+  }, [columnFocusIds, columnKeys, displayRows, focusedWithin, preferredColumnWidths, rememberedCell, shouldScroll])
 
   if (rows.length === 0) return <Text>No results.</Text>
 
@@ -327,7 +330,18 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
             width={tableWidth}
             headerBg={theme.inputBg}
             borderColor={theme.borderColor}
-            wrapRow={({ rowIndex, children }) => <ResultsRow rowIndex={rowIndex}>{children}</ResultsRow>}
+            wrapRow={({ rowIndex, children }) => {
+              const rowFocusId = rowFocusIds.get(rowIndex)
+              if (!rowFocusId) {
+                return <box width="100%">{children}</box>
+              }
+
+              return (
+                <ResultsRow rowFocusableId={rowFocusId}>
+                  {children}
+                </ResultsRow>
+              )
+            }}
           />
         </scrollbox>
       </Focusable>
@@ -335,10 +349,10 @@ function ResultsTableBody(props: { rows: object[]; width?: number }) {
   )
 }
 
-function ResultsRow(props: { rowIndex: number; children: ReactNode }) {
+function ResultsRow(props: { rowFocusableId: string; children: ReactNode }) {
   return (
     <Focusable
-      focusableId={resultsTableRowFocusId(props.rowIndex)}
+      focusableId={props.rowFocusableId}
       onMouseDown={(event) => {
         event.stopPropagation()
       }}
@@ -352,8 +366,13 @@ function ResultsRow(props: { rowIndex: number; children: ReactNode }) {
   )
 }
 
-function ResultsCell(props: { columnIndex: number; columnWidth: number; remembered: boolean; value: string }) {
-  const { columnIndex, columnWidth, remembered, value } = props
+function ResultsCell(props: {
+  columnWidth: number
+  focusableId: string
+  remembered: boolean
+  value: string
+}) {
+  const { columnWidth, focusableId, remembered, value } = props
   const theme = useTheme()
   const focused = useIsFocused()
   const navigationActive = useIsFocusNavigationActive()
@@ -362,7 +381,7 @@ function ResultsCell(props: { columnIndex: number; columnWidth: number; remember
   return (
     <Focusable
       focusable
-      focusableId={resultsTableCellFocusId(columnIndex)}
+      focusableId={focusableId}
       height={1}
       navigable={false}
       onMouseDown={(event) => {
@@ -412,37 +431,29 @@ function clamp(index: number, length: number): number {
   return Math.min(Math.max(index, 0), length - 1)
 }
 
-function resultsTableCellPath(rowIndex: number, columnIndex: number): readonly [string, string, string, string] {
-  return [
-    RESULTS_TABLE_FOCUS_ID,
-    RESULTS_TABLE_GRID_AREA_ID,
-    resultsTableRowFocusId(rowIndex),
-    resultsTableCellFocusId(columnIndex),
-  ]
+function resultsTableCellPath(
+  rowIndex: number,
+  columnIndex: number,
+  columnKeys: readonly string[],
+  rowFocusIds: ReadonlyMap<number, string>,
+  columnFocusIds: ReadonlyMap<string, string>,
+): readonly string[] | undefined {
+  const rowFocusId = rowFocusIds.get(rowIndex)
+  const columnKey = columnKeys[columnIndex]
+  const columnFocusId = columnKey === undefined ? undefined : columnFocusIds.get(columnKey)
+  if (!rowFocusId || !columnFocusId) {
+    return undefined
+  }
+
+  return focusPath(focusPath(RESULTS_TABLE_GRID_PATH, rowFocusId), columnFocusId)
 }
 
 function resolveFocusedCellCoordinates(
   path: readonly string[] | undefined,
-  rowIndexById: ReadonlyMap<string, number>,
-  columnIndexById: ReadonlyMap<string, number>,
+  coordinatesByPathKey: ReadonlyMap<string, CellCoordinates>,
 ): CellCoordinates | undefined {
-  if (!path || path.length < 4 || path[0] !== RESULTS_TABLE_FOCUS_ID || path[1] !== RESULTS_TABLE_GRID_AREA_ID) {
-    return undefined
-  }
-
-  const rowId = path[2]
-  const columnId = path[3]
-  if (!rowId || !columnId) {
-    return undefined
-  }
-
-  const rowIndex = rowIndexById.get(rowId)
-  const columnIndex = columnIndexById.get(columnId)
-  if (rowIndex === undefined || columnIndex === undefined) {
-    return undefined
-  }
-
-  return { rowIndex, columnIndex }
+  const pathKey = focusPathKey(path)
+  return pathKey ? coordinatesByPathKey.get(pathKey) : undefined
 }
 
 function sameCellCoordinates(coords: CellCoordinates | undefined, rowIndex: number, columnIndex: number): boolean {
@@ -482,4 +493,12 @@ function shouldPopOut(value: string, columnWidth: number): boolean {
 
 function resolvePopOutWrapMode(value: string): "char" | "word" | "none" {
   return /\s/.test(value) ? "word" : "char"
+}
+
+function requiredOpaqueFocusId<Key extends string | number>(ids: ReadonlyMap<Key, string>, key: Key): string {
+  const focusableId = ids.get(key)
+  if (!focusableId) {
+    throw new Error(`Missing focusable id for ${String(key)}`)
+  }
+  return focusableId
 }

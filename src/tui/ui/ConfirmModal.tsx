@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from "react"
-import { useIsFocusNavigationActive, useIsFocusWithin } from "../focus"
-import { useShortcut } from "./keybind"
+import { useIsFocusNavigationActive, useIsFocusWithin } from "../focus/context"
+import { useShortcut } from "./keybind/useShortcut"
 import { PromptModal } from "./PromptModal"
 import { useResolvable, type ResolvableBrand } from "./resolvable"
 import { Text } from "./Text"

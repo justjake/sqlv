@@ -4,16 +4,17 @@ import {
   ResultsTable,
   RESULTS_TABLE_FOCUS_ID,
   RESULTS_TABLE_GRID_AREA_ID,
-  resultsTableRowFocusId,
 } from "../../../src/tui/dataview/ResultsTable"
-import { useFocusNavigationState, useFocusTree } from "../../../src/tui/focus"
+import { useFocusNavigationState, useFocusTree } from "../../../src/tui/focus/context"
 import { createTuiRenderHarness } from "../testUtils"
 
-const { dispatchInput, focusedPathLine, render, settleDeferredRender } = createTuiRenderHarness()
+const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()
+let focusedPath: readonly string[] | undefined
 
 function ResultsTableHarness(props: { rows: object[]; initialPath?: readonly string[]; width?: number }) {
   const tree = useFocusTree()
   const state = useFocusNavigationState()
+  focusedPath = state.focusedPath
 
   useEffect(() => {
     if (!props.initialPath) {
@@ -27,7 +28,6 @@ function ResultsTableHarness(props: { rows: object[]; initialPath?: readonly str
 
   return (
     <box flexDirection="column">
-      <text>{state.focusedPath?.join("/") ?? "none"}</text>
       <ResultsTable rows={props.rows} width={props.width} />
     </box>
   )
@@ -48,13 +48,13 @@ describe("ResultsTable", () => {
 
     await settleDeferredRender(ui)
 
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-0")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-0", "cell-0"])
   })
 
   test("focusing a result row forwards focus into its first cell", async () => {
     const ui = await render(
       <ResultsTableHarness
-        initialPath={[RESULTS_TABLE_FOCUS_ID, RESULTS_TABLE_GRID_AREA_ID, resultsTableRowFocusId(1)]}
+        initialPath={[RESULTS_TABLE_FOCUS_ID, RESULTS_TABLE_GRID_AREA_ID, "row-1"]}
         rows={[
           { id: 1, name: "Ada" },
           { id: 2, name: "Grace" },
@@ -65,7 +65,7 @@ describe("ResultsTable", () => {
 
     await settleDeferredRender(ui)
 
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-0")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-1", "cell-0"])
   })
 
   test("navigates focused result cells with arrows and hjkl", async () => {
@@ -82,14 +82,14 @@ describe("ResultsTable", () => {
 
     await settleDeferredRender(ui)
     await dispatchInput(ui, () => ui.mockInput.pressArrow("right"))
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-1")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-0", "cell-1"])
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("j"))
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-1")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-1", "cell-1"])
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("h"))
 
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-0")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-1", "cell-0"])
   })
 
   test("supports spreadsheet-style result navigation shortcuts", async () => {
@@ -105,25 +105,25 @@ describe("ResultsTable", () => {
     )
 
     await settleDeferredRender(ui)
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-0")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-0", "cell-0"])
 
     await dispatchInput(ui, () => ui.mockInput.pressTab())
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-1")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-0", "cell-1"])
 
     await dispatchInput(ui, () => ui.mockInput.pressEnter())
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-1")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-1", "cell-1"])
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("HOME"))
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-0")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-1", "cell-0"])
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("END"))
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-1")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-1", "cell-1"])
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("HOME", { ctrl: true }))
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-0")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-0", "cell-0"])
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("END", { ctrl: true }))
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-1")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-1", "cell-1"])
   })
 
   test("supports modifier nav aliases alongside edge jumps in the results grid", async () => {
@@ -139,19 +139,19 @@ describe("ResultsTable", () => {
     )
 
     await settleDeferredRender(ui)
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-0")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-0", "cell-0"])
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("l", { ctrl: true }))
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-2")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-0", "cell-2"])
 
     await dispatchInput(ui, () => ui.mockInput.pressArrow("down", { ctrl: true }))
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-1/cell-2")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-1", "cell-2"])
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("k", { ctrl: true }))
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-2")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-0", "cell-2"])
 
     await dispatchInput(ui, () => ui.mockInput.pressArrow("left", { ctrl: true }))
-    expect(focusedPathLine(ui)).toContain("results-table/grid/row-0/cell-0")
+    expect(focusedPath).toEqual(["results-table", "grid", "row-0", "cell-0"])
   })
 
   test("measures result tables to the parent pane and keeps rows single-line", async () => {

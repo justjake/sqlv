@@ -1,12 +1,13 @@
 import { TextAttributes } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
 import { useEffect } from "react"
-import { useFocusNavigationState, useFocusTree } from "../../../src/tui/focus"
+import { useFocusNavigationState, useFocusTree } from "../../../src/tui/focus/context"
 import { flattenTree, clampTreeIndex, TreeView } from "../../../src/tui/sidebar/TreeView"
 import { IconProvider } from "../../../src/tui/ui/icons"
 import { createTuiRenderHarness } from "../testUtils"
 
-const { dispatchInput, focusedPathLine, render, settleDeferredRender } = createTuiRenderHarness()
+const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()
+let focusedPath: readonly string[] | undefined
 
 function TreeViewHarness(props: {
   initialPath: readonly string[]
@@ -17,6 +18,7 @@ function TreeViewHarness(props: {
 }) {
   const tree = useFocusTree()
   const state = useFocusNavigationState()
+  focusedPath = state.focusedPath
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -28,7 +30,6 @@ function TreeViewHarness(props: {
 
   return (
     <box flexDirection="column">
-      <text>{`${state.focusedPath?.join("/") ?? "none"} | nav:${state.active ? "on" : "off"}`}</text>
       <TreeView nodes={props.nodes} onExpand={props.onExpand} onFocus={props.onFocus} onSelect={props.onSelect} />
     </box>
   )
@@ -122,7 +123,7 @@ describe("TreeView", () => {
     )
     await settleDeferredRender(ui)
 
-    expect(focusedPathLine(ui)).toContain("sidebar-tree")
+    expect(focusedPath).toEqual(["sidebar-tree", "row-0"])
     expect(ui.captureCharFrame()).toContain("Root")
     expect(ui.captureCharFrame()).not.toContain("Branch")
 
@@ -173,14 +174,14 @@ describe("TreeView", () => {
     )
 
     await settleDeferredRender(ui)
-    expect(focusedPathLine(ui)).toContain("sidebar-tree/row-root")
+    expect(focusedPath).toEqual(["sidebar-tree", "row-0"])
     expect(ui.captureCharFrame()).toContain("Child")
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("j"))
-    expect(focusedPathLine(ui)).toContain("sidebar-tree/row-root.child")
+    expect(focusedPath).toEqual(["sidebar-tree", "row-1"])
 
     await dispatchInput(ui, () => ui.mockInput.pressKey("k"))
-    expect(focusedPathLine(ui)).toContain("sidebar-tree/row-root")
+    expect(focusedPath).toEqual(["sidebar-tree", "row-0"])
   })
 
   test("renders nvim-style nested prefixes", async () => {

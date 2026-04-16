@@ -1,10 +1,16 @@
 import { QueryClient } from "@tanstack/query-core"
 import { describe, expect, test } from "bun:test"
 import { type LocalPersistence, createSession } from "../../src/lib/createLocalPersistence"
+import { createEditorAnalysisSubject } from "../../src/lib/editor/analysis"
+import { createEditorBuffer } from "../../src/lib/editor/buffer"
+import {
+  type EditorCompletionContext,
+  type SuggestionItem,
+} from "../../src/lib/editor/completion"
 import { init } from "../../src/lib/init"
 import { AdapterRegistry, type Adapter } from "../../src/lib/interface/Adapter"
-import { SqlVisor, type OpenEditorSuggestionMenuInput, type QueryRef } from "../../src/lib/SqlVisor"
-import type { SuggestionItem, SuggestionProvider, SuggestionRequest } from "../../src/lib/suggestions"
+import { SqlVisor, type QueryRef } from "../../src/lib/SqlVisor"
+import type { SuggestionProvider, SuggestionRequest } from "../../src/lib/suggestions/types"
 import type { ExplainResult } from "../../src/lib/types/Explain"
 import { type LogEntry } from "../../src/lib/types/Log"
 import type { ObjectInfo } from "../../src/lib/types/objects"
@@ -209,17 +215,12 @@ async function waitForQueryState(
   return engine.getQueryState(query)
 }
 
-function createSuggestionMenuInput(patch: Partial<OpenEditorSuggestionMenuInput> = {}): OpenEditorSuggestionMenuInput {
+function createCompletionContext(patch: Partial<EditorCompletionContext> = {}): EditorCompletionContext {
   return {
-    cursorOffset: patch.cursorOffset ?? 17,
-    documentText: patch.documentText ?? "select * from @us",
-    replacementRange: patch.replacementRange ?? { end: 17, start: 14 },
-    trigger: patch.trigger ?? {
-      context: { triggerText: "@" },
-      kind: "mention",
-      query: "us",
-    },
-    scope: patch.scope,
+    kind: patch.kind ?? "mention",
+    query: patch.query ?? "us",
+    replaceRange: patch.replaceRange ?? { end: 17, start: 14 },
+    scope: patch.scope ?? { kind: "all-connections" },
   }
 }
 
@@ -555,7 +556,7 @@ describe("SqlVisor", () => {
       notifications += 1
     })
 
-    engine.setEditorState({
+    engine.setEditorBuffer({
       cursorOffset: "select 1".length,
       text: "select 1",
     })
@@ -583,15 +584,16 @@ describe("SqlVisor", () => {
       analysis: {
         status: "idle",
       },
-      cursorOffset: "select 1".length,
-      suggestionMenu: {
+      buffer: {
+        cursorOffset: "select 1".length,
+        revision: 1,
+        text: "select 1",
+      },
+      completion: {
         items: [],
-        open: false,
-        query: "",
         status: "closed",
       },
-      suggestionScopeMode: "all-connections",
-      text: "select 1",
+      completionScopeMode: "all-connections",
       treeSitterGrammar: "sql",
     })
     expect(notifications).toBeGreaterThanOrEqual(4)
@@ -605,40 +607,32 @@ describe("SqlVisor", () => {
       registry: new AdapterRegistry([new FakeBunAdapter()]),
     })
 
-    engine.openEditorSuggestionMenu(
-      createSuggestionMenuInput({
-        cursorOffset: "select * from users where id = 1".length,
-        documentText: "select * from users where id = 1",
-        replacementRange: { end: "select * from users where id = 1".length, start: "select * from ".length },
+    engine.setEditorBuffer({
+      cursorOffset: "select * from users where id = 1".length,
+      text: "select * from users where id = 1",
+    })
+    engine.openEditorCompletion(
+      createCompletionContext({
+        kind: "identifier",
+        query: "users",
+        replaceRange: { end: "select * from users where id = 1".length, start: "select * from ".length },
         scope: {
           connectionId: "conn-1",
           kind: "selected-connection",
         },
-        trigger: {
-          kind: "identifier",
-          query: "users",
-        },
       }),
     )
-    await waitFor(() => engine.getState().editor.suggestionMenu.status === "ready")
-
-    engine.setEditorState({
-      cursorOffset: "select * from users where id = 1".length,
-      text: "select * from users where id = 1",
-    })
 
     expect(engine.formatEditorQuery()).toBe(true)
-    expect(engine.getState().editor.text).toBe(`select
+    expect(engine.getState().editor.buffer.text).toBe(`select
   *
 from
   users
 where
   id = 1`)
-    expect(engine.getState().editor.cursorOffset).toBe("select * from users where id = 1".length)
-    expect(engine.getState().editor.suggestionMenu).toEqual({
+    expect(engine.getState().editor.buffer.cursorOffset).toBe("select * from users where id = 1".length)
+    expect(engine.getState().editor.completion).toEqual({
       items: [],
-      open: false,
-      query: "",
       status: "closed",
     })
   })
@@ -658,21 +652,24 @@ where
       registry: new AdapterRegistry([fakeAdapter]),
     })
 
-    engine.requestEditorAnalysis({ text: "select 1" })
+    engine.setEditorBuffer({
+      cursorOffset: "select 1".length,
+      text: "select 1",
+    })
+    engine.requestEditorAnalysis()
 
     await waitFor(() => engine.getState().editor.analysis.status === "ready")
 
     expect(fakeAdapter.explainCalls).toBe(1)
     expect(engine.getState().editor.analysis).toEqual({
-      connectionId: "conn-1",
       error: undefined,
-      requestedText: "select 1",
       result: {
         columns: [{ name: "value", type: "INTEGER" }],
         diagnostics: [],
         status: "ok",
       },
       status: "ready",
+      subject: createEditorAnalysisSubject(createEditorBuffer("select 1", "select 1".length, 1), "conn-1"),
     })
 
     const logEntries = await persistence.persist.log.query(() => unsafeRawSQL<LogEntry>("select"))
@@ -700,14 +697,22 @@ where
       registry: new AdapterRegistry([fakeAdapter]),
     })
 
-    engine.requestEditorAnalysis({ text: "select slow" })
+    engine.setEditorBuffer({
+      cursorOffset: "select slow".length,
+      text: "select slow",
+    })
+    engine.requestEditorAnalysis()
     await waitFor(() => engine.getState().editor.analysis.status === "loading")
 
-    engine.requestEditorAnalysis({ text: "select fast" })
+    engine.setEditorBuffer({
+      cursorOffset: "select fast".length,
+      text: "select fast",
+    })
+    engine.requestEditorAnalysis()
 
     await waitFor(() => engine.getState().editor.analysis.status === "ready")
 
-    expect(engine.getState().editor.analysis.requestedText).toBe("select fast")
+    expect(engine.getState().editor.analysis.subject?.text).toBe("select fast")
     expect(engine.getState().editor.analysis.result).toEqual({
       diagnostics: [],
       status: "ok",
@@ -733,14 +738,16 @@ where
       registry: new AdapterRegistry([fakeAdapter]),
     })
 
-    engine.requestEditorAnalysis({ text: "select" })
+    engine.setEditorBuffer({
+      cursorOffset: "select".length,
+      text: "select",
+    })
+    engine.requestEditorAnalysis()
 
     await waitFor(() => fakeAdapter.explainCalls === 1 && engine.getState().editor.analysis.status === "ready")
 
     expect(engine.getState().editor.analysis).toEqual({
-      connectionId: "conn-1",
       error: undefined,
-      requestedText: "select",
       result: {
         diagnostics: [
           {
@@ -752,6 +759,7 @@ where
         status: "invalid",
       },
       status: "ready",
+      subject: createEditorAnalysisSubject(createEditorBuffer("select", "select".length, 1), "conn-1"),
     })
   })
 
@@ -789,7 +797,7 @@ where
     })
     expect(engine.getState().queryExecution.data?.sql.source).toBe("select 1")
     expect(engine.getState().queryExecution.status).toBe("success")
-    expect(engine.getState().editor.text).toBe("select 1")
+    expect(engine.getState().editor.buffer.text).toBe("select 1")
   })
 
   test("loads persisted query history from previous sessions on create", async () => {
@@ -823,7 +831,7 @@ where
 
     engine.restoreQueryExecution(older.id)
 
-    expect(engine.getState().editor.text).toBe("select 1")
+    expect(engine.getState().editor.buffer.text).toBe("select 1")
     expect(engine.getState().queryExecution.data?.id).toBe(older.id)
     expect(engine.getState().detailView).toEqual({
       kind: "rows",
@@ -872,8 +880,10 @@ where
     expect(engine.getState().selectedConnectionId).toBeUndefined()
     expect(engine.getState().settings.sidebarState.lastSelectedConnectionId).toBe(second.id)
     expect(engine.getState().editor).toMatchObject({
-      cursorOffset: "select 1".length,
-      text: "select 1",
+      buffer: {
+        cursorOffset: "select 1".length,
+        text: "select 1",
+      },
       treeSitterGrammar: undefined,
     })
     expect(engine.getState().queryExecution.data?.connectionId).toBe(first.id)
@@ -921,7 +931,7 @@ where
       registry: new AdapterRegistry([fakeAdapter]),
     })
 
-    engine.setEditorState({
+    engine.setEditorBuffer({
       cursorOffset: "select 7".length,
       text: "select 7",
     })
@@ -973,7 +983,7 @@ where
     })
 
     engine.restoreSavedQuery(initialSavedQuery.id)
-    engine.setEditorState({
+    engine.setEditorBuffer({
       cursorOffset: "select * from audit_log where ok = 1".length,
       text: "select * from audit_log where ok = 1",
     })
@@ -1037,9 +1047,11 @@ where
       savedQuery,
     })
     expect(engine.getState().editor).toMatchObject({
-      cursorOffset: savedQuery.text.length,
+      buffer: {
+        cursorOffset: savedQuery.text.length,
+        text: savedQuery.text,
+      },
       savedQueryId: savedQuery.id,
-      text: savedQuery.text,
     })
     expect(engine.getState().queryExecution.data?.id).toBe("exec-newer")
     expect(engine.getState().detailView).toEqual({
@@ -1092,9 +1104,11 @@ where
     })
     expect(engine.getState().selectedConnectionId).toBe(currentConnection.id)
     expect(engine.getState().editor).toMatchObject({
-      cursorOffset: savedQuery.text.length,
+      buffer: {
+        cursorOffset: savedQuery.text.length,
+        text: savedQuery.text,
+      },
       savedQueryId: savedQuery.id,
-      text: savedQuery.text,
       treeSitterGrammar: "sql",
     })
     expect(engine.getState().queryExecution.data?.connectionId).toBe("conn-deleted")
@@ -1158,9 +1172,11 @@ where
       savedQuery: noResultSavedQuery,
     })
     expect(engine.getState().editor).toMatchObject({
-      cursorOffset: noResultSavedQuery.text.length,
+      buffer: {
+        cursorOffset: noResultSavedQuery.text.length,
+        text: noResultSavedQuery.text,
+      },
       savedQueryId: noResultSavedQuery.id,
-      text: noResultSavedQuery.text,
     })
     expect(engine.getState().queryExecution.status).toBe("pending")
     expect(engine.getState().detailView).toEqual({
@@ -1278,11 +1294,11 @@ where
       async getSuggestions(request) {
         requests.push(request)
 
-        if (request.scope.kind === "selected-connection") {
+        if (request.completion.scope.kind === "selected-connection") {
           return [
             {
-              connectionId: request.scope.connectionId,
-              id: `selected:${request.scope.connectionId}`,
+              connectionId: request.completion.scope.connectionId,
+              id: `selected:${request.completion.scope.connectionId}`,
               insertText: "orders",
               kind: "table",
               label: "orders",
@@ -1316,69 +1332,74 @@ where
       suggestionProviders: [provider],
     })
 
-    engine.openEditorSuggestionMenu(
-      createSuggestionMenuInput({
-        cursorOffset: "select 1".length,
-        documentText: "select 1",
-        replacementRange: { end: "select 1".length, start: "select 1".length - 1 },
-        trigger: {
-          kind: "custom",
-          query: "us",
-        },
+    engine.setEditorBuffer({
+      cursorOffset: "select 1".length,
+      text: "select 1",
+    })
+    engine.openEditorCompletion(
+      createCompletionContext({
+        kind: "custom",
+        query: "us",
+        replaceRange: { end: "select 1".length, start: "select 1".length - 1 },
       }),
     )
-    await waitFor(() => engine.getState().editor.suggestionMenu.status === "ready")
+    await waitFor(() => engine.getState().editor.completion.status === "ready")
 
-    expect(requests[0]?.scope).toEqual({ kind: "all-connections" })
-    expect(engine.getState().editor.suggestionMenu.items.map((item) => item.id)).toEqual([
+    expect(requests[0]?.completion.scope).toEqual({ kind: "all-connections" })
+    expect(engine.getState().editor.completion.items.map((item) => item.id)).toEqual([
       "conn-2:users",
       "conn-1:users",
     ])
 
     const query = engine.runQuery({ text: "select 1" })
-    expect(engine.getState().editor.suggestionMenu.open).toBe(true)
+    expect(engine.getState().editor.completion.status).toBe("ready")
     await waitForQueryState(engine, query, (state) => state.status === "success")
-    expect(engine.getState().editor.suggestionMenu.open).toBe(true)
+    expect(engine.getState().editor.completion.status).toBe("ready")
 
-    engine.closeEditorSuggestionMenu()
-    engine.openEditorSuggestionMenu(createSuggestionMenuInput())
-    await waitFor(() => engine.getState().editor.suggestionMenu.status === "ready")
+    engine.closeEditorCompletion()
+    engine.setEditorBuffer({
+      cursorOffset: 17,
+      text: "select * from @us",
+    })
+    engine.openEditorCompletion(createCompletionContext())
+    await waitFor(() => engine.getState().editor.completion.status === "ready")
 
-    engine.focusEditorSuggestionMenuItem({ id: "conn-1:users" })
-    expect(engine.getState().editor.suggestionMenu.focusedItemId).toBe("conn-1:users")
+    engine.focusEditorCompletionItem({ id: "conn-1:users" })
+    expect(engine.getState().editor.completion.focusedItemId).toBe("conn-1:users")
 
-    const applied = engine.applyEditorSuggestionMenuItem()
+    const applied = engine.applyEditorCompletionItem()
     expect(applied).toBe(true)
     expect(engine.getState().selectedConnectionId).toBe("conn-1")
-    expect(engine.getState().editor.suggestionScopeMode).toBe("selected-connection")
-    expect(engine.getState().editor.text).toBe("select * from users")
-    expect(engine.getState().editor.cursorOffset).toBe(19)
-    expect(engine.getState().editor.suggestionMenu).toEqual({
+    expect(engine.getState().editor.completionScopeMode).toBe("selected-connection")
+    expect(engine.getState().editor.buffer.text).toBe("select * from users")
+    expect(engine.getState().editor.buffer.cursorOffset).toBe(19)
+    expect(engine.getState().editor.completion).toEqual({
       items: [],
-      open: false,
-      query: "",
       status: "closed",
     })
 
-    engine.openEditorSuggestionMenu(
-      createSuggestionMenuInput({
-        cursorOffset: 18,
-        documentText: "select * from @ord",
-        replacementRange: { end: 18, start: 14 },
-        trigger: {
-          context: { triggerText: "@" },
-          kind: "mention",
-          query: "ord",
+    engine.setEditorBuffer({
+      cursorOffset: 18,
+      text: "select * from @ord",
+    })
+    engine.openEditorCompletion(
+      createCompletionContext({
+        kind: "mention",
+        query: "ord",
+        replaceRange: { end: 18, start: 14 },
+        scope: {
+          connectionId: "conn-1",
+          kind: "selected-connection",
         },
       }),
     )
-    await waitFor(() => engine.getState().editor.suggestionMenu.status === "ready")
+    await waitFor(() => engine.getState().editor.completion.status === "ready")
 
-    expect(requests.at(-1)?.scope).toEqual({
+    expect(requests.at(-1)?.completion.scope).toEqual({
       connectionId: "conn-1",
       kind: "selected-connection",
     })
-    expect(engine.getState().editor.suggestionMenu.items).toEqual([
+    expect(engine.getState().editor.completion.items).toEqual([
       {
         connectionId: "conn-1",
         id: "selected:conn-1",
@@ -1398,7 +1419,7 @@ where
         {
           id: "slow-provider",
           getSuggestions(request) {
-            if (request.trigger.query === "slow") {
+            if (request.completion.query === "slow") {
               return new Promise<SuggestionItem[]>((resolve) => {
                 resolveFirstRequest = resolve
                 request.abortSignal.addEventListener(
@@ -1425,28 +1446,24 @@ where
     let firstRequestAborted = false
     let resolveFirstRequest!: (items: SuggestionItem[]) => void
 
-    engine.openEditorSuggestionMenu(
-      createSuggestionMenuInput({
-        trigger: {
-          kind: "custom",
-          query: "slow",
-        },
+    engine.openEditorCompletion(
+      createCompletionContext({
+        kind: "custom",
+        query: "slow",
       }),
     )
-    await waitFor(() => engine.getState().editor.suggestionMenu.status === "loading")
+    await waitFor(() => engine.getState().editor.completion.status === "loading")
 
-    engine.openEditorSuggestionMenu(
-      createSuggestionMenuInput({
-        trigger: {
-          kind: "custom",
-          query: "fresh",
-        },
+    engine.openEditorCompletion(
+      createCompletionContext({
+        kind: "custom",
+        query: "fresh",
       }),
     )
-    await waitFor(() => engine.getState().editor.suggestionMenu.status === "ready")
+    await waitFor(() => engine.getState().editor.completion.status === "ready")
 
     expect(firstRequestAborted).toBe(true)
-    expect(engine.getState().editor.suggestionMenu.items).toEqual([
+    expect(engine.getState().editor.completion.items).toEqual([
       {
         id: "fresh",
         insertText: "fresh",
@@ -1463,7 +1480,7 @@ where
     ])
     await new Promise((resolve) => setTimeout(resolve, 10))
 
-    expect(engine.getState().editor.suggestionMenu.items).toEqual([
+    expect(engine.getState().editor.completion.items).toEqual([
       {
         id: "fresh",
         insertText: "fresh",
@@ -1509,19 +1526,16 @@ where
       registry: new AdapterRegistry([fakeAdapter]),
     })
 
-    engine.openEditorSuggestionMenu(
-      createSuggestionMenuInput({
-        trigger: {
-          context: { triggerText: "@" },
-          kind: "mention",
-          query: "active",
-        },
+    engine.openEditorCompletion(
+      createCompletionContext({
+        kind: "mention",
+        query: "active",
       }),
     )
-    await waitFor(() => engine.getState().editor.suggestionMenu.status === "ready")
+    await waitFor(() => engine.getState().editor.completion.status === "ready")
 
     expect(fakeAdapter.fetchObjectsCalls).toBeGreaterThanOrEqual(2)
-    expect(engine.getState().editor.suggestionMenu.items).toEqual([
+    expect(engine.getState().editor.completion.items).toEqual([
       {
         connectionId: "conn-1",
         detail: "First | view",
@@ -1540,22 +1554,19 @@ where
       },
     ])
 
-    engine.openEditorSuggestionMenu(
-      createSuggestionMenuInput({
+    engine.openEditorCompletion(
+      createCompletionContext({
+        kind: "mention",
+        query: "latest",
         scope: {
           connectionId: "conn-1",
           kind: "selected-connection",
         },
-        trigger: {
-          context: { triggerText: "@" },
-          kind: "mention",
-          query: "latest",
-        },
       }),
     )
-    await waitFor(() => engine.getState().editor.suggestionMenu.status === "ready")
+    await waitFor(() => engine.getState().editor.completion.status === "ready")
 
-    expect(engine.getState().editor.suggestionMenu.items).toEqual([
+    expect(engine.getState().editor.completion.items).toEqual([
       {
         connectionId: "conn-1",
         detail: "First | matview",

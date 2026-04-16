@@ -1,19 +1,14 @@
 import { TextAttributes, type BoxRenderable } from "@opentui/core"
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { sameFocusPath } from "../../lib/focus"
+import { focusPath, sameFocusPath } from "../../lib/focus/paths"
 import type { DiscoveredConnectionSuggestion } from "../../lib/SqlVisor"
-import {
-  Focusable,
-  type FocusableProps,
-  useFocusedDescendantPath,
-  useFocusPath,
-  useIsFocusNavigationActive,
-  useIsFocusWithin,
-  useRememberedDescendantPath,
-  useFocusTree,
-} from "../focus"
+import { Focusable, type FocusableProps } from "../focus/Focusable"
+import { useFocusedDescendantPath, useFocusPath, useFocusTree, useIsFocusNavigationActive, useIsFocusWithin, useRememberedDescendantPath } from "../focus/context"
+import { useOpaqueIdMap } from "../focus/opaqueIds"
 import { useIconGlyph, type IconName } from "../ui/icons"
-import { useKeybind, useNavKeys, useShortcut } from "../ui/keybind"
+import { useKeybind } from "../ui/keybind/useKeybind"
+import { useNavKeys } from "../ui/keybind/useNavKeys"
+import { useShortcut } from "../ui/keybind/useShortcut"
 import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 
@@ -94,14 +89,26 @@ function TreeViewBody(props: Omit<TreeViewProps, "focusableProps">) {
     () => flattenVisibleTree(nodes, expansionState.expandedRowKeys),
     [expansionState.expandedRowKeys, nodes],
   )
+  const rowKeys = useMemo(() => rows.map((row) => row.rowKey), [rows])
+  const rowFocusIds = useOpaqueIdMap(rowKeys, "row")
+  const rowPaths = useMemo(() => {
+    const next = new Map<string, readonly string[]>()
+    for (const rowKey of rowKeys) {
+      const focusableId = rowFocusIds.get(rowKey)
+      if (focusableId) {
+        next.set(rowKey, focusPath(treePath, focusableId))
+      }
+    }
+    return next
+  }, [rowFocusIds, rowKeys, treePath])
   const focusedWithin = useIsFocusWithin(treePath)
   const navigationActive = useIsFocusNavigationActive()
   const focusedRowPath = useFocusedDescendantPath()
   const rememberedRowPath = useRememberedDescendantPath()
   const theme = useTheme()
 
-  const focusedIndex = rows.findIndex((row) => sameFocusPath(focusedRowPath, treeRowPath(treePath, row.rowKey)))
-  const rememberedIndex = rows.findIndex((row) => sameFocusPath(rememberedRowPath, treeRowPath(treePath, row.rowKey)))
+  const focusedIndex = rows.findIndex((row) => sameFocusPath(focusedRowPath, rowPaths.get(row.rowKey)))
+  const rememberedIndex = rows.findIndex((row) => sameFocusPath(rememberedRowPath, rowPaths.get(row.rowKey)))
   const currentIndex = focusedIndex >= 0 ? focusedIndex : rememberedIndex >= 0 ? rememberedIndex : 0
   const currentRow = rows[currentIndex]
 
@@ -118,10 +125,11 @@ function TreeViewBody(props: Omit<TreeViewProps, "focusableProps">) {
 
   function focusRow(nextIndex: number) {
     const row = rows[nextIndex]
-    if (!row) {
+    const rowPath = row ? rowPaths.get(row.rowKey) : undefined
+    if (!rowPath) {
       return
     }
-    tree.focusPath(treeRowPath(treePath, row.rowKey))
+    tree.focusPath(rowPath)
   }
 
   function focusCurrentRow() {
@@ -188,7 +196,10 @@ function TreeViewBody(props: Omit<TreeViewProps, "focusableProps">) {
 
   function toggleDisclosure(row: VisibleTreeNode) {
     const rowIndex = rows.findIndex((candidate) => candidate.rowKey === row.rowKey)
-    tree.focusPath(treeRowPath(treePath, row.rowKey), "mouse")
+    const rowPath = rowPaths.get(row.rowKey)
+    if (rowPath) {
+      tree.focusPath(rowPath, "mouse")
+    }
     toggleRow(row, rowIndex >= 0 ? rowIndex : currentIndex)
   }
 
@@ -218,7 +229,10 @@ function TreeViewBody(props: Omit<TreeViewProps, "focusableProps">) {
         if (currentRow?.parentRowKey) {
           key.preventDefault()
           key.stopPropagation()
-          tree.focusPath(treeRowPath(treePath, currentRow.parentRowKey))
+          const parentRowPath = rowPaths.get(currentRow.parentRowKey)
+          if (parentRowPath) {
+            tree.focusPath(parentRowPath)
+          }
         }
       },
       right(key) {
@@ -260,12 +274,17 @@ function TreeViewBody(props: Omit<TreeViewProps, "focusableProps">) {
         </Focusable>
       )}
       {rows.map((row) => {
-        const path = treeRowPath(treePath, row.rowKey)
+        const path = rowPaths.get(row.rowKey)
+        const rowFocusId = rowFocusIds.get(row.rowKey)
         const focused = sameFocusPath(path, focusedRowPath)
         const remembered = !focusedWithin && sameFocusPath(path, rememberedRowPath)
+        if (!path || !rowFocusId) {
+          return null
+        }
         return (
           <TreeRow
             key={row.rowKey}
+            focusableId={rowFocusId}
             row={row}
             onToggleDisclosure={row.isExpandable ? () => toggleDisclosure(row) : undefined}
           >
@@ -277,8 +296,13 @@ function TreeViewBody(props: Omit<TreeViewProps, "focusableProps">) {
   )
 }
 
-function TreeRow(props: { row: VisibleTreeNode; onToggleDisclosure?: () => void; children: ReactNode }) {
-  const { children, onToggleDisclosure, row } = props
+function TreeRow(props: {
+  children: ReactNode
+  focusableId: string
+  onToggleDisclosure?: () => void
+  row: VisibleTreeNode
+}) {
+  const { children, focusableId, onToggleDisclosure, row } = props
   const rowRef = useRef<BoxRenderable>(null)
   const disclosureOffset = treeDisclosureOffset(row)
 
@@ -301,7 +325,7 @@ function TreeRow(props: { row: VisibleTreeNode; onToggleDisclosure?: () => void;
       }}
       width="100%"
     >
-      <Focusable focusable focusableId={rowFocusId(row.rowKey)} navigable={false}>
+      <Focusable focusable focusableId={focusableId} navigable={false}>
         <box width="100%">{children}</box>
       </Focusable>
     </box>
@@ -394,18 +418,6 @@ function TreeNodeView(
       )}
     </box>
   )
-}
-
-function treeRowPath(path: readonly string[], rowKey: string): readonly string[] {
-  return [...path, rowFocusId(rowKey)]
-}
-
-export function treeRowFocusId(rowKey: string): string {
-  return `row-${rowKey}`
-}
-
-function rowFocusId(rowKey: string): string {
-  return treeRowFocusId(rowKey)
 }
 
 function treePrefix(row: VisibleTreeNode, disclosure: string): string {

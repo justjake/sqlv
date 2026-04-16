@@ -1,8 +1,9 @@
 import type { InputRenderable } from "@opentui/core"
 import { useEffect, useRef, useState } from "react"
-import { Focusable, useIsFocusWithin } from "../focus"
+import { Focusable } from "../focus/Focusable"
+import { useIsFocusWithin } from "../focus/context"
 import { Shortcut } from "../Shortcut"
-import { useShortcut } from "../ui/keybind"
+import { useShortcut } from "../ui/keybind/useShortcut"
 import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 

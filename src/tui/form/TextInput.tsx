@@ -1,6 +1,7 @@
 import type { InputRenderable } from "@opentui/core"
 import { useRef } from "react"
-import { Focusable, useIsFocusNavigationActive, useIsFocused, useIsHighlighted } from "../focus"
+import { Focusable } from "../focus/Focusable"
+import { useIsFocusNavigationActive, useIsFocused, useIsHighlighted } from "../focus/context"
 import { useTheme } from "../ui/theme"
 
 export type TextInputProps = {

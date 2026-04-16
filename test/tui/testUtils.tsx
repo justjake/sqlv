@@ -2,8 +2,8 @@ import { testRender } from "@opentui/react/test-utils"
 import type { TestRendererOptions } from "@opentui/core/testing"
 import { afterEach } from "bun:test"
 import { act, type ReactNode } from "react"
-import { FocusProvider } from "../../src/tui/focus"
-import { KeybindProvider } from "../../src/tui/ui/keybind"
+import { FocusProvider } from "../../src/tui/focus/context"
+import { KeybindProvider } from "../../src/tui/ui/keybind/KeybindProvider"
 
 export type RenderedUi = Awaited<ReturnType<typeof testRender>>
 
@@ -45,13 +45,8 @@ export function createTuiRenderHarness() {
     })
   }
 
-  function focusedPathLine(ui: RenderedUi): string {
-    return ui.captureCharFrame().split("\n")[0] ?? ""
-  }
-
   return {
     dispatchInput,
-    focusedPathLine,
     render,
     settleDeferredRender,
   }

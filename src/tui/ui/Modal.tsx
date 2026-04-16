@@ -1,8 +1,8 @@
 import { useTerminalDimensions } from "@opentui/react"
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
-import { useShortcut } from "./keybind"
+import { useShortcut } from "./keybind/useShortcut"
 import { DEFAULT_MODAL_Z_INDEX, resolveModalViewportBounds } from "./modalShared"
-import { useIsFocusNavigationActive } from "../focus"
+import { useIsFocusNavigationActive } from "../focus/context"
 import { Text } from "./Text"
 import { useTheme } from "./theme"
 

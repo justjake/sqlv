@@ -1,5 +1,5 @@
 import type { Renderable, ScrollBoxRenderable } from "@opentui/core"
-import type { FocusPath, FocusRect, FocusVisibleRect } from "../../lib/focus"
+import type { FocusPath, FocusRect, FocusVisibleRect } from "../../lib/focus/types"
 
 const FOCUS_RENDERABLE_PREFIX = "focus:"
 

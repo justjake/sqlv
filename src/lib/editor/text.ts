@@ -1,4 +1,7 @@
-import type { EditorRange } from "../suggestions"
+export type EditorRange = {
+  end: number
+  start: number
+}
 
 export function replaceTextRange(text: string, range: EditorRange, replacement: string): string {
   return text.slice(0, range.start) + replacement + text.slice(range.end)

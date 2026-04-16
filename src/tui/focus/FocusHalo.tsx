@@ -1,9 +1,17 @@
 import type { Renderable } from "@opentui/core"
+import { useLayoutEffect } from "react"
 import { useTheme } from "../ui/theme"
-import { useIsFocusNavigationActive, useIsHighlighted } from "./context"
+import {
+  focusPathSignature,
+  useFocusHaloOverlayController,
+  useFocusPath,
+  useIsFocusNavigationActive,
+  useIsHighlighted,
+} from "./context"
 
 export type FocusHaloProps = {
   baseZIndex?: number
+  getRenderable?: () => Renderable | null | undefined
   renderable?: Renderable | null
 }
 
@@ -11,20 +19,46 @@ export function FocusHalo(props: FocusHaloProps) {
   const theme = useTheme()
   const active = useIsFocusNavigationActive()
   const highlighted = useIsHighlighted()
+  const controller = useFocusHaloOverlayController()
+  const path = useFocusPath()
+  const ownerPathKey = focusPathSignature(path)
 
-  if (!active || !highlighted) {
-    return null
-  }
+  useLayoutEffect(() => {
+    if (!ownerPathKey) {
+      return
+    }
 
-  return (
-    <box
-      backgroundColor={theme.focusNavHaloBg}
-      bottom={0}
-      left={0}
-      position="absolute"
-      right={0}
-      top={0}
-      zIndex={Math.max((props.renderable?.zIndex ?? props.baseZIndex ?? 0) + 1, 1)}
-    />
-  )
+    if (!active || !highlighted) {
+      controller.clearTarget(ownerPathKey)
+      return
+    }
+
+    const renderable = props.getRenderable?.() ?? props.renderable
+    if (!renderable || renderable.isDestroyed) {
+      controller.clearTarget(ownerPathKey)
+      return
+    }
+
+    controller.setTarget({
+      backgroundColor: theme.focusNavHaloBg,
+      ownerPathKey,
+      renderable,
+      zIndex: Math.max((renderable.zIndex ?? props.baseZIndex ?? 0) + 1, 1),
+    })
+
+    return () => {
+      controller.clearTarget(ownerPathKey)
+    }
+  }, [
+    active,
+    controller,
+    highlighted,
+    ownerPathKey,
+    props.baseZIndex,
+    props.getRenderable,
+    props.renderable,
+    theme.focusNavHaloBg,
+  ])
+
+  return null
 }

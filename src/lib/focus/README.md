@@ -66,6 +66,13 @@ That path is the source of truth for:
 
 Paths are preferred over opaque generated ids because they explain *where* something lives, not just *that* it exists.
 
+Path segments are still opaque structural ids:
+
+- compare paths to paths
+- do ancestry checks against whole paths
+- do not parse segment values to recover domain data
+- do not encode row ids, field keys, coordinates, or other payload into the path itself
+
 ## One Participant Type
 
 The core now models a single participant type: a **focusable**.

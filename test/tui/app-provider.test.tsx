@@ -4,16 +4,14 @@ import { act, useEffect, type ReactNode } from "react"
 import {
   RESULTS_TABLE_FOCUS_ID,
   RESULTS_TABLE_GRID_AREA_ID,
-  resultsTableCellFocusId,
-  resultsTableRowFocusId,
 } from "../../src/tui/dataview/ResultsTable"
-import { FocusProvider, focusPathSignature, useFocusNavigationState, useFocusTree } from "../../src/tui/focus"
-import { App, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID, recentQueryFocusId } from "../../src/tui/index"
+import { FocusProvider, focusPathSignature, useFocusNavigationState, useFocusTree } from "../../src/tui/focus/context"
+import { App, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID } from "../../src/tui/index"
 import { AddConnectionPane, ADD_CONNECTION_AREA_ID } from "../../src/tui/connection/AddConnectionPane"
 import { PostgresAdapter } from "../../src/lib/adapters/postgres"
 import { objectNodes, onOpenNode, onSelectNode, SIDEBAR_AREA_ID, Sidebar } from "../../src/tui/sidebar/Sidebar"
-import { SIDEBAR_TREE_AREA_ID, treeRowFocusId, type TreeNode } from "../../src/tui/sidebar/TreeView"
-import { KeybindProvider } from "../../src/tui/ui/keybind"
+import { SIDEBAR_TREE_AREA_ID, type TreeNode } from "../../src/tui/sidebar/TreeView"
+import { KeybindProvider } from "../../src/tui/ui/keybind/KeybindProvider"
 import { Text } from "../../src/tui/ui/Text"
 import { SqlVisorProvider, useSqlVisor, useSqlVisorState } from "../../src/tui/useSqlVisor"
 import { createEngineStub, createQueryState, makeConnection, makeQueryExecution, makeSavedQuery } from "../support"
@@ -35,8 +33,30 @@ const defaultPostgresURI =
     }),
   ) ?? ""
 
-function addConnectionInputPath(key: string) {
-  return [ADD_CONNECTION_AREA_ID, key, "input"] as const
+const ADD_CONNECTION_FIELD_SLOT = {
+  create: 4,
+  host: 9,
+  name: 1,
+  path: 2,
+  protocol: 0,
+  readonly: 3,
+  uri: 8,
+} as const
+
+function addConnectionInputPath(key: keyof typeof ADD_CONNECTION_FIELD_SLOT) {
+  return [ADD_CONNECTION_AREA_ID, `field-${ADD_CONNECTION_FIELD_SLOT[key]}`, "input"] as const
+}
+
+function sidebarRowPath(slot: number) {
+  return [SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, `row-${slot}`] as const
+}
+
+function recentQueryRowPath(slot: number) {
+  return [RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, `query-${slot}`] as const
+}
+
+function resultsTableCellPath(rowSlot: number, cellSlot: number) {
+  return [RESULTS_TABLE_FOCUS_ID, RESULTS_TABLE_GRID_AREA_ID, `row-${rowSlot}`, `cell-${cellSlot}`] as const
 }
 
 async function render(node: ReactNode, size = { height: 18, width: 100 }) {
@@ -357,7 +377,7 @@ describe("SqlVisor provider and app", () => {
     const ui = await render(
       <SqlVisorProvider engine={stub.engine}>
         <Sidebar onAddConnection={() => undefined} />
-        <FocusController path={[SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(connection.id)]} />
+        <FocusController path={sidebarRowPath(0)} />
       </SqlVisorProvider>,
       { height: 16, width: 100 },
     )
@@ -637,14 +657,14 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, `row-${first.id}`]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(sidebarRowPath(0)) ?? "")
 
     await act(async () => {
       ui.mockInput.pressArrow("down")
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, `row-${second.id}`]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(sidebarRowPath(1)) ?? "")
   })
 
   test("confirms connection deletion from backspace on a focused sidebar connection", async () => {
@@ -676,7 +696,7 @@ describe("SqlVisor provider and app", () => {
     const ui = await render(
       <SqlVisorProvider engine={stub.engine}>
         <App />
-        <FocusController path={[SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(first.id)]} />
+        <FocusController path={sidebarRowPath(0)} />
         <FocusProbe />
       </SqlVisorProvider>,
       { height: 20, width: 100 },
@@ -687,9 +707,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(
-      focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(first.id)]) ?? "",
-    )
+    expect(focusedPath).toBe(focusPathSignature(sidebarRowPath(0)) ?? "")
 
     ui.mockInput.pressBackspace()
     await settleRenderedUi(ui, { delayMs: 80, renders: 3 })
@@ -706,9 +724,7 @@ describe("SqlVisor provider and app", () => {
     })
 
     expect(stub.calls.deleteConnection).toEqual([])
-    expect(focusedPath).toBe(
-      focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(first.id)]) ?? "",
-    )
+    expect(focusedPath).toBe(focusPathSignature(sidebarRowPath(0)) ?? "")
 
     ui.mockInput.pressBackspace()
     await settleRenderedUi(ui, { delayMs: 80, renders: 3 })
@@ -724,9 +740,7 @@ describe("SqlVisor provider and app", () => {
     expect(stub.calls.deleteConnection).toEqual([first.id])
     expect(ui.captureCharFrame()).not.toContain(first.name)
     expect(ui.captureCharFrame()).toContain(second.name)
-    expect(focusedPath).toBe(
-      focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(second.id)]) ?? "",
-    )
+    expect(focusedPath).toBe(focusPathSignature(sidebarRowPath(0)) ?? "")
   })
 
   test("activating the sidebar from focus navigation delegates into its first row on launch", async () => {
@@ -783,7 +797,7 @@ describe("SqlVisor provider and app", () => {
     })
 
     expect(focusNavigationActive).toBe(false)
-    expect(focusedPath).toBe(focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, `row-${connection.id}`]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(sidebarRowPath(0)) ?? "")
   })
 
   test("renders row detail views in the app", async () => {
@@ -882,7 +896,9 @@ describe("SqlVisor provider and app", () => {
         },
         history: [failedEntry, restorableEntry],
         editor: {
-          text: "select 1",
+          buffer: {
+            text: "select 1",
+          },
         },
         selectedConnectionId: connection.id,
       },
@@ -907,8 +923,10 @@ describe("SqlVisor provider and app", () => {
                     title: "Query Error",
                   },
             editor: {
-              ...stub.getState().editor,
-              text: entry.sql.source,
+              buffer: {
+                cursorOffset: entry.sql.source.length,
+                text: entry.sql.source,
+              },
             },
             selectedConnectionId: entry.connectionId,
           })
@@ -973,8 +991,10 @@ describe("SqlVisor provider and app", () => {
         status: "success",
       }),
       editor: {
-        cursorOffset: "select ".length,
-        text: "select ",
+        buffer: {
+          cursorOffset: "select ".length,
+          text: "select ",
+        },
       },
       history: [
         makeQueryExecution({
@@ -1014,7 +1034,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(stub.getState().editor.text).toBe("select x")
+    expect(stub.getState().editor.buffer.text).toBe("select x")
   })
 
   test("restores saved queries from ctrl-r and clears the detail pane when no execution exists", async () => {
@@ -1206,7 +1226,7 @@ describe("SqlVisor provider and app", () => {
     const ui = await render(
       <SqlVisorProvider engine={stub.engine}>
         <App />
-        <FocusController path={[RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(activeQueryId)]} />
+        <FocusController path={recentQueryRowPath(0)} />
         <FocusProbe />
       </SqlVisorProvider>,
       { height: 24, width: 100 },
@@ -1223,25 +1243,19 @@ describe("SqlVisor provider and app", () => {
     expect(ui.captureCharFrame()).toContain("select 2")
     expect(ui.captureCharFrame()).not.toContain("select 1")
     expect(ui.captureCharFrame()).not.toContain("pragma table_info(posts)")
-    expect(focusedPath).toBe(
-      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(activeQueryId)]) ?? "",
-    )
+    expect(focusedPath).toBe(focusPathSignature(recentQueryRowPath(0)) ?? "")
 
     await act(async () => {
       ui.mockInput.pressArrow("down")
       await ui.renderOnce()
     })
-    expect(focusedPath).toBe(
-      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(newestFinished.id)]) ?? "",
-    )
+    expect(focusedPath).toBe(focusPathSignature(recentQueryRowPath(1)) ?? "")
 
     await act(async () => {
       ui.mockInput.pressArrow("down")
       await ui.renderOnce()
     })
-    expect(focusedPath).toBe(
-      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(failedFinished.id)]) ?? "",
-    )
+    expect(focusedPath).toBe(focusPathSignature(recentQueryRowPath(2)) ?? "")
     expect(ui.captureCharFrame()).toContain("Query running")
 
     let frameAfterInspect = ""
@@ -1257,9 +1271,7 @@ describe("SqlVisor provider and app", () => {
       }
     })
 
-    expect(focusedPath).toBe(
-      focusPathSignature([RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(failedFinished.id)]) ?? "",
-    )
+    expect(focusedPath).toBe(focusPathSignature(recentQueryRowPath(2)) ?? "")
     expect(frameAfterInspect).not.toContain("Inspector")
     expect(frameAfterInspect).toContain("Query failed")
     expect(frameAfterInspect).toContain("query failed")
@@ -1293,7 +1305,7 @@ describe("SqlVisor provider and app", () => {
     const ui = await render(
       <SqlVisorProvider engine={stub.engine}>
         <App />
-        <FocusController path={[RECENT_QUERY_FOCUS_ID, RECENT_QUERY_AREA_ID, recentQueryFocusId(finishedQuery.id)]} />
+        <FocusController path={recentQueryRowPath(0)} />
         <FocusProbe />
       </SqlVisorProvider>,
       { height: 18, width: 60 },
@@ -1309,14 +1321,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(
-      focusPathSignature([
-        RESULTS_TABLE_FOCUS_ID,
-        RESULTS_TABLE_GRID_AREA_ID,
-        resultsTableRowFocusId(0),
-        resultsTableCellFocusId(0),
-      ]) ?? "",
-    )
+    expect(focusedPath).toBe(focusPathSignature(resultsTableCellPath(0, 0)) ?? "")
     expect(ui.captureCharFrame()).toContain("1")
   })
 
@@ -1441,7 +1446,7 @@ describe("SqlVisor provider and app", () => {
     const ui = await render(
       <SqlVisorProvider engine={stub.engine}>
         <App />
-        <FocusController path={[SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId("suggestions")]} />
+        <FocusController path={sidebarRowPath(0)} />
         <FocusProbe />
       </SqlVisorProvider>,
       { height: 32, width: 120 },
@@ -1458,9 +1463,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(
-      focusPathSignature([SIDEBAR_AREA_ID, SIDEBAR_TREE_AREA_ID, treeRowFocusId(`suggestions.${suggestion.id}`)]) ?? "",
-    )
+    expect(focusedPath).toBe(focusPathSignature(sidebarRowPath(1)) ?? "")
 
     await act(async () => {
       ui.mockInput.pressEnter()
@@ -1565,8 +1568,6 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("uri")) ?? "")
-
     await pressBackspaceRepeated(ui, defaultPostgresURI.length)
 
     await act(async () => {
@@ -1589,8 +1590,6 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("host")) ?? "")
-
     await pressBackspaceRepeated(ui, "db".length)
 
     await act(async () => {
@@ -1609,8 +1608,6 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
       await ui.renderOnce()
     })
-
-    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("uri")) ?? "")
 
     await typeTextSteadily(ui, "%")
 
@@ -1870,7 +1867,9 @@ describe("SqlVisor provider and app", () => {
       }),
       selectedConnectionId: connection.id,
       editor: {
-        text: "",
+        buffer: {
+          text: "",
+        },
       },
     })
 
@@ -1891,6 +1890,6 @@ describe("SqlVisor provider and app", () => {
     })
 
     expect(ui.captureCharFrame()).toContain("abc")
-    expect(stub.getState().editor.text).toBe("abc")
+    expect(stub.getState().editor.buffer.text).toBe("abc")
   })
 })

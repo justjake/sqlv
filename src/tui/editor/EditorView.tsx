@@ -4,20 +4,16 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import {
   getDiagnosticLogicalLine,
   getVisibleEditorAnalysis,
-  normalizeHighlightRange,
-  selectVisibleSuggestionItems,
-  type EditorAnalysisStateSnapshot,
-} from "../../lib/editor"
-import type {
-  RequestEditorAnalysisInput,
-  EditorState,
-  EditorSuggestionMenuItemFocusInput,
-  OpenEditorSuggestionMenuInput,
-} from "../../lib/SqlVisor"
-import type { SuggestionItem } from "../../lib/suggestions"
-import { decideEditorSuggestionMenu } from "../../lib/suggestions/editorCompletion"
+  type EditorAnalysisState,
+} from "../../lib/editor/analysis"
+import { createEditorChange, type EditorChange } from "../../lib/editor/buffer"
+import { type EditorCompletionItemFocusInput, type SuggestionItem } from "../../lib/editor/completion"
+import { type EditorState } from "../../lib/editor/state"
+import { normalizeHighlightRange } from "../../lib/editor/text"
+import { selectVisibleSuggestionItems } from "../../lib/editor/suggestionMenu"
 import type { SavedQuery } from "../../lib/types/SavedQuery"
-import { Focusable, useIsFocused } from "../focus"
+import { Focusable } from "../focus/Focusable"
+import { useIsFocused } from "../focus/context"
 import { Shortcut } from "../Shortcut"
 import { ensureTreeSitterGrammarLoaded, highlightTreeSitterOnce } from "../tree-sitter/client"
 import { Text } from "../ui/Text"
@@ -35,15 +31,12 @@ import {
 
 export type EditorProps = {
   editor: EditorState
-  analysisConnectionId?: string
-  selectedConnectionId?: string
-  onEditorChange?: (patch: Partial<Pick<EditorState, "text" | "cursorOffset">>) => void
-  onRequestAnalysis?: (input?: RequestEditorAnalysisInput) => void
+  onChange?: (change: EditorChange) => void
+  onRequestAnalysis?: () => void
   onCancelAnalysis?: () => void
-  onOpenSuggestionMenu?: (input: OpenEditorSuggestionMenuInput) => void
-  onCloseSuggestionMenu?: () => void
-  onFocusSuggestionMenuItem?: (input: EditorSuggestionMenuItemFocusInput) => void
-  onApplySuggestionMenuItem?: () => void
+  onCloseCompletion?: () => void
+  onFocusCompletionItem?: (input: EditorCompletionItemFocusInput) => void
+  onApplyCompletionItem?: () => void
   onExecute?: (sql: string) => void
   onFormatQuery?: () => void
   onHistory?: () => void
@@ -84,18 +77,16 @@ type EditorAnalysisOverlay = {
 
 export function EditorView(props: EditorProps) {
   const {
-    analysisConnectionId,
     autoFocus,
     editor,
-    onApplySuggestionMenuItem,
+    onApplyCompletionItem,
     onCancelAnalysis,
-    onCloseSuggestionMenu,
-    onEditorChange,
+    onChange,
+    onCloseCompletion,
     onExecute,
-    onFocusSuggestionMenuItem,
+    onFocusCompletionItem,
     onFormatQuery,
     onHistory,
-    onOpenSuggestionMenu,
     onRequestAnalysis,
     onSaveAsNew,
     onSaveChanges,
@@ -116,34 +107,31 @@ export function EditorView(props: EditorProps) {
       return
     }
 
-    if (textarea.plainText !== editor.text) {
-      textarea.setText(editor.text)
+    if (textarea.plainText !== editor.buffer.text) {
+      textarea.setText(editor.buffer.text)
     }
 
-    if (textarea.cursorOffset !== editor.cursorOffset) {
-      textarea.cursorOffset = editor.cursorOffset
+    if (textarea.cursorOffset !== editor.buffer.cursorOffset) {
+      textarea.cursorOffset = editor.buffer.cursorOffset
     }
-  }, [editor.cursorOffset, editor.text])
+  }, [editor.buffer.cursorOffset, editor.buffer.text])
 
   useEffect(() => {
     if (!onRequestAnalysis && !onCancelAnalysis) {
       return
     }
 
-    if (!editor.text.trim()) {
+    if (!editor.buffer.text.trim()) {
       onCancelAnalysis?.()
       return
     }
 
     const timeout = setTimeout(() => {
-      onRequestAnalysis?.({
-        connectionId: analysisConnectionId,
-        text: editor.text,
-      })
+      onRequestAnalysis?.()
     }, 180)
 
     return () => clearTimeout(timeout)
-  }, [analysisConnectionId, editor.text, onCancelAnalysis, onRequestAnalysis])
+  }, [editor.buffer.text, onCancelAnalysis, onRequestAnalysis])
 
   return (
     <Focusable
@@ -157,17 +145,15 @@ export function EditorView(props: EditorProps) {
       <EditorSurface
         editor={editor}
         handleExecute={handleExecute}
-        onApplySuggestionMenuItem={onApplySuggestionMenuItem}
-        onCloseSuggestionMenu={onCloseSuggestionMenu}
-        onEditorChange={onEditorChange}
-        onFocusSuggestionMenuItem={onFocusSuggestionMenuItem}
+        onApplyCompletionItem={onApplyCompletionItem}
+        onChange={onChange}
+        onCloseCompletion={onCloseCompletion}
+        onFocusCompletionItem={onFocusCompletionItem}
         onFormatQuery={onFormatQuery}
         onHistory={onHistory}
-        onOpenSuggestionMenu={onOpenSuggestionMenu}
         onSaveAsNew={onSaveAsNew}
         onSaveChanges={onSaveChanges}
         savedQuery={savedQuery}
-        selectedConnectionId={props.selectedConnectionId}
         textareaRef={textareaRef}
       />
     </Focusable>
@@ -178,35 +164,32 @@ function EditorSurface(props: {
   editor: EditorState
   textareaRef: RefObject<TextareaRenderable | null>
   handleExecute: () => void
-  onEditorChange?: (patch: Partial<Pick<EditorState, "text" | "cursorOffset">>) => void
-  onOpenSuggestionMenu?: (input: OpenEditorSuggestionMenuInput) => void
-  onCloseSuggestionMenu?: () => void
-  onFocusSuggestionMenuItem?: (input: EditorSuggestionMenuItemFocusInput) => void
-  onApplySuggestionMenuItem?: () => void
+  onChange?: (change: EditorChange) => void
+  onCloseCompletion?: () => void
+  onFocusCompletionItem?: (input: EditorCompletionItemFocusInput) => void
+  onApplyCompletionItem?: () => void
   onHistory?: () => void
   onFormatQuery?: () => void
   onSaveAsNew?: () => void
   onSaveChanges?: () => void
   savedQuery?: SavedQuery
-  selectedConnectionId?: string
 }) {
   const {
     editor,
     handleExecute,
-    onApplySuggestionMenuItem,
-    onCloseSuggestionMenu,
-    onEditorChange,
-    onFocusSuggestionMenuItem,
+    onApplyCompletionItem,
+    onChange,
+    onCloseCompletion,
+    onFocusCompletionItem,
     onFormatQuery,
     onHistory,
-    onOpenSuggestionMenu,
     onSaveAsNew,
     onSaveChanges,
     savedQuery,
-    selectedConnectionId,
     textareaRef,
   } = props
-  const { analysis, cursorOffset, suggestionMenu, text, treeSitterGrammar } = editor
+  const { analysis, buffer, completion, treeSitterGrammar } = editor
+  const { cursorOffset, text } = buffer
   const focused = useIsFocused()
   const theme = useTheme()
   const renderer = useRenderer()
@@ -215,10 +198,7 @@ function EditorSurface(props: {
   const editorSyntaxStylesRef = useRef<EditorSyntaxStyleRegistry | null>(null)
   const syntaxHighlightRequestRef = useRef(0)
   const [, setLayoutVersion] = useState(0)
-  const lastObservedEditorStateRef = useRef({
-    cursorOffset,
-    text,
-  })
+  const lastObservedBufferRef = useRef(buffer)
   const pendingSyncRef = useRef(false)
   const pendingSyncReasonRef = useRef<"content" | "cursor">("cursor")
 
@@ -231,35 +211,15 @@ function EditorSurface(props: {
 
       const text = textarea.plainText
       const cursorOffset = textarea.cursorOffset
-      const previousState = lastObservedEditorStateRef.current
-      lastObservedEditorStateRef.current = {
-        cursorOffset,
-        text,
-      }
-      onEditorChange?.({
-        cursorOffset,
-        text,
-      })
-
-      const suggestionDecision = decideEditorSuggestionMenu({
-        cursorOffset,
-        menu: suggestionMenu,
-        previousText: previousState.text,
-        reason,
-        selectedConnectionId,
-        text,
-      })
-
-      if (suggestionDecision.kind === "open") {
-        onOpenSuggestionMenu?.(suggestionDecision.input)
+      const change = createEditorChange(lastObservedBufferRef.current, { cursorOffset, text }, reason)
+      if (change.next === change.previous) {
         return
       }
 
-      if (suggestionDecision.kind === "close") {
-        onCloseSuggestionMenu?.()
-      }
+      lastObservedBufferRef.current = change.next
+      onChange?.(change)
     },
-    [onCloseSuggestionMenu, onEditorChange, onOpenSuggestionMenu, selectedConnectionId, suggestionMenu, textareaRef],
+    [onChange, textareaRef],
   )
 
   const scheduleSyncEditorState = useCallback(
@@ -294,14 +254,11 @@ function EditorSurface(props: {
   }, [scheduleSyncEditorState, textareaRef])
 
   useEffect(() => {
-    lastObservedEditorStateRef.current = {
-      cursorOffset,
-      text,
-    }
-  }, [cursorOffset, text])
+    lastObservedBufferRef.current = buffer
+  }, [buffer])
 
   useEffect(() => {
-    if (!focused || !suggestionMenu.open) {
+    if (!focused || completion.status === "closed") {
       return
     }
 
@@ -314,18 +271,18 @@ function EditorSurface(props: {
         case "up":
           event.preventDefault()
           event.stopPropagation()
-          onFocusSuggestionMenuItem?.({ delta: -1 })
+          onFocusCompletionItem?.({ delta: -1 })
           return
         case "down":
           event.preventDefault()
           event.stopPropagation()
-          onFocusSuggestionMenuItem?.({ delta: 1 })
+          onFocusCompletionItem?.({ delta: 1 })
           return
         case "enter":
         case "return":
           event.preventDefault()
           event.stopPropagation()
-          onApplySuggestionMenuItem?.()
+          onApplyCompletionItem?.()
           return
         case "tab":
           if (event.shift) {
@@ -333,12 +290,12 @@ function EditorSurface(props: {
           }
           event.preventDefault()
           event.stopPropagation()
-          onApplySuggestionMenuItem?.()
+          onApplyCompletionItem?.()
           return
         case "escape":
           event.preventDefault()
           event.stopPropagation()
-          onCloseSuggestionMenu?.()
+          onCloseCompletion?.()
       }
     }
 
@@ -348,14 +305,14 @@ function EditorSurface(props: {
     }
   }, [
     focused,
-    onApplySuggestionMenuItem,
-    onCloseSuggestionMenu,
-    onFocusSuggestionMenuItem,
+    completion.status,
+    onApplyCompletionItem,
+    onCloseCompletion,
+    onFocusCompletionItem,
     renderer,
-    suggestionMenu.open,
   ])
 
-  const visibleAnalysis = getVisibleEditorAnalysis(text, analysis)
+  const visibleAnalysis = getVisibleEditorAnalysis(buffer, analysis)
 
   useEffect(() => {
     const textarea = textareaRef.current
@@ -478,7 +435,7 @@ function EditorSurface(props: {
   }, [cursorOffset, focused, text, textareaRef])
 
   const flyoutLayout = computeSuggestionMenuLayout(
-    suggestionMenu,
+    completion,
     containerRef.current,
     textareaRef.current,
   )
@@ -561,13 +518,13 @@ function EditorSurface(props: {
       </box>
       {flyoutLayout && (
         <SuggestionMenuFlyout
-          focusedItemId={suggestionMenu.focusedItemId}
+          focusedItemId={completion.focusedItemId}
           items={flyoutLayout.items}
           left={flyoutLayout.left}
-          status={suggestionMenu.status}
+          status={completion.status}
           top={flyoutLayout.top}
           width={flyoutLayout.width}
-          error={suggestionMenu.error}
+          error={completion.error}
           theme={theme}
         />
       )}
@@ -576,7 +533,7 @@ function EditorSurface(props: {
 }
 
 function getEditorAnalysisOverlay(
-  analysis: EditorAnalysisStateSnapshot,
+  analysis: EditorAnalysisState,
   text: string,
   textarea: TextareaRenderable | null,
   focused: boolean,
@@ -684,7 +641,7 @@ function getVisibleLogicalLineTop(textarea: TextareaRenderable | null, logicalLi
 
 function applyEditorDiagnosticHighlights(
   textarea: TextareaRenderable,
-  analysis: EditorAnalysisStateSnapshot,
+  analysis: EditorAnalysisState,
   text: string,
   styles: EditorSyntaxStyleRegistry | null,
 ): void {
@@ -726,7 +683,7 @@ function getDiagnosticStyleId(styles: EditorSyntaxStyleRegistry, severity: "erro
 function SuggestionMenuFlyout(props: {
   items: SuggestionItem[]
   focusedItemId: string | undefined
-  status: EditorState["suggestionMenu"]["status"]
+  status: EditorState["completion"]["status"]
   error: string | undefined
   left: number
   top: number
@@ -772,11 +729,11 @@ function SuggestionMenuFlyout(props: {
 }
 
 function computeSuggestionMenuLayout(
-  menu: EditorState["suggestionMenu"],
+  menu: EditorState["completion"],
   container: BoxRenderable | null,
   textarea: TextareaRenderable | null,
 ): { items: SuggestionItem[]; left: number; top: number; width: number } | undefined {
-  if (!menu.open || !container || !textarea || container.width <= 0 || container.height <= 0) {
+  if (menu.status === "closed" || !container || !textarea || container.width <= 0 || container.height <= 0) {
     return undefined
   }
 
@@ -815,7 +772,7 @@ function measureSuggestionMenuWidth(
 }
 
 function getSuggestionMenuStatusMessage(
-  status: EditorState["suggestionMenu"]["status"],
+  status: EditorState["completion"]["status"],
   error: string | undefined,
   itemCount: number,
 ): string | undefined {

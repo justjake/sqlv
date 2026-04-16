@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
-import { useIsHighlighted, useIsFocusNavigationActive, Focusable } from "../../focus"
+import { Focusable } from "../../focus/Focusable"
+import { useIsFocusNavigationActive, useIsHighlighted } from "../../focus/context"
 import { useTheme } from "../../ui/theme"
 import { Table, type TableColumn } from "./Table"
 

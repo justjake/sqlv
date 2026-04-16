@@ -1,7 +1,8 @@
 import type { ReactNode } from "react"
-import { useShortcut } from "../ui/keybind"
+import { useShortcut } from "../ui/keybind/useShortcut"
 import { useTheme } from "../ui/theme"
-import { Focusable, useIsFocusNavigationActive, useIsFocused, useIsHighlighted } from "../focus"
+import { Focusable } from "../focus/Focusable"
+import { useIsFocusNavigationActive, useIsFocused, useIsHighlighted } from "../focus/context"
 import { Text } from "../ui/Text"
 import { renderSelectOptionLabel } from "./selectOptionLabel"
 

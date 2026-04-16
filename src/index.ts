@@ -12,16 +12,10 @@ export {
 export { sqlite, type SqliteArg, type SqliteSQL } from "./lib/adapters/sqlite"
 export { TursoAdapter, type TursoConfig } from "./lib/adapters/TursoAdapter"
 export { createLocalPersistence, createLocalPersistenceConnection } from "./lib/createLocalPersistence"
+export { FocusTree } from "./lib/focus/FocusTree"
+export { chooseNextFocusNavigable, type MeasuredFocusNode } from "./lib/focus/navigation"
+export { ROOT_FOCUS_PATH, focusPath, focusPathAncestors, focusPathKey, focusPathSubpath, isAncestorFocusPath, sameFocusPath } from "./lib/focus/paths"
 export {
-  FocusTree,
-  ROOT_FOCUS_PATH,
-  chooseNextFocusNavigable,
-  focusPath,
-  focusPathAncestors,
-  focusPathKey,
-  focusPathSubpath,
-  isAncestorFocusPath,
-  sameFocusPath,
   type FocusApplyContext,
   type FocusApplyReason,
   type FocusDirection,
@@ -35,14 +29,13 @@ export {
   type FocusRevealOptions,
   type FocusTreeSnapshot,
   type FocusVisibleRect,
-  type MeasuredFocusNode,
   type FocusAreaRegistration,
   type FocusNavigableId,
   type FocusNavigablePath,
   type FocusNavigationParticipant,
   type FocusNavigationSnapshot,
   type FocusNodeRegistration,
-} from "./lib/focus"
+} from "./lib/focus/types"
 export {
   AdapterRegistry,
   type Adapter,
@@ -67,34 +60,60 @@ export {
   type ConnectionSuggestionsState,
   type DetailView,
   type DiscoveredConnectionSuggestion,
-  type EditorAnalysisState,
-  type EditorAnalysisStatus,
-  type EditorState,
-  type EditorSuggestionMenuItemFocusInput,
-  type EditorSuggestionMenuItemRef,
-  type EditorSuggestionMenuState,
-  type EditorSuggestionMenuStatus,
-  type RequestEditorAnalysisInput,
   type QueryRef,
   type QueryExecutionState,
   type RestoreSavedQueryResult,
   type RunQueryInput,
   type SaveQueryAsNewInput,
   type SaveSavedQueryChangesInput,
-  type OpenEditorSuggestionMenuInput,
   type SqlVisorCreateOptions,
   type SqlVisorState,
 } from "./lib/SqlVisor"
 export {
-  KnownObjectsSuggestionProvider,
-  type EditorRange,
-  type EditorSuggestionMenuTrigger,
-  type EditorSuggestionScope,
-  type EditorSuggestionScopeMode,
+  createEditorAnalysisSubject,
+  filterDisplayableEditorAnalysis,
+  getDiagnosticLogicalLine,
+  getVisibleEditorAnalysis,
+  idleEditorAnalysisState,
+  isIncompleteInputDiagnostic,
+  type EditorAnalysisState,
+  type EditorAnalysisStatus,
+  type EditorAnalysisSubject,
+} from "./lib/editor/analysis"
+export {
+  applyEditorBufferPatch,
+  clampCursorOffset,
+  createEditorBuffer,
+  createEditorChange,
+  type EditorBuffer,
+  type EditorBufferPatch,
+  type EditorChange,
+  type EditorChangeKind,
+  type EditorTextEdit,
+} from "./lib/editor/buffer"
+export {
+  closedEditorCompletionState,
+  decideEditorCompletion,
+  detectIdentifierCompletion,
+  detectMentionCompletion,
+  resolveEditorCompletionScope,
+  type EditorCompletionContext,
+  type EditorCompletionDecision,
+  type EditorCompletionItemFocusInput,
+  type EditorCompletionItemRef,
+  type EditorCompletionScope,
+  type EditorCompletionScopeMode,
+  type EditorCompletionState,
+  type EditorCompletionStatus,
   type SuggestionItem,
-  type SuggestionProvider,
-  type SuggestionRequest,
-} from "./lib/suggestions"
+} from "./lib/editor/completion"
+export { createEmptyEditorState, type EditorState } from "./lib/editor/state"
+export { selectVisibleSuggestionItems } from "./lib/editor/suggestionMenu"
+export { normalizeHighlightRange, offsetToLineColumn, replaceTextRange, type EditorRange } from "./lib/editor/text"
+export {
+  KnownObjectsSuggestionProvider,
+} from "./lib/suggestions/KnownObjectsSuggestionProvider"
+export { type SuggestionProvider, type SuggestionRequest } from "./lib/suggestions/types"
 export { type SavedQuery } from "./lib/types/SavedQuery"
 export {
   createSettingsRow,

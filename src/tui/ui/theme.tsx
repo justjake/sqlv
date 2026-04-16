@@ -98,7 +98,7 @@ const LIGHT: Theme = {
   focusNavBg: "#6f95c7",
   focusNavHaloBg: withHexAlpha("#6f95c7", FOCUS_NAV_HALO_ALPHA),
   focusNavBorder: "#303030",
-  focusHintBg: "#f3f3f3",
+  focusHintBg: "#303030",
   inputBg: "#e0e0e0",
   formFieldFocusRingInactive: "#c8c8c8",
   formFieldFocusRingActive: "#4271ae",
@@ -131,7 +131,7 @@ function themeFromPalette(palette: TerminalColors, mode: ThemeMode): Theme {
       focusNavBg: p[12] ?? brighten(p[4] ?? LIGHT.focusBg, 0.2),
       focusNavHaloBg: withHexAlpha(p[12] ?? brighten(p[4] ?? LIGHT.focusBg, 0.2), FOCUS_NAV_HALO_ALPHA),
       focusNavBorder: p[0] ?? LIGHT.focusNavBorder,
-      focusHintBg: p[7] ?? LIGHT.focusHintBg,
+      focusHintBg: p[0] ? brighten(p[0], 0.18) : LIGHT.focusHintBg,
       inputBg: p[7] ?? LIGHT.inputBg, // ANSI white (light bg tint)
       formFieldFocusRingInactive: p[7] ?? LIGHT.formFieldFocusRingInactive,
       formFieldFocusRingActive: p[4] ?? LIGHT.formFieldFocusRingActive,

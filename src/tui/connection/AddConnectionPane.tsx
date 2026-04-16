@@ -1,5 +1,6 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
+import { focusPath, isAncestorFocusPath } from "../../lib/focus/paths"
 import type { DiscoveredConnectionSuggestion } from "../../lib/SqlVisor"
 import type {
   AnyAdapter,
@@ -9,8 +10,13 @@ import type {
   ConnectionSpecDraft,
   Protocol,
 } from "../../lib/interface/Adapter"
-import { Focusable, useFocusedDescendantPath, useFocusTree, useRememberedDescendantPath } from "../focus"
-import { CheckboxField, SelectField, SelectOptionRowField, TextField } from "../form"
+import { Focusable } from "../focus/Focusable"
+import { useFocusedDescendantPath, useFocusTree, useRememberedDescendantPath } from "../focus/context"
+import { useOpaqueIdMap } from "../focus/opaqueIds"
+import { CheckboxField } from "../form/CheckboxField"
+import { SelectField } from "../form/SelectField"
+import { SelectOptionRowField } from "../form/SelectOptionRowField"
+import { TextField } from "../form/TextField"
 import { Shortcut } from "../Shortcut"
 import { useModalBottomRight } from "../ui/Modal"
 import { Text } from "../ui/Text"
@@ -40,6 +46,7 @@ type AddConnectionDraft = {
 
 export const ADD_CONNECTION_AREA_ID = "add-connection"
 const CYCLE_HINT_LABEL = "← ⟶ cycle"
+const ADD_CONNECTION_AREA_PATH = [ADD_CONNECTION_AREA_ID] as const
 
 export function AddConnectionPane(props: AddConnectionPaneProps) {
   const { initialSuggestion, onSaved } = props
@@ -82,6 +89,15 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
           ...(uriEnabled ? ([{ kind: "uri", key: "uri" }] as const) : []),
           ...visibleFields.map((field): FocusField => ({ kind: "field", field, key: field.key })),
         ]
+  const fieldKeys = useMemo(() => focusFields.map((field) => field.key), [focusFields])
+  const fieldFocusIds = useOpaqueIdMap(fieldKeys, "field")
+  const fieldPaths = useMemo(() => {
+    const next = new Map<string, readonly string[]>()
+    for (const fieldKey of fieldKeys) {
+      next.set(fieldKey, focusPath(ADD_CONNECTION_AREA_PATH, requiredOpaqueFocusId(fieldFocusIds, fieldKey)))
+    }
+    return next
+  }, [fieldFocusIds, fieldKeys])
 
   const loadProtocol = useCallback(
     (nextProtocol: Protocol, focusFieldKey: "name" | "protocol" = "name") => {
@@ -94,9 +110,12 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
       setDraft(nextDraft)
       setErrors({})
       setFormError(undefined)
-      focusTree.focusPath(addConnectionFieldPath(focusFieldKey))
+      const focusPathForField = fieldPaths.get(focusFieldKey)
+      if (focusPathForField) {
+        focusTree.focusPath(focusPathForField)
+      }
     },
-    [adapters, focusTree],
+    [adapters, fieldPaths, focusTree],
   )
 
   useEffect(() => {
@@ -113,8 +132,11 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
     }
 
     didRequestInitialFocusRef.current = true
-    focusTree.focusPath(addConnectionFieldPath("name"))
-  }, [focusFields.length, focusTree])
+    const nameFieldPath = fieldPaths.get("name")
+    if (nameFieldPath) {
+      focusTree.focusPath(nameFieldPath)
+    }
+  }, [fieldPaths, focusFields.length, focusTree])
 
   if (!adapters.length) {
     return (
@@ -252,6 +274,8 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
       <AddConnectionPaneBody
         adapters={adapters}
         errors={errors}
+        fieldFocusIds={fieldFocusIds}
+        fieldPaths={fieldPaths}
         focusFields={focusFields}
         formError={formError}
         name={name}
@@ -286,6 +310,8 @@ export function AddConnectionPane(props: AddConnectionPaneProps) {
 function AddConnectionPaneBody(props: {
   adapters: AdapterWithConnectionSpec[]
   errors: Record<string, string | undefined>
+  fieldFocusIds: ReadonlyMap<string, string>
+  fieldPaths: ReadonlyMap<string, readonly string[]>
   focusFields: FocusField[]
   formError: string | undefined
   name: string
@@ -307,6 +333,8 @@ function AddConnectionPaneBody(props: {
   const {
     adapters,
     errors,
+    fieldFocusIds,
+    fieldPaths,
     focusFields,
     formError,
     name,
@@ -328,7 +356,8 @@ function AddConnectionPaneBody(props: {
   const focusTree = useFocusTree()
   const focusedFieldPath = useFocusedDescendantPath()
   const rememberedFieldPath = useRememberedDescendantPath()
-  const currentFieldKey = resolveFieldKey(focusedFieldPath) ?? resolveFieldKey(rememberedFieldPath)
+  const currentFieldKey =
+    resolveCurrentFieldKey(focusedFieldPath, fieldPaths) ?? resolveCurrentFieldKey(rememberedFieldPath, fieldPaths)
   const currentFieldIndex = clampIndex(
     findFieldIndex(focusFields, currentFieldKey ?? "name"),
     focusFields.length,
@@ -347,10 +376,11 @@ function AddConnectionPaneBody(props: {
   function focusFieldByOffset(step: number) {
     const nextIndex = stepIndex(currentFieldIndex, focusFields.length, step)
     const nextField = focusFields[nextIndex]
-    if (!nextField) {
+    const nextFieldPath = nextField ? fieldPaths.get(nextField.key) : undefined
+    if (!nextFieldPath) {
       return
     }
-    focusTree.focusPath(addConnectionFieldPath(nextField.key))
+    focusTree.focusPath(nextFieldPath)
   }
 
   return (
@@ -366,7 +396,7 @@ function AddConnectionPaneBody(props: {
       <SelectOptionRowField
         description="Pick the adapter that will own this connection."
         disabled={protocolDisabled}
-        focusableId="protocol"
+        focusableId={requiredOpaqueFocusId(fieldFocusIds, "protocol")}
         hint={CYCLE_HINT_LABEL}
         label="Protocol"
         onChange={onSelectProtocol}
@@ -382,7 +412,7 @@ function AddConnectionPaneBody(props: {
 
       <TextField
         error={errors.name}
-        focusableId="name"
+        focusableId={requiredOpaqueFocusId(fieldFocusIds, "name")}
         label="Connection Name"
         onChange={onSetName}
         down={navigateNext}
@@ -395,7 +425,7 @@ function AddConnectionPaneBody(props: {
         <TextField
           description="Paste a connection URI to populate the fields below. Editing the fields keeps this URI in sync."
           error={errors.uri}
-          focusableId="uri"
+          focusableId={requiredOpaqueFocusId(fieldFocusIds, "uri")}
           label="Connection URI"
           onChange={onSetURI}
           down={navigateNext}
@@ -418,7 +448,7 @@ function AddConnectionPaneBody(props: {
                 checked={booleanField(values, field.key, field.defaultValue ?? false)}
                 description={field.description}
                 error={errors[field.key]}
-                focusableId={field.key}
+                focusableId={requiredOpaqueFocusId(fieldFocusIds, field.key)}
                 hint="space toggle"
                 label={field.label}
                 onChange={(value) => onSetBooleanField(field.key, value)}
@@ -434,7 +464,7 @@ function AddConnectionPaneBody(props: {
                 key={field.key}
                 description={field.description}
                 error={errors[field.key]}
-                focusableId={field.key}
+                focusableId={requiredOpaqueFocusId(fieldFocusIds, field.key)}
                 label={field.label}
                 onChange={(value) => onSetStringField(field.key, value)}
                 down={navigateNext}
@@ -449,7 +479,7 @@ function AddConnectionPaneBody(props: {
                 key={field.key}
                 description={field.description}
                 error={errors[field.key]}
-                focusableId={field.key}
+                focusableId={requiredOpaqueFocusId(fieldFocusIds, field.key)}
                 hint={CYCLE_HINT_LABEL}
                 label={field.label}
                 onChange={(value) => onSetStringField(field.key, value)}
@@ -521,20 +551,29 @@ function resolveInitialDraft(
   }
 }
 
-function addConnectionFieldPath(key: string) {
-  return [ADD_CONNECTION_AREA_ID, key] as const
-}
-
-function resolveFieldKey(path: readonly string[] | undefined): string | undefined {
-  if (!path || path[0] !== ADD_CONNECTION_AREA_ID || path.length < 2) {
-    return undefined
+function resolveCurrentFieldKey(
+  path: readonly string[] | undefined,
+  fieldPaths: ReadonlyMap<string, readonly string[]>,
+): string | undefined {
+  for (const [fieldKey, fieldPath] of fieldPaths) {
+    if (isAncestorFocusPath(fieldPath, path)) {
+      return fieldKey
+    }
   }
-  return path[1]
+  return undefined
 }
 
 function findFieldIndex(fields: FocusField[], key: string): number {
   const index = fields.findIndex((field) => field.key === key)
   return index < 0 ? 0 : index
+}
+
+function requiredOpaqueFocusId<Key extends string | number>(ids: ReadonlyMap<Key, string>, key: Key): string {
+  const focusableId = ids.get(key)
+  if (!focusableId) {
+    throw new Error(`Missing focusable id for ${String(key)}`)
+  }
+  return focusableId
 }
 
 function defaultFieldValues(spec: ConnectionSpec<any>): ConnectionFormValues {

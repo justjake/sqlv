@@ -1,19 +1,15 @@
 import type { InputRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
-import { sameFocusPath } from "../../lib/focus"
-import type { QueryExecution } from "../../index"
+import { focusPath, sameFocusPath } from "../../lib/focus/paths"
+import type { QueryExecution } from "../../lib/types/Log"
 import type { Connection } from "../../lib/types/Connection"
 import type { SavedQuery } from "../../lib/types/SavedQuery"
-import {
-  Focusable,
-  useFocusedDescendantPath,
-  useFocusTree,
-  useIsFocusNavigationActive,
-  useIsFocusWithin,
-  useRememberedDescendantPath,
-} from "../focus"
+import { Focusable } from "../focus/Focusable"
+import { useFocusedDescendantPath, useFocusTree, useIsFocusNavigationActive, useIsFocusWithin, useRememberedDescendantPath } from "../focus/context"
+import { useOpaqueIdMap } from "../focus/opaqueIds"
 import { Shortcut } from "../Shortcut"
-import { QueryListTable, type TableColumn } from "../dataview/table"
+import { QueryListTable } from "../dataview/table/QueryListTable"
+import type { TableColumn } from "../dataview/table/Table"
 import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
 
@@ -41,6 +37,7 @@ export type QueryFinderEntry =
 export const QUERY_HISTORY_AREA_ID = "query-history"
 const QUERY_HISTORY_FILTER_ID = "filter"
 const QUERY_HISTORY_RESULTS_AREA_ID = "query-history-results"
+const QUERY_HISTORY_RESULTS_PATH = [QUERY_HISTORY_AREA_ID, QUERY_HISTORY_RESULTS_AREA_ID] as const
 
 type HistoryMatch = {
   kind: "history"
@@ -123,6 +120,18 @@ function QueryHistoryBody(
     [connections, filterText, savedQueries, visibleEntries],
   )
   const totalVisibleItemCount = visibleEntries.length + savedQueries.length
+  const entryIds = useMemo(() => filteredEntries.map((entry) => entry.id), [filteredEntries])
+  const entryFocusIds = useOpaqueIdMap(entryIds, "entry")
+  const historyEntryPaths = useMemo(() => {
+    const next = new Map<string, readonly string[]>()
+    for (const entryId of entryIds) {
+      const focusableId = entryFocusIds.get(entryId)
+      if (focusableId) {
+        next.set(entryId, focusPath(QUERY_HISTORY_RESULTS_PATH, focusableId))
+      }
+    }
+    return next
+  }, [entryFocusIds, entryIds])
 
   useEffect(() => {
     if (!focusedWithin) {
@@ -138,7 +147,8 @@ function QueryHistoryBody(
   }, [filterInputRef, focusedWithin])
 
   const selectedEntryId =
-    resolveHistoryEntryId(focusedDescendantPath) ?? resolveHistoryEntryId(rememberedDescendantPath)
+    resolveSelectedHistoryEntryId(focusedDescendantPath, historyEntryPaths) ??
+    resolveSelectedHistoryEntryId(rememberedDescendantPath, historyEntryPaths)
   const selectedIndex = filteredEntries.findIndex((match) => match.id === selectedEntryId)
   const currentIndex = selectedIndex >= 0 ? selectedIndex : 0
   const selectedEntry = filteredEntries[currentIndex]
@@ -210,10 +220,11 @@ function QueryHistoryBody(
 
   function focusRow(index: number) {
     const match = filteredEntries[index]
-    if (!match) {
+    const entryPath = match ? historyEntryPaths.get(match.id) : undefined
+    if (!entryPath) {
       return
     }
-    tree.focusPath(historyEntryPath(match.id))
+    tree.focusPath(entryPath)
   }
 
   return (
@@ -293,11 +304,11 @@ function QueryHistoryBody(
               columns={columns}
               width={width}
               getRowKey={(row) => row.id}
-              getRowFocusableId={(row) => entryFocusId(row.id)}
+              getRowFocusableId={(row) => entryFocusIds.get(row.id)}
               isRowDimmed={(row) => row.kind === "history" && row.entry.initiator === "system"}
-              isRowFocused={(row) => sameFocusPath(historyEntryPath(row.id), focusedDescendantPath)}
+              isRowFocused={(row) => sameFocusPath(historyEntryPaths.get(row.id), focusedDescendantPath)}
               isRowSelected={(row) =>
-                !focusedWithin && sameFocusPath(historyEntryPath(row.id), rememberedDescendantPath)
+                !focusedWithin && sameFocusPath(historyEntryPaths.get(row.id), rememberedDescendantPath)
               }
             />
           )}
@@ -307,27 +318,16 @@ function QueryHistoryBody(
   )
 }
 
-function entryFocusId(id: string): string {
-  return `entry-${id}`
-}
-
-function historyEntryPath(id: string): readonly [string, string, string] {
-  return [QUERY_HISTORY_AREA_ID, QUERY_HISTORY_RESULTS_AREA_ID, entryFocusId(id)]
-}
-
-function resolveHistoryEntryId(path: readonly string[] | undefined): string | undefined {
-  const entryId = path?.[2]
-  if (
-    !path ||
-    path.length !== 3 ||
-    path[0] !== QUERY_HISTORY_AREA_ID ||
-    path[1] !== QUERY_HISTORY_RESULTS_AREA_ID ||
-    !entryId?.startsWith("entry-")
-  ) {
-    return undefined
+function resolveSelectedHistoryEntryId(
+  path: readonly string[] | undefined,
+  historyEntryPaths: ReadonlyMap<string, readonly string[]>,
+): string | undefined {
+  for (const [entryId, entryPath] of historyEntryPaths) {
+    if (sameFocusPath(entryPath, path)) {
+      return entryId
+    }
   }
-
-  return entryId.slice("entry-".length)
+  return undefined
 }
 
 function filterQueryFinderEntries(args: {

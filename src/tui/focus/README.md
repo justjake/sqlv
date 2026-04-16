@@ -70,8 +70,8 @@ So the adapter renders that distinction explicitly:
 - `useIsFocused()` reflects committed focus
 - `useIsHighlighted()` reflects the temporary navigation target
 - `Focusable` renders highlight chrome by default unless `hideNavigationHalo` is set
-- [`FocusHalo.tsx`](./FocusHalo.tsx) implements the shared halo chrome
-- [`FocusNavigationHint.tsx`](./FocusNavigationHint.tsx) renders the mode affordance
+- [`FocusHalo.tsx`](./FocusHalo.tsx) reports the highlighted renderable to a provider-owned overlay store
+- [`FocusChrome.tsx`](./FocusChrome.tsx) mounts the shared halo overlay and the focus-navigation hint together at the end of the app tree so they share one stacking context
 
 This is an important principle in the bindings: visual focus navigation state is derived from the focus tree, not inferred from OpenTUI's focused renderable.
 
@@ -144,6 +144,8 @@ This is a good example of the adapter's role:
 - the core knows semantic identity as a path
 - OpenTUI exposes imperative reveal by id
 - the adapter translates between the two
+
+That translation treats path segments as opaque. The binding may derive stable renderable ids from the whole path, but widget code should not parse path values or stash domain payload in `focusableId` strings.
 
 Without that mapping, nested scroll-follow would need widget-specific plumbing everywhere.
 
@@ -219,7 +221,7 @@ Outside focus navigation, `Esc` is still owned by the focus system first. It fir
 
 ## Visual Treatment Is Derived, Not Commanding
 
-The halo and hint panel are deliberately passive.
+The halo overlay and hint panel are deliberately passive.
 
 They do not make decisions. They only reflect the current focus-tree state:
 

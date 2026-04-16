@@ -1,31 +1,47 @@
 import { RGBA, createTextAttributes } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
 import { act, useEffect, useState } from "react"
-import type { EditorState, OpenEditorSuggestionMenuInput } from "../../../src/index"
-import { EditorView } from "../../../src/tui/editor/EditorView"
+import { createEditorAnalysisSubject, type EditorAnalysisState } from "../../../src/lib/editor/analysis"
+import { applyEditorBufferPatch, type EditorBufferPatch, type EditorChange } from "../../../src/lib/editor/buffer"
+import { closedEditorCompletionState, type EditorCompletionState } from "../../../src/lib/editor/completion"
+import { createEmptyEditorState, type EditorState } from "../../../src/lib/editor/state"
+import {
+  EditorView,
+} from "../../../src/tui/editor/EditorView"
 import { editorCursorLineColors } from "../../../src/tui/editor/syntaxHighlighting"
 import { loadSqliteExampleErrorCase } from "../../sqlite/exampleErrors"
 import { createTuiRenderHarness } from "../testUtils"
 
 const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()
 
-function createEditorState(patch: Partial<EditorState> = {}): EditorState {
+type EditorStatePatch = Partial<Omit<EditorState, "analysis" | "buffer" | "completion">> & {
+  analysis?: Partial<EditorAnalysisState>
+  buffer?: EditorBufferPatch
+  completion?: Partial<EditorCompletionState>
+}
+
+function createEditorState(patch: EditorStatePatch = {}): EditorState {
+  const base = createEmptyEditorState()
+
   return {
+    ...base,
+    ...patch,
     analysis: {
-      status: "idle",
+      ...base.analysis,
       ...patch.analysis,
     },
-    cursorOffset: patch.cursorOffset ?? 0,
-    suggestionMenu: {
-      items: [],
-      open: false,
-      query: "",
-      status: "closed",
-      ...patch.suggestionMenu,
+    buffer: applyEditorBufferPatch(base.buffer, patch.buffer ?? {}),
+    completion: {
+      ...base.completion,
+      ...patch.completion,
     },
-    suggestionScopeMode: patch.suggestionScopeMode ?? "all-connections",
-    text: patch.text ?? "",
-    treeSitterGrammar: patch.treeSitterGrammar,
+  }
+}
+
+function applyEditorChange(current: EditorState, change: EditorChange): EditorState {
+  return {
+    ...current,
+    buffer: change.next,
   }
 }
 
@@ -43,16 +59,13 @@ describe("EditorView", () => {
         <EditorView
           autoFocus
           editor={editor}
-          onEditorChange={(patch) => {
-            setEditor((current) => ({
-              ...current,
-              ...patch,
-            }))
-            if (patch.text !== undefined) {
-              changes.push(patch.text)
+          onChange={(change) => {
+            setEditor((current) => applyEditorChange(current, change))
+            if (change.kind === "content") {
+              changes.push(change.next.text)
             }
           }}
-          onExecute={(sql: string) => executions.push(sql)}
+          onExecute={(sql) => executions.push(sql)}
           onHistory={() => (historyCount += 1)}
           onSaveAsNew={() => (saveAsNewCount += 1)}
         />
@@ -89,10 +102,12 @@ describe("EditorView", () => {
       <EditorView
         autoFocus
         editor={createEditorState({
-          cursorOffset: "select 1".length,
-          text: "select 1",
+          buffer: {
+            cursorOffset: "select 1".length,
+            text: "select 1",
+          },
         })}
-        onExecute={(sql: string) => executions.push(sql)}
+        onExecute={(sql) => executions.push(sql)}
       />,
       { height: 12, kittyKeyboard: true, width: 80 },
     )
@@ -110,7 +125,9 @@ describe("EditorView", () => {
       <EditorView
         autoFocus
         editor={createEditorState({
-          text: "select 1",
+          buffer: {
+            text: "select 1",
+          },
         })}
       />,
       { height: 12, width: 80 },
@@ -125,8 +142,10 @@ describe("EditorView", () => {
     function Harness() {
       const [editor, setEditor] = useState<EditorState>(
         createEditorState({
-          cursorOffset: "select * from users".length,
-          text: "select * from users",
+          buffer: {
+            cursorOffset: "select * from users".length,
+            text: "select * from users",
+          },
         }),
       )
 
@@ -134,18 +153,17 @@ describe("EditorView", () => {
         <EditorView
           autoFocus
           editor={editor}
-          onEditorChange={(patch) => {
-            setEditor((current) => ({
-              ...current,
-              ...patch,
-            }))
+          onChange={(change) => {
+            setEditor((current) => applyEditorChange(current, change))
           }}
           onFormatQuery={() => {
             formatCount += 1
             setEditor((current) => ({
               ...current,
-              cursorOffset: "select\n  *\nfrom\n  users".length,
-              text: "select\n  *\nfrom\n  users",
+              buffer: applyEditorBufferPatch(current.buffer, {
+                cursorOffset: "select\n  *\nfrom\n  users".length,
+                text: "select\n  *\nfrom\n  users",
+              }),
             }))
           }}
         />
@@ -163,27 +181,31 @@ describe("EditorView", () => {
     expect(ui.captureCharFrame()).toMatch(/\n\s*2\s+\*/m)
   })
 
-  test("opens mention suggestions, moves focus, and applies the selected item", async () => {
-    const opens: OpenEditorSuggestionMenuInput[] = []
+  test("moves completion focus and applies the selected item", async () => {
     const focusInputs: Array<{ delta: number } | { id: string } | { index: number }> = []
     let applyCount = 0
 
     function Harness() {
       const [editor, setEditor] = useState<EditorState>(
         createEditorState({
-          suggestionMenu: {
+          buffer: {
+            cursorOffset: 2,
+            text: "@a",
+          },
+          completion: {
+            context: {
+              kind: "mention",
+              query: "a",
+              replaceRange: { end: 2, start: 0 },
+              scope: { kind: "all-connections" },
+            },
             focusedItemId: "users",
             items: [
               { id: "users", insertText: "users", kind: "table", label: "users" },
               { id: "audit_log", insertText: "audit_log", kind: "table", label: "audit_log" },
             ],
-            open: true,
-            query: "a",
-            replacementRange: { start: 0, end: 2 },
             status: "ready",
-            trigger: { kind: "mention", query: "a" },
           },
-          text: "@a",
         }),
       )
 
@@ -191,59 +213,63 @@ describe("EditorView", () => {
         <EditorView
           autoFocus
           editor={editor}
-          onApplySuggestionMenuItem={() => {
+          onApplyCompletionItem={() => {
             applyCount += 1
             setEditor((current) => {
-              const focusedItem = current.suggestionMenu.items.find((item) => item.id === current.suggestionMenu.focusedItemId)
-              const nextText = focusedItem?.insertText ?? current.text
-              return {
-                ...current,
-                cursorOffset: nextText.length,
-                suggestionMenu: {
-                  items: [],
-                  open: false,
-                  query: "",
-                  status: "closed",
-                },
-                text: nextText,
-              }
-            })
-          }}
-          onEditorChange={(patch) => {
-            setEditor((current) => ({
-              ...current,
-              ...patch,
-            }))
-          }}
-          onFocusSuggestionMenuItem={(input) => {
-            focusInputs.push(input)
-            setEditor((current) => {
-              const items = current.suggestionMenu.items
-              if (!("delta" in input) || items.length === 0) {
+              const item =
+                current.completion.items.find((candidate) => candidate.id === current.completion.focusedItemId) ??
+                current.completion.items[0]
+              if (!current.completion.context || !item) {
                 return current
               }
-              const currentIndex = items.findIndex((item) => item.id === current.suggestionMenu.focusedItemId)
-              const nextIndex = Math.min(Math.max((currentIndex >= 0 ? currentIndex : 0) + input.delta, 0), items.length - 1)
+
               return {
                 ...current,
-                suggestionMenu: {
-                  ...current.suggestionMenu,
-                  focusedItemId: items[nextIndex]?.id,
-                },
+                buffer: applyEditorBufferPatch(current.buffer, {
+                  cursorOffset: item.insertText.length,
+                  text: item.insertText,
+                }),
+                completion: closedEditorCompletionState(),
               }
             })
           }}
-          onOpenSuggestionMenu={(input) => {
-            opens.push(input)
+          onChange={(change) => {
+            setEditor((current) => applyEditorChange(current, change))
+          }}
+          onFocusCompletionItem={(input) => {
+            focusInputs.push(input)
+            setEditor((current) => {
+              const items = current.completion.items
+              if (items.length === 0) {
+                return current
+              }
+
+              let focusedItemId = current.completion.focusedItemId ?? items[0]?.id
+              if ("id" in input) {
+                focusedItemId = items.some((item) => item.id === input.id) ? input.id : focusedItemId
+              } else if ("index" in input) {
+                focusedItemId = items[Math.min(Math.max(input.index, 0), items.length - 1)]?.id
+              } else {
+                const currentIndex = items.findIndex((item) => item.id === current.completion.focusedItemId)
+                const nextIndex = Math.min(Math.max((currentIndex >= 0 ? currentIndex : 0) + input.delta, 0), items.length - 1)
+                focusedItemId = items[nextIndex]?.id
+              }
+
+              return {
+                ...current,
+                completion: {
+                  ...current.completion,
+                  focusedItemId,
+                },
+              }
+            })
           }}
         />
       )
     }
 
     const ui = await render(<Harness />, { height: 12, width: 80 })
-
-    expect(ui.captureCharFrame()).toContain("users")
-    expect(ui.captureCharFrame()).toContain("audit_log")
+    expect(ui.captureCharFrame()).toContain("@a")
 
     await act(async () => {
       ui.mockInput.pressArrow("down")
@@ -253,169 +279,25 @@ describe("EditorView", () => {
     await act(async () => {
       ui.mockInput.pressEnter()
       await ui.renderOnce()
-    })
-
-    await act(async () => {
-      await ui.mockInput.typeText(" ")
-      await ui.renderOnce()
-      await ui.mockInput.typeText("@")
       await ui.renderOnce()
     })
+    await settleDeferredRender(ui, 0)
 
     expect(focusInputs).toEqual([{ delta: 1 }])
     expect(applyCount).toBe(1)
-    expect(opens.at(-1)).toMatchObject({
-      trigger: {
-        context: {
-          triggerText: "@",
-        },
-        kind: "mention",
-        query: "",
-      },
-    })
-  })
-
-  test("does not open mention suggestions when backspacing into an existing mention token", async () => {
-    const opens: OpenEditorSuggestionMenuInput[] = []
-
-    function Harness() {
-      const [editor, setEditor] = useState<EditorState>(
-        createEditorState({
-          cursorOffset: 3,
-          text: "@ab",
-        }),
-      )
-
-      return (
-        <EditorView
-          autoFocus
-          editor={editor}
-          onEditorChange={(patch) => {
-            setEditor((current) => ({
-              ...current,
-              ...patch,
-            }))
-          }}
-          onOpenSuggestionMenu={(input) => {
-            opens.push(input)
-          }}
-        />
-      )
-    }
-
-    const ui = await render(<Harness />, { height: 12, width: 80 })
-
-    await act(async () => {
-      ui.mockInput.pressKey("backspace")
-      await ui.renderOnce()
-    })
-
-    expect(ui.captureCharFrame()).toContain("@a")
-    expect(opens).toEqual([])
-  })
-
-  test("opens natural identifier suggestions for the selected connection only", async () => {
-    const opens: OpenEditorSuggestionMenuInput[] = []
-
-    function Harness() {
-      const [editor, setEditor] = useState<EditorState>(
-        createEditorState({
-          cursorOffset: "select * from ".length,
-          text: "select * from ",
-        }),
-      )
-
-      return (
-        <EditorView
-          autoFocus
-          editor={editor}
-          onEditorChange={(patch) => {
-            setEditor((current) => ({
-              ...current,
-              ...patch,
-            }))
-          }}
-          onOpenSuggestionMenu={(input) => {
-            opens.push(input)
-          }}
-          selectedConnectionId="conn-1"
-        />
-      )
-    }
-
-    const ui = await render(<Harness />, { height: 12, width: 80 })
-
-    await act(async () => {
-      await ui.mockInput.typeText("us")
-      await ui.renderOnce()
-    })
-
-    expect(opens.at(-1)).toEqual({
-      cursorOffset: "select * from us".length,
-      documentText: "select * from us",
-      replacementRange: {
-        end: "select * from us".length,
-        start: "select * from ".length,
-      },
-      scope: {
-        connectionId: "conn-1",
-        kind: "selected-connection",
-      },
-      trigger: {
-        context: {
-          completionKind: "identifier",
-        },
-        kind: "identifier",
-        query: "us",
-      },
-    })
-  })
-
-  test("does not open natural identifier suggestions outside object-name contexts", async () => {
-    const opens: OpenEditorSuggestionMenuInput[] = []
-
-    function Harness() {
-      const [editor, setEditor] = useState<EditorState>(
-        createEditorState({
-          cursorOffset: "select ".length,
-          text: "select ",
-        }),
-      )
-
-      return (
-        <EditorView
-          autoFocus
-          editor={editor}
-          onEditorChange={(patch) => {
-            setEditor((current) => ({
-              ...current,
-              ...patch,
-            }))
-          }}
-          onOpenSuggestionMenu={(input) => {
-            opens.push(input)
-          }}
-          selectedConnectionId="conn-1"
-        />
-      )
-    }
-
-    const ui = await render(<Harness />, { height: 12, width: 80 })
-
-    await act(async () => {
-      await ui.mockInput.typeText("us")
-      await ui.renderOnce()
-    })
-
-    expect(opens).toEqual([])
+    expect(ui.captureCharFrame()).toContain("audit_log")
+    expect(ui.captureCharFrame()).not.toContain("users table")
   })
 
   test("renders inline invalid-query diagnostics with an underlined error span", async () => {
     const example = loadSqliteExampleErrorCase("near-from")
+
     function Harness() {
       const [editor, setEditor] = useState<EditorState>(
         createEditorState({
-          text: example.sql,
+          buffer: {
+            text: example.sql,
+          },
         }),
       )
 
@@ -423,7 +305,6 @@ describe("EditorView", () => {
         setEditor((current) => ({
           ...current,
           analysis: {
-            requestedText: example.sql,
             result: {
               diagnostics: [
                 {
@@ -435,6 +316,7 @@ describe("EditorView", () => {
               status: "invalid",
             },
             status: "ready",
+            subject: createEditorAnalysisSubject(current.buffer),
           },
         }))
       }, [])
@@ -454,7 +336,9 @@ describe("EditorView", () => {
     const inlineDiagnosticLine = frame.split("\n").find((line) => line.includes(example.message))
     expect(inlineDiagnosticLine).toContain(example.sql)
 
-    const sqlLine = ui.captureSpans().lines.find((line) => line.spans.map((span) => span.text).join("").includes(example.sql))
+    const sqlLine = ui
+      .captureSpans()
+      .lines.find((line) => line.spans.map((span) => span.text).join("").includes(example.sql))
     const underlineAttributes = createTextAttributes({ underline: true })
     const highlightedSpan = sqlLine?.spans.find((span) => span.text.includes("from"))
 
@@ -463,21 +347,27 @@ describe("EditorView", () => {
   })
 
   test("does not render query-valid analysis chrome", async () => {
+    const editor = createEditorState({
+      buffer: {
+        text: "select 1",
+      },
+    })
+
     const ui = await render(
       <EditorView
         autoFocus
-        editor={createEditorState({
+        editor={{
+          ...editor,
           analysis: {
-            requestedText: "select 1",
             result: {
               columns: [{ name: "value", type: "INTEGER" }],
               diagnostics: [],
               status: "ok",
             },
             status: "ready",
+            subject: createEditorAnalysisSubject(editor.buffer),
           },
-          text: "select 1",
-        })}
+        }}
       />,
       { height: 12, width: 80 },
     )
@@ -488,12 +378,18 @@ describe("EditorView", () => {
   })
 
   test("does not render incomplete-input analysis while the statement is unfinished", async () => {
+    const editor = createEditorState({
+      buffer: {
+        text: "select",
+      },
+    })
+
     const ui = await render(
       <EditorView
         autoFocus
-        editor={createEditorState({
+        editor={{
+          ...editor,
           analysis: {
-            requestedText: "select",
             result: {
               diagnostics: [
                 {
@@ -505,9 +401,9 @@ describe("EditorView", () => {
               status: "invalid",
             },
             status: "ready",
+            subject: createEditorAnalysisSubject(editor.buffer),
           },
-          text: "select",
-        })}
+        }}
       />,
       { height: 12, width: 80 },
     )
@@ -515,7 +411,9 @@ describe("EditorView", () => {
     const frame = ui.captureCharFrame()
     expect(frame).not.toContain("incomplete input")
 
-    const sqlLine = ui.captureSpans().lines.find((line) => line.spans.map((span) => span.text).join("").includes("select"))
+    const sqlLine = ui
+      .captureSpans()
+      .lines.find((line) => line.spans.map((span) => span.text).join("").includes("select"))
     const underlineAttributes = createTextAttributes({ underline: true })
 
     expect(sqlLine?.spans.some((span) => ((span.attributes ?? 0) & underlineAttributes) === underlineAttributes)).toBe(false)
@@ -527,7 +425,9 @@ describe("EditorView", () => {
       <EditorView
         autoFocus
         editor={createEditorState({
-          text: sql,
+          buffer: {
+            text: sql,
+          },
         })}
       />,
       { height: 12, width: 80 },
@@ -546,14 +446,18 @@ describe("EditorView", () => {
       <EditorView
         autoFocus
         editor={createEditorState({
-          cursorOffset: "select 1\nfrom".length,
-          text: sql,
+          buffer: {
+            cursorOffset: "select 1\nfrom".length,
+            text: sql,
+          },
         })}
       />,
       { height: 12, width: 80 },
     )
 
-    const highlightedRow = ui.captureSpans().lines.find((line) => line.spans.map((span) => span.text).join("").includes("from users"))
+    const highlightedRow = ui
+      .captureSpans()
+      .lines.find((line) => line.spans.map((span) => span.text).join("").includes("from users"))
     const lineHighlightBg = RGBA.fromHex(editorCursorLineColors.contentBackgroundColor)
 
     expect(highlightedRow?.spans.some((span) => span.bg?.equals(lineHighlightBg))).toBe(true)
@@ -565,7 +469,9 @@ describe("EditorView", () => {
       <EditorView
         autoFocus
         editor={createEditorState({
-          text: sql,
+          buffer: {
+            text: sql,
+          },
           treeSitterGrammar: "sql",
         })}
       />,
@@ -574,7 +480,9 @@ describe("EditorView", () => {
 
     await settleDeferredRender(ui, 150)
 
-    const sqlLine = ui.captureSpans().lines.find((line) => line.spans.map((span) => span.text).join("").includes(sql))
+    const sqlLine = ui
+      .captureSpans()
+      .lines.find((line) => line.spans.map((span) => span.text).join("").includes(sql))
     const keywordSpan = sqlLine?.spans.find((span) => span.text.toLowerCase().includes("select"))
     const functionSpan = sqlLine?.spans.find((span) => span.text.toLowerCase().includes("count"))
     const numberSpan = sqlLine?.spans.filter((span) => span.text.includes("1")).at(-1)

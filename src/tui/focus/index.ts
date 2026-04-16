@@ -1,4 +1,5 @@
 export { Focusable, type FocusableProps } from "./Focusable"
+export { FocusChrome } from "./FocusChrome"
 export { FocusHalo } from "./FocusHalo"
 export { FocusNavigationHint } from "./FocusNavigationHint"
 export {

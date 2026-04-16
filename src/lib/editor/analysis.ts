@@ -1,24 +1,31 @@
-import type { EditorRange } from "../suggestions"
 import type { ExplainResult } from "../types/Explain"
-import { normalizeHighlightRange, offsetToLineColumn } from "./text"
+import type { EditorBuffer } from "./buffer"
+import { normalizeHighlightRange, offsetToLineColumn, type EditorRange } from "./text"
 
-export type EditorAnalysisStateSnapshot = {
+export type EditorAnalysisStatus = "idle" | "loading" | "ready" | "error"
+
+export type EditorAnalysisSubject = {
   connectionId?: string
+  revision: number
+  text: string
+}
+
+export type EditorAnalysisState = {
   error?: string
-  requestedText?: string
   result?: ExplainResult
-  status: "idle" | "loading" | "ready" | "error"
+  status: EditorAnalysisStatus
+  subject?: EditorAnalysisSubject
 }
 
 export function getVisibleEditorAnalysis(
-  text: string,
-  analysis: EditorAnalysisStateSnapshot,
-): EditorAnalysisStateSnapshot {
+  buffer: EditorBuffer,
+  analysis: EditorAnalysisState,
+): EditorAnalysisState {
   if (analysis.status === "idle") {
     return analysis
   }
 
-  if (analysis.requestedText !== text) {
+  if (analysis.subject?.revision !== buffer.revision) {
     return { status: "idle" }
   }
 
@@ -26,8 +33,8 @@ export function getVisibleEditorAnalysis(
 }
 
 export function filterDisplayableEditorAnalysis(
-  analysis: EditorAnalysisStateSnapshot,
-): EditorAnalysisStateSnapshot {
+  analysis: EditorAnalysisState,
+): EditorAnalysisState {
   if (analysis.status !== "ready" || analysis.result?.status !== "invalid") {
     return analysis
   }
@@ -53,6 +60,23 @@ export function filterDisplayableEditorAnalysis(
 
 export function isIncompleteInputDiagnostic(message: string, code?: string): boolean {
   return code === "incomplete-input" || /\bincomplete input\b/i.test(message)
+}
+
+export function createEditorAnalysisSubject(
+  buffer: EditorBuffer,
+  connectionId?: string,
+): EditorAnalysisSubject {
+  return {
+    connectionId,
+    revision: buffer.revision,
+    text: buffer.text,
+  }
+}
+
+export function idleEditorAnalysisState(): EditorAnalysisState {
+  return {
+    status: "idle",
+  }
 }
 
 export function getDiagnosticLogicalLine(text: string, range: EditorRange | undefined): number | undefined {

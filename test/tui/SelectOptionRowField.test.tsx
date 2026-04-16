@@ -1,7 +1,7 @@
 import { RGBA } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
 import { act, useState } from "react"
-import { SelectOptionRowField } from "../../src/tui/form"
+import { SelectOptionRowField } from "../../src/tui/form/SelectOptionRowField"
 import { Text } from "../../src/tui/ui/Text"
 import { createTuiRenderHarness } from "./testUtils"
 
