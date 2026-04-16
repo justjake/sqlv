@@ -25,10 +25,14 @@ Design priorities, in order:
    services, and API are platform-neutral. Sync drivers (like
    better-sqlite3) are out of scope unless a parallel sync `StorageDb`
    type is added later.
-3. **Type-safe, boring APIs.** Branded IDs, discriminated unions, explicit
+3. **Store-first in-memory state.** The engine's in-memory layer is a
+   TanStack Store graph. Writable source state exists exactly once in a
+   single root store. Shared computed state uses derived stores; view-local
+   projections use selectors instead of duplicating state.
+4. **Type-safe, boring APIs.** Branded IDs, discriminated unions, explicit
    method signatures. No stringly-typed handles, no generic row envelopes,
    no runtime type dispatch where static types work.
-4. **Durable audit of everything.** Every state mutation writes both the
+5. **Durable audit of everything.** Every state mutation writes both the
    affected row and an audit event in a single transaction. Queries live in
    their own table; everything else in the audit log.
 
@@ -41,7 +45,7 @@ Design priorities, in order:
 | `domain/`         | nothing                                                  | Pure nouns, branded IDs, domain helpers, utilities |
 | `spi/`            | domain                                                   | Adapter extension contracts                        |
 | `api/`            | domain, spi, engine                                      | World-public contracts + aggregate type            |
-| `engine/`         | domain, spi, api (types)                                 | Private orchestration, services, storage schema    |
+| `engine/`         | domain, spi, api (types)                                 | Private orchestration, services, store graph, storage schema |
 | `adapters/`       | domain, spi, sibling adapter-family files, external libs | Protocol implementations                           |
 | `platforms/`      | domain, spi, engine, api, external libs                  | Driver wiring, secrets, paths, composition roots   |
 | `apps/framework/` | api, domain, external libs                               | Reusable host framework                            |
@@ -397,12 +401,15 @@ runner and are expected to evolve. Queries that run inside a flow carry
 to the engine core; adapters render them via `renderSQL(sql)`. `unsafeRawSQL<Row>(text)`
 wraps hand-written query text with the row phantom type.
 
-#### `QueryState` is not a domain type
+#### Async state is not a domain type
 
-TanStack-shaped query state wrappers (`QueryState<T>`, `pendingQueryState`,
-`queryStateOrPending`) are not domain nouns. The public `QueryState<T>`
-type lives in `api/QueryState.ts`; construction helpers live in
-`engine/workspace/queryState.ts`. See §8.
+TanStack Query caches and observers are not domain nouns. They stay inside
+`engine/services/` and `engine/workspace/` as implementation details. The
+public engine state exposes a small engine-owned async shape
+(`api/AsyncState.ts`) rather than TanStack Query's internal cache types.
+Domain types model completed business facts (`Connection`,
+`QueryExecution`, `SavedQuery`, `AuditEvent`), not the mechanics of
+loading or subscribing to them.
 
 ### 3.7 `SavedQuery`
 
@@ -748,23 +755,53 @@ any row.
 
 ---
 
-## 5. In-Memory State
+## 5. In-Memory Store Graph
 
-### 5.1 `SqlVisorState`
+The engine's in-memory layer is a TanStack Store graph.
+
+- `WorkspaceStore` owns one writable root store plus shared TanStack
+  `Derived` stores.
+- Hosts usually read through selectors; not every projection becomes a named
+  derived store.
+- Services mutate authoritative state through `workspace.setState(...)`.
+- Services never write derived state.
+
+### 5.1 `AsyncState<T>`
+
+The public engine state uses a small engine-owned async wrapper:
+
+```ts
+export type AsyncState<T> = {
+  status: "idle" | "pending" | "success" | "error";
+  data?: T;
+  error?: Error;
+  updatedAt?: EpochMillis;
+};
+```
+
+Rules:
+
+- `data` may remain populated while a refresh is pending or after an error.
+- This shape is intentionally smaller than TanStack Query's `QueryState`.
+- If a service uses TanStack Query internally, observer results are bridged
+  into `AsyncState<T>` with explicit `workspace.setState(...)` writes. No
+  code depends on `queryClient.getQueryState(...)` being reactive.
+
+### 5.2 `SqlVisorState`
 
 ```ts
 export type SqlVisorState = {
   sessionId: SessionId;
-  connections: QueryState<Connection[]>;
-  connectionSuggestions: QueryState<DiscoveredConnectionSuggestion[]>;
+  connections: AsyncState<Connection[]>;
+  connectionSuggestions: AsyncState<DiscoveredConnectionSuggestion[]>;
   selectedConnectionId?: ConnectionId;
   selectedQueryExecutionId: QueryExecutionId | null;
+  selectedQueryExecution: AsyncState<QueryExecution | null>;
   editor: EditorState;
   recentHistory: QueryExecution[]; // bounded sliding window; see §6.6
   savedQueries: SavedQuery[];
   appState: AppStateSnapshot;
-  queryExecution: QueryState<QueryExecution>; // currently-selected execution
-  objectsByConnectionId: Record<ConnectionId, QueryState<ObjectInfo[]>>;
+  objectsByConnectionId: Record<ConnectionId, AsyncState<ObjectInfo[]>>;
 };
 ```
 
@@ -773,61 +810,87 @@ the engine. Hosts that want "remember the last connection across runs"
 store it in `app_state` and call `sqlv.connections.select(id)` after the
 engine is up.
 
+`selectedQueryExecution` is source state, not derived state. The selected
+execution may live outside `recentHistory`, so the engine keeps the loaded
+resource for the current selection explicitly.
+
 `recentHistory` is a bounded window (default 10 executions). It never
 grows unbounded at runtime: on a new execution, the oldest is dropped.
 On boot, only the most recent N rows are loaded. Older history is
 reachable through `queries.listPage`, `queries.getById`, and
 `queries.search`.
 
-This is the single public state snapshot delivered to hosts via
-`sqlv.getState()` and `sqlv.subscribe(listener)`.
+This is the single public state shape exposed through the `sqlv.state`
+store plus the `sqlv.getState()` and `sqlv.subscribe(listener)`
+convenience methods.
 
-### 5.2 `WorkspaceStore`
+### 5.3 `WorkspaceStore`
 
-`engine/workspace/WorkspaceStore.ts` is the sole authority for mutating
-`SqlVisorState`. It exposes:
+`engine/workspace/WorkspaceStore.ts` is the engine-local state boundary.
+It wraps the TanStack root store and owns the engine's shared derived
+stores.
 
 ```ts
 class WorkspaceStore {
+  readonly state: ReadonlyStore<SqlVisorState>;
+  readonly selectedConnection: Derived<Connection | undefined>;
+  readonly selectedConnectionObjects: Derived<ObjectInfo[] | undefined>;
+  readonly editorProtocol: Derived<Protocol | undefined>;
+
   constructor(initial: SqlVisorState);
-  subscribe(listener: () => void): () => void;
   getState(): SqlVisorState;
-  patch(update: Partial<SqlVisorState>): void;
-  replace(
-    update: Pick<
-      SqlVisorState,
-      | "connections"
-      | "connectionSuggestions"
-      | "queryExecution"
-      | "objectsByConnectionId"
-    >,
-  ): void;
+  subscribe(listener: () => void): () => void;
+  setState(updater: (prev: SqlVisorState) => SqlVisorState): void;
 }
 ```
 
 Rules:
 
-- Every service holds a reference to the single `WorkspaceStore`.
-- Services call `patch(...)` or `replace(...)` to mutate state. They never
-  store a parallel snapshot.
-- The store runs state normalization on every change (derived fields like
-  `editor.treeSitterGrammar` from `selectedConnectionId`).
-- Listener notification is synchronous and runs after normalization.
+- Every service holds a reference to the same `WorkspaceStore`.
+- `WorkspaceStore` is a thin wrapper. It does not introduce a second state
+  model, a normalization pass, or a `patch(...)` / `replace(...)` DSL.
+- The underlying TanStack store still owns the authoritative source state;
+  `WorkspaceStore` just keeps that mechanism localized to engine code.
+- Shared derived values are created once here instead of being recreated ad
+  hoc across services and hosts.
 
-### 5.3 Slice ownership
+### 5.4 Derived state
 
-Each slice is owned by exactly one service. Services may read peers' slices
-through the store but never write them.
+Shared computed state lives in TanStack `Derived` stores owned by
+`WorkspaceStore`.
 
-| Slice                                                          | Owner                                  |
-| -------------------------------------------------------------- | -------------------------------------- |
-| `sessionId`                                                    | `SessionsService` (write-once at boot) |
-| `connections`, `connectionSuggestions`, `selectedConnectionId` | `ConnectionsService`                   |
-| `objectsByConnectionId`                                        | `CatalogService`                       |
-| `recentHistory`, `selectedQueryExecutionId`, `queryExecution`  | `QueriesService`                       |
-| `savedQueries`                                                 | `SavedQueriesService`                  |
-| `appState`                                                     | `AppStateService`                      |
-| `editor.*`                                                     | `EditorService`                        |
+Examples of canonical shared derived state:
+
+- `selectedConnection` — resolve from `connections.data` and
+  `selectedConnectionId`
+- `selectedConnectionObjects` — resolve the selected connection's catalog
+  slice from `objectsByConnectionId`
+- `editorProtocol` — resolve from the selected connection and saved-query
+  context
+- `canRunQuery` — editor has non-empty text and a selected connection exists
+
+Rules:
+
+- Use `Derived` only for shared, canonical computed values that multiple
+  engine consumers need.
+- Use selectors at the host boundary for view-local projections.
+- Derived stores depend only on TanStack Store nodes, never on imperative
+  snapshot getters such as `queryClient.getQueryState(...)`.
+
+### 5.5 Slice ownership
+
+Each source-state slice is owned by exactly one service. Services may read
+peers' slices through `WorkspaceStore` but never write them.
+
+| Slice                                                                   | Owner                                  |
+| ----------------------------------------------------------------------- | -------------------------------------- |
+| `sessionId`                                                             | `SessionsService` (write-once at boot) |
+| `connections`, `connectionSuggestions`, `selectedConnectionId`          | `ConnectionsService`                   |
+| `objectsByConnectionId`                                                 | `CatalogService`                       |
+| `recentHistory`, `selectedQueryExecutionId`, `selectedQueryExecution`   | `QueriesService`                       |
+| `savedQueries`                                                          | `SavedQueriesService`                  |
+| `appState`                                                              | `AppStateService`                      |
+| `editor.*`                                                              | `EditorService`                        |
 
 ---
 
@@ -964,16 +1027,17 @@ Collaborators: `AdaptersService`, `AuditService`, `WorkspaceStore`.
 Side effects of `add`:
 
 1. Insert row + emit `connection.created` audit event (one transaction).
-2. Patch `state.connections` with the new list.
-3. Patch `state.selectedConnectionId` to the new connection.
+2. One `workspace.setState(...)` update replaces `state.connections` and
+   sets `state.selectedConnectionId` to the new connection.
 
 Side effects of `delete`:
 
 1. Cancel all queries on the connection's runner.
 2. Evict runner from cache.
 3. Delete row + emit `connection.deleted` audit event (one transaction).
-4. Patch `state.connections`; if the deleted connection was selected,
-   resolve a new selection via `#resolveSelectedConnectionId`.
+4. One `workspace.setState(...)` update replaces `state.connections`; if
+   the deleted connection was selected, resolve a new selection via
+   `#resolveSelectedConnectionId`.
 
 Selection resolution when the current id is invalid (e.g., after a delete):
 
@@ -987,8 +1051,10 @@ after boot. That is host policy and the engine does not participate.
 
 ### 6.5 `CatalogService`
 
-Owns per-connection object caches (no durable storage). Uses TanStack
-Query internally for fetch deduplication and abort.
+Owns per-connection object caches (no durable storage). May use TanStack
+Query internally for fetch deduplication and abort, but any observable
+engine state is bridged into `WorkspaceStore` through explicit
+`workspace.setState(...)` writes.
 
 Public api `CatalogApi`:
 
@@ -1005,7 +1071,7 @@ Module-public:
   a connection; called by `ConnectionsService.delete`.
 
 `load` opens a flow (`flow.load_objects`) via the connection's runner and
-issues `adapter.fetchObjects(db.withFlow(flow))`. The flow closes in a
+issues `adapter.fetchObjects(runner.withFlow(flow))`. The flow closes in a
 `finally` block with `cancelled` matching the abort state.
 
 ### 6.6 `QueriesService`
@@ -1075,12 +1141,14 @@ detached result arrays.
 1. Resolve `text` (defaults to `state.editor.buffer.text`) and
    `connectionId` (defaults to `state.selectedConnectionId`).
 2. Validate non-empty + connection-exists.
-3. Build a pending `QueryExecution` and patch it into
-   `state.recentHistory` (with window eviction),
-   `state.queryExecution`, and `state.selectedQueryExecutionId`.
+3. Build a pending `QueryExecution` and publish it with one
+   `workspace.setState(...)` update to `state.recentHistory` (with window
+   eviction), `state.selectedQueryExecution`, and
+   `state.selectedQueryExecutionId`.
 4. Dispatch through `ConnectionsService.getRunner(id).execute(sql, options)`.
-5. On resolve/reject: replace the pending slot in `state.recentHistory`
-   with the terminal record.
+5. On resolve/reject: one `workspace.setState(...)` replaces the pending
+   slot in `state.recentHistory` with the terminal record and updates
+   `state.selectedQueryExecution` if it is still the selected row.
 
 #### `listPage`
 
@@ -1276,6 +1344,7 @@ the snapshot for UI even on failure. Success calls return a
 
 export type SqlVisor = {
   readonly session: Session;
+  readonly state: ReadonlyStore<SqlVisorState>;
   readonly adapters: AdaptersApi;
   readonly audit: AuditApi;
   readonly connections: ConnectionsApi;
@@ -1290,6 +1359,11 @@ export type SqlVisor = {
 };
 ```
 
+`state` is the public readonly TanStack Store handle for hosts that want
+selector-based subscriptions. It is forwarded from the internal
+`WorkspaceStore`. `subscribe` and `getState` remain convenience delegates
+for non-React or low-friction callers.
+
 ### 8.2 `*Api` types
 
 Every `*Api` type lives in `src/api/`. The engine service class implements
@@ -1300,6 +1374,8 @@ them.
 ```
 src/api/
   SqlVisor.ts
+  SqlVisorState.ts
+  AsyncState.ts
   AdaptersApi.ts
   AuditApi.ts
   ConnectionsApi.ts
@@ -1308,17 +1384,15 @@ src/api/
   SavedQueriesApi.ts
   AppStateApi.ts
   EditorApi.ts
-  QueryState.ts
   init.ts
 ```
 
 No `api/services/` subfolder. The files are peers.
 
-`QueryState.ts` exports the public `QueryState<T>` type — an alias for
-TanStack Query's `QueryState<T, Error>`, with the `SqlVisorState` shape
-depending on it. The engine's construction helpers
-(`pendingQueryState<T>()`, `queryStateOrPending<T>(state)`) live in
-`engine/workspace/queryState.ts` and are not part of the public surface.
+`AsyncState.ts` exports the public async resource shape used by
+`SqlVisorState`. It is intentionally smaller than TanStack Query's
+`QueryState`. Shared `Derived` stores and any TanStack Query bridge code
+live under `engine/workspace/` and are not part of the public surface.
 
 ### 8.3 Visibility enforcement
 
@@ -1351,11 +1425,13 @@ The `SqlVisor` implementation declares its public fields at the api type:
 import type { SqlVisor as SqlVisorApi } from "#api/SqlVisor";
 
 export class SqlVisor implements SqlVisorApi {
+  readonly state: ReadonlyStore<SqlVisorState>;
   readonly connections: ConnectionsApi;
   readonly queries: QueriesApi;
   readonly audit: AuditApi;
   // …
   #services: {
+    workspace: WorkspaceStore;
     connections: ConnectionsService;
     queries: QueriesService;
     audit: AuditService;
@@ -1364,6 +1440,7 @@ export class SqlVisor implements SqlVisorApi {
 
   private constructor(services) {
     this.#services = services;
+    this.state = services.workspace.state;
     this.connections = services.connections; // widens to ConnectionsApi
     this.queries = services.queries;
     // …
@@ -1373,7 +1450,7 @@ export class SqlVisor implements SqlVisorApi {
 
 Services hold references to each other at the _full_ class type, so they
 can call module-public methods. The aggregate hands apps a narrower view of
-the same objects.
+the same objects and forwards `workspace.state` as its public store handle.
 
 ### 8.4 `api/init.ts`
 
@@ -1396,17 +1473,17 @@ src/platforms/bun/
   createBunSqlVisor.ts
   paths.ts
   storage/
-    openLocalStorageDb.ts
+    openLibsqlDb.ts
     libsqlClient.ts
     secrets.ts
 ```
 
-### 9.2 `openLocalStorageDb`
+### 9.2 `openLibsqlDb`
 
-The single boot seam for local storage.
+The single boot seam for libsql-backed storage.
 
 ```ts
-export async function openLocalStorageDb(args: {
+export async function openLibsqlDb(args: {
   app?: string;
   dbPath?: string;
   encryptionKey?: string;
@@ -1436,7 +1513,7 @@ Responsibilities:
 8. Return the handle.
 
 Session creation does _not_ live here — that is the engine's
-`SessionsService.start()` job. `openLocalStorageDb` returns only storage.
+`SessionsService.start()` job. `openLibsqlDb` returns only storage.
 
 ### 9.3 `createBunSqlVisor`
 
@@ -1457,7 +1534,7 @@ export async function createBunSqlVisor(options: {
 
 Behavior:
 
-1. `openLocalStorageDb(...)` → `{ db, close }`.
+1. `openLibsqlDb(...)` → `{ db, close }`.
 2. Instantiate built-in adapters (`TursoAdapter`, `BunSqlAdapter`,
    `PostgresAdapter`) and merge with `options.adapters`.
 3. `SqlVisor.create({ db, app, adapters, queryClient, suggestionProviders, close })`.
@@ -1628,14 +1705,23 @@ have no outgoing FKs.
 
 ### 11.5 State discipline
 
-- Only `WorkspaceStore` mutates `SqlVisorState`.
-- Services access peer state through the store's `getState()`; they never
+- `WorkspaceStore` is the engine's in-memory authority. It owns the root
+  TanStack store plus the engine's shared `Derived` stores.
+- Services access peer state through `workspace.getState()`; they never
   reach into other services' fields.
+- Services mutate source state through `workspace.setState(...)`; they
+  never keep a parallel writable snapshot.
+- Shared computed state lives in `WorkspaceStore`'s `Derived` stores and is
+  never written directly.
 - Persistence and state updates for a given operation run in this order:
   1. Start transaction.
   2. Write row + write audit event.
   3. Commit.
-  4. Derive new in-memory shape; `workspace.patch(...)`.
+  4. Perform one `workspace.setState(...)` update for the new authoritative
+     in-memory state.
+- If a service uses TanStack Query internally, query observers feed store
+  updates explicitly; no code relies on `queryClient.getQueryState(...)`
+  being reactive.
 - On transaction failure, state is _not_ patched and the caller sees the
   error. Callers do not retry automatically.
 
@@ -1701,14 +1787,15 @@ src/
   api/
     AdaptersApi.ts
     AppStateApi.ts
+    AsyncState.ts
     AuditApi.ts
     CatalogApi.ts
     ConnectionsApi.ts
     EditorApi.ts
     QueriesApi.ts
-    QueryState.ts
     SavedQueriesApi.ts
     SqlVisor.ts
+    SqlVisorState.ts
     init.ts
 
   domain/
@@ -1766,9 +1853,7 @@ src/
         sessions.ts
         shared.ts
     workspace/
-      WorkspaceSnapshot.ts
       WorkspaceStore.ts
-      queryState.ts
     services/
       AdaptersService.ts
       AppStateService.ts
@@ -1804,7 +1889,7 @@ src/
       paths.ts
       storage/
         libsqlClient.ts
-        openLocalStorageDb.ts
+        openLibsqlDb.ts
         secrets.ts
 
   apps/
