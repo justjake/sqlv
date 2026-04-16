@@ -194,6 +194,14 @@ type SqlVisorStatePatch = Partial<Omit<SqlVisorState, "editor" | "settings">> & 
 
 export function createSqlVisorState(patch: SqlVisorStatePatch = {}): SqlVisorState {
   const baseEditor = createEmptyEditorState()
+  const history = patch.history ?? []
+  const hasSelectedQueryExecutionId = Object.hasOwn(patch, "selectedQueryExecutionId")
+  const selectedQueryExecutionId = hasSelectedQueryExecutionId
+    ? patch.selectedQueryExecutionId ?? null
+    : history[0]?.id ?? null
+  const selectedQueryExecution = selectedQueryExecutionId
+    ? history.find((entry) => entry.id === selectedQueryExecutionId)
+    : undefined
   const editor: EditorState = {
     ...baseEditor,
     ...patch.editor,
@@ -212,15 +220,39 @@ export function createSqlVisorState(patch: SqlVisorStatePatch = {}): SqlVisorSta
     connections: patch.connections ?? pendingQueryState<Connection<any>[]>([]),
     connectionSuggestions: patch.connectionSuggestions ?? pendingQueryState(),
     selectedConnectionId: patch.selectedConnectionId,
-    selectedQueryExecutionId: patch.selectedQueryExecutionId ?? null,
+    selectedQueryExecutionId,
     editor,
-    history: patch.history ?? [],
+    history,
     savedQueries: patch.savedQueries ?? [],
     settings: {
       ...defaultSettingsState(),
       ...patch.settings,
     },
-    queryExecution: patch.queryExecution ?? pendingQueryState<QueryExecution>(),
+    queryExecution:
+      patch.queryExecution ??
+      (selectedQueryExecution
+        ? createQueryState({
+            data: selectedQueryExecution,
+            dataUpdateCount: 1,
+            dataUpdatedAt: selectedQueryExecution.finishedAt || selectedQueryExecution.createdAt,
+            error: selectedQueryExecution.status === "success" ? null : new Error(selectedQueryExecution.error || ""),
+            errorUpdateCount: selectedQueryExecution.status === "success" ? 0 : 1,
+            errorUpdatedAt:
+              selectedQueryExecution.status === "success"
+                ? 0
+                : selectedQueryExecution.finishedAt || selectedQueryExecution.createdAt,
+            fetchFailureCount: selectedQueryExecution.status === "success" ? 0 : 1,
+            fetchFailureReason:
+              selectedQueryExecution.status === "success" ? null : new Error(selectedQueryExecution.error || ""),
+            fetchStatus: selectedQueryExecution.status === "pending" ? "fetching" : "idle",
+            status:
+              selectedQueryExecution.status === "pending"
+                ? "pending"
+                : selectedQueryExecution.status === "success"
+                  ? "success"
+                  : "error",
+          })
+        : pendingQueryState<QueryExecution>()),
     objectsByConnectionId: patch.objectsByConnectionId ?? {},
   }
 }
