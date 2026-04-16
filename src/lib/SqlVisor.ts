@@ -310,16 +310,7 @@ export class SqlVisor {
     })
 
     const selectedConnectionId = this.#resolveSelectedConnectionId(connections)
-
-    this.#setState({
-      selectedConnectionId,
-    })
-    this.#syncQueryState()
-    this.#persistSidebarSelection(selectedConnectionId)
-
-    if (selectedConnectionId) {
-      void this.loadConnectionObjects(selectedConnectionId)
-    }
+    this.#applySelectedConnection(selectedConnectionId)
 
     return connections
   }
@@ -416,25 +407,7 @@ export class SqlVisor {
   }
 
   selectConnection(connectionId: string | undefined) {
-    if (connectionId !== this.#state.selectedConnectionId) {
-      this.#abortEditorAnalysisRequest()
-    }
-    this.#setState({
-      editor:
-        connectionId === this.#state.selectedConnectionId
-          ? this.#state.editor
-          : {
-              ...this.#state.editor,
-              analysis: idleEditorAnalysisState(),
-            },
-      selectedConnectionId: connectionId,
-    })
-    this.#syncQueryState()
-    this.#persistSidebarSelection(connectionId)
-
-    if (connectionId) {
-      void this.loadConnectionObjects(connectionId)
-    }
+    this.#applySelectedConnection(connectionId)
   }
 
   setEditorState(
@@ -661,8 +634,10 @@ export class SqlVisor {
     }
 
     this.#currentQueryId = executionId
-    this.selectConnection(execution.connectionId)
-    this.#syncQueryState()
+    const restoredConnectionId = this.#findConnection(execution.connectionId)?.id
+    this.#applySelectedConnection(restoredConnectionId, {
+      persistSidebarSelection: restoredConnectionId !== undefined,
+    })
     this.closeEditorSuggestionMenu()
     this.cancelEditorAnalysis()
     this.setEditorState({
@@ -1030,6 +1005,44 @@ export class SqlVisor {
     return queryRunner
   }
 
+  #applySelectedConnection(
+    connectionId: string | undefined,
+    options: {
+      persistSidebarSelection?: boolean
+    } = {},
+  ) {
+    if (connectionId !== this.#state.selectedConnectionId) {
+      this.#abortEditorAnalysisRequest()
+    }
+    this.#setState({
+      editor:
+        connectionId === this.#state.selectedConnectionId
+          ? this.#state.editor
+          : {
+              ...this.#state.editor,
+              analysis: idleEditorAnalysisState(),
+            },
+      selectedConnectionId: connectionId,
+    })
+    this.#syncQueryState()
+
+    if (options.persistSidebarSelection ?? true) {
+      this.#persistSidebarSelection(connectionId)
+    }
+
+    if (connectionId && this.#findConnection(connectionId)) {
+      void this.loadConnectionObjects(connectionId).catch(() => undefined)
+    }
+  }
+
+  #findConnection(connectionId: string | undefined): Connection<any> | undefined {
+    if (!connectionId) {
+      return undefined
+    }
+
+    return this.#state.connections.data?.find((candidate) => candidate.id === connectionId)
+  }
+
   async #findConnectionSuggestions(): Promise<DiscoveredConnectionSuggestion[]> {
     const adapters = this.registry.list()
     const connections = this.#state.connections.data ?? []
@@ -1062,7 +1075,7 @@ export class SqlVisor {
   }
 
   #requireConnection(connectionId: string): Connection<any> {
-    const connection = this.#state.connections.data?.find((candidate) => candidate.id === connectionId)
+    const connection = this.#findConnection(connectionId)
     if (!connection) {
       throw new Error(`Unknown connection: ${connectionId}`)
     }
@@ -1399,7 +1412,7 @@ export class SqlVisor {
   }
 
   #resolveSavedQueryConnectionId(savedQuery: SavedQuery, execution: QueryExecution | undefined): string | undefined {
-    if (execution?.connectionId) {
+    if (execution?.connectionId && this.#findConnection(execution.connectionId)) {
       return execution.connectionId
     }
 

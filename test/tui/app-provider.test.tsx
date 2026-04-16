@@ -35,6 +35,10 @@ const defaultPostgresURI =
     }),
   ) ?? ""
 
+function addConnectionInputPath(key: string) {
+  return [ADD_CONNECTION_AREA_ID, key, "input"] as const
+}
+
 async function render(node: ReactNode, size = { height: 18, width: 100 }) {
   rendered = await testRender(
     <FocusProvider>
@@ -1473,7 +1477,7 @@ describe("SqlVisor provider and app", () => {
     expect(frame).toContain("//localhost:15432/postgres?sslmode=disable")
     expect(frame).toContain("Host")
     expect(frame).toContain("postgres")
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("name")) ?? "")
 
     await act(async () => {
       ui.mockInput.pressTab({ shift: true })
@@ -1482,7 +1486,7 @@ describe("SqlVisor provider and app", () => {
     })
     await settleRenderedUi(ui, { renders: 2 })
 
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "protocol"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("protocol")) ?? "")
 
     await act(async () => {
       ui.mockInput.pressArrow("left")
@@ -1526,7 +1530,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("name")) ?? "")
 
     await act(async () => {
       ui.mockInput.pressTab({ shift: true })
@@ -1535,7 +1539,7 @@ describe("SqlVisor provider and app", () => {
     })
     await settleRenderedUi(ui, { renders: 2 })
 
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "protocol"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("protocol")) ?? "")
 
     await act(async () => {
       ui.mockInput.pressArrow("left")
@@ -1553,7 +1557,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("name")) ?? "")
 
     await act(async () => {
       ui.mockInput.pressTab()
@@ -1561,7 +1565,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "uri"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("uri")) ?? "")
 
     await pressBackspaceRepeated(ui, defaultPostgresURI.length)
 
@@ -1585,7 +1589,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "host"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("host")) ?? "")
 
     await pressBackspaceRepeated(ui, "db".length)
 
@@ -1606,7 +1610,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "uri"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("uri")) ?? "")
 
     await typeTextSteadily(ui, "%")
 
@@ -1742,7 +1746,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "name"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("name")) ?? "")
 
     await act(async () => {
       ui.mockInput.pressTab({ shift: true })
@@ -1750,7 +1754,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "protocol"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("protocol")) ?? "")
     expect(ui.captureCharFrame()).toContain("◉ bunsqlite")
     expect(ui.captureCharFrame()).toContain("○ postgresql")
     expect(ui.captureCharFrame()).toContain("○ turso")
@@ -1766,7 +1770,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "protocol"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("protocol")) ?? "")
     expect(ui.captureCharFrame()).toContain("◉ turso")
     expect(ui.captureCharFrame()).toContain("○ bunsqlite")
     expect(ui.captureCharFrame()).toContain("○ postgresql")
@@ -1815,7 +1819,7 @@ describe("SqlVisor provider and app", () => {
     })
 
     expect(focusNavigationActive).toBe(false)
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "readonly"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("readonly")) ?? "")
 
     const readonlyLine = ui.captureSpans().lines.find((line) => {
       const text = line.spans.map((span) => span.text).join("")
@@ -1840,7 +1844,7 @@ describe("SqlVisor provider and app", () => {
     })
 
     expect(ui.captureCharFrame()).toContain("Enabled")
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "readonly"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("readonly")) ?? "")
 
     await act(async () => {
       ui.mockInput.pressArrow("down")
@@ -1848,7 +1852,7 @@ describe("SqlVisor provider and app", () => {
       await ui.renderOnce()
     })
 
-    expect(focusedPath).toBe(focusPathSignature([ADD_CONNECTION_AREA_ID, "create"]) ?? "")
+    expect(focusedPath).toBe(focusPathSignature(addConnectionInputPath("create")) ?? "")
   })
 
   test("keeps the query editor text stable across engine state updates", async () => {

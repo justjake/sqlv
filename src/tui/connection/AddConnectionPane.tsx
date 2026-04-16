@@ -1,6 +1,5 @@
-import type { InputRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
+import type { ScrollBoxRenderable } from "@opentui/core"
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
-import { sameFocusPath } from "../../lib/focus"
 import type { DiscoveredConnectionSuggestion } from "../../lib/SqlVisor"
 import type {
   AnyAdapter,
@@ -10,22 +9,11 @@ import type {
   ConnectionSpecDraft,
   Protocol,
 } from "../../lib/interface/Adapter"
-import {
-  Focusable,
-  useFocusedDescendantPath,
-  useIsFocusNavigationActive,
-  useFocusTree,
-  useIsFocused,
-  useIsHighlighted,
-  useIsFocusWithin,
-  useRememberedDescendantPath,
-} from "../focus"
-import { CheckboxInput, FormLabel, RadioSelectRowInput, TextInput } from "../form"
+import { Focusable, useFocusedDescendantPath, useFocusTree, useRememberedDescendantPath } from "../focus"
+import { CheckboxField, SelectField, SelectOptionRowField, TextField } from "../form"
 import { Shortcut } from "../Shortcut"
-import { useKeybindHandler } from "../ui/keybind"
 import { useModalBottomRight } from "../ui/Modal"
 import { Text } from "../ui/Text"
-import { useTheme } from "../ui/theme"
 import { useSqlVisor, useSqlVisorState } from "../useSqlVisor"
 
 type AddConnectionPaneProps = {
@@ -48,12 +36,6 @@ type AddConnectionDraft = {
   name: string
   values: ConnectionFormValues
   uri: string
-}
-
-type FieldNavProps = {
-  onPrev: () => void
-  onNext: () => void
-  remembered: boolean
 }
 
 export const ADD_CONNECTION_AREA_ID = "add-connection"
@@ -344,10 +326,9 @@ function AddConnectionPaneBody(props: {
     values,
   } = props
   const focusTree = useFocusTree()
-  const focusedWithin = useIsFocusWithin([ADD_CONNECTION_AREA_ID])
   const focusedFieldPath = useFocusedDescendantPath()
   const rememberedFieldPath = useRememberedDescendantPath()
-  const currentFieldKey = resolveDirectChildKey(focusedFieldPath) ?? resolveDirectChildKey(rememberedFieldPath)
+  const currentFieldKey = resolveFieldKey(focusedFieldPath) ?? resolveFieldKey(rememberedFieldPath)
   const currentFieldIndex = clampIndex(
     findFieldIndex(focusFields, currentFieldKey ?? "name"),
     focusFields.length,
@@ -382,39 +363,44 @@ function AddConnectionPaneBody(props: {
     >
       {formError && <Text>{formError}</Text>}
 
-      <ProtocolPickerField
-        adapters={adapters}
-        onChange={onSelectProtocol}
-        onNext={navigateNext}
-        onPrev={navigatePrev}
-        protocol={protocol}
+      <SelectOptionRowField
+        description="Pick the adapter that will own this connection."
         disabled={protocolDisabled}
-        remembered={!focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath("protocol"))}
+        focusableId="protocol"
+        hint={CYCLE_HINT_LABEL}
+        label="Protocol"
+        onChange={onSelectProtocol}
+        down={navigateNext}
+        up={navigatePrev}
+        options={adapters.map((adapter) => ({
+          key: adapter.protocol,
+          label: adapter.protocol,
+          value: adapter.protocol,
+        }))}
+        value={protocol}
       />
 
-      <TextInputField
+      <TextField
         error={errors.name}
         focusableId="name"
         label="Connection Name"
         onChange={onSetName}
-        onNext={navigateNext}
-        onPrev={navigatePrev}
+        down={navigateNext}
+        up={navigatePrev}
         placeholder={spec?.defaultName}
-        remembered={!focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath("name"))}
         value={name}
       />
 
       {uriEnabled && (
-        <TextInputField
+        <TextField
           description="Paste a connection URI to populate the fields below. Editing the fields keeps this URI in sync."
           error={errors.uri}
           focusableId="uri"
           label="Connection URI"
           onChange={onSetURI}
-          onNext={navigateNext}
-          onPrev={navigatePrev}
+          down={navigateNext}
+          up={navigatePrev}
           placeholder={protocol ? `${protocol}://...` : undefined}
-          remembered={!focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath("uri"))}
           value={uri}
         />
       )}
@@ -424,39 +410,36 @@ function AddConnectionPaneBody(props: {
           return null
         }
 
-        const remembered = !focusedWithin && sameFocusPath(rememberedFieldPath, addConnectionFieldPath(field.key))
         switch (field.kind) {
           case "boolean":
             return (
-              <BooleanField
+              <CheckboxField
                 key={field.key}
                 checked={booleanField(values, field.key, field.defaultValue ?? false)}
                 description={field.description}
                 error={errors[field.key]}
-                fieldFocused={focusedWithin && currentFieldKey === field.key}
                 focusableId={field.key}
+                hint="space toggle"
                 label={field.label}
                 onChange={(value) => onSetBooleanField(field.key, value)}
-                onNext={navigateNext}
-                onPrev={navigatePrev}
-                remembered={remembered}
+                down={navigateNext}
+                up={navigatePrev}
               />
             )
           case "text":
           case "path":
           case "secret":
             return (
-              <TextInputField
+              <TextField
                 key={field.key}
                 description={field.description}
                 error={errors[field.key]}
                 focusableId={field.key}
                 label={field.label}
                 onChange={(value) => onSetStringField(field.key, value)}
-                onNext={navigateNext}
-                onPrev={navigatePrev}
+                down={navigateNext}
+                up={navigatePrev}
                 placeholder={textFieldPlaceholder(field)}
-                remembered={remembered}
                 value={stringField(values, field.key, field.defaultValue ?? "")}
               />
             )
@@ -466,12 +449,13 @@ function AddConnectionPaneBody(props: {
                 key={field.key}
                 description={field.description}
                 error={errors[field.key]}
-                field={field}
                 focusableId={field.key}
+                hint={CYCLE_HINT_LABEL}
+                label={field.label}
                 onChange={(value) => onSetStringField(field.key, value)}
-                onNext={navigateNext}
-                onPrev={navigatePrev}
-                remembered={remembered}
+                down={navigateNext}
+                up={navigatePrev}
+                options={field.options}
                 value={stringField(values, field.key, field.defaultValue ?? "")}
               />
             )
@@ -479,305 +463,6 @@ function AddConnectionPaneBody(props: {
       })}
     </scrollbox>
   )
-}
-
-function ProtocolPickerField(
-  props: FieldNavProps & {
-    adapters: AdapterWithConnectionSpec[]
-    disabled?: boolean
-    onChange: (value: Protocol) => void
-    protocol: Protocol | undefined
-  },
-) {
-  return (
-    <Focusable focusable focusableId="protocol">
-      <ProtocolPickerBody {...props} />
-    </Focusable>
-  )
-}
-
-function ProtocolPickerBody(
-  props: FieldNavProps & {
-    adapters: AdapterWithConnectionSpec[]
-    disabled?: boolean
-    onChange: (value: Protocol) => void
-    protocol: Protocol | undefined
-  },
-) {
-  const { onPrev, onNext, adapters, disabled, onChange, protocol, remembered } = props
-  const focused = useIsFocused()
-  const highlighted = useIsHighlighted()
-  const navigationActive = useIsFocusNavigationActive()
-  const active = navigationActive ? highlighted : focused
-
-  useKeybindHandler({
-    enabled: focused,
-    detect: isFieldNavKey,
-    onKey(event) {
-      handleFieldNav(event, onPrev, onNext)
-    },
-  })
-
-  return (
-    <FormLabel
-      active={active || remembered}
-      description="Pick the adapter that will own this connection."
-      inputFocused={!navigationActive && focused}
-      name="Protocol"
-    >
-      <RadioSelectRowInput
-        disabled={disabled}
-        hint={CYCLE_HINT_LABEL}
-        onChange={onChange}
-        options={adapters.map((adapter) => ({
-          key: adapter.protocol,
-          label: adapter.protocol,
-          value: adapter.protocol,
-        }))}
-        value={protocol}
-      />
-    </FormLabel>
-  )
-}
-
-function TextInputField(
-  props: FieldNavProps & {
-    focusableId: string
-    label: string
-    value: string
-    placeholder?: string
-    description?: string
-    error?: string
-    onChange: (value: string) => void
-  },
-) {
-  const { description, error, focusableId, label, onChange, onNext, onPrev, placeholder, remembered, value } = props
-  const inputRef = useRef<InputRenderable>(null)
-
-  return (
-    <Focusable applyFocus={() => inputRef.current?.focus()} focusable focusableId={focusableId}>
-      <TextInputFieldBody
-        description={description}
-        error={error}
-        inputRef={inputRef}
-        label={label}
-        onChange={onChange}
-        onNext={onNext}
-        onPrev={onPrev}
-        placeholder={placeholder}
-        remembered={remembered}
-        value={value}
-      />
-    </Focusable>
-  )
-}
-
-function TextInputFieldBody(props: {
-  description?: string
-  error?: string
-  inputRef: RefObject<InputRenderable | null>
-  label: string
-  onChange: (value: string) => void
-  onNext: () => void
-  onPrev: () => void
-  placeholder?: string
-  remembered: boolean
-  value: string
-}) {
-  const focused = useIsFocused()
-  const highlighted = useIsHighlighted()
-  const navigationActive = useIsFocusNavigationActive()
-  const active = navigationActive ? highlighted : focused
-
-  useKeybindHandler({
-    enabled: focused,
-    detect: isFieldNavKey,
-    onKey(event) {
-      handleFieldNav(event, props.onPrev, props.onNext)
-    },
-  })
-
-  return (
-    <FormLabel
-      active={active || props.remembered}
-      description={props.description}
-      error={props.error}
-      inputFocused={!navigationActive && focused}
-      name={props.label}
-    >
-      <TextInput
-        inputRef={props.inputRef}
-        onInput={props.onChange}
-        placeholder={props.placeholder}
-        value={props.value}
-      />
-    </FormLabel>
-  )
-}
-
-function BooleanField(
-  props: FieldNavProps & {
-    focusableId: string
-    label: string
-    checked: boolean
-    fieldFocused: boolean
-    description?: string
-    error?: string
-    onChange: (value: boolean) => void
-  },
-) {
-  return (
-    <Focusable focusable focusableId={props.focusableId}>
-      <BooleanFieldBody {...props} />
-    </Focusable>
-  )
-}
-
-function BooleanFieldBody(
-  props: FieldNavProps & {
-    label: string
-    checked: boolean
-    fieldFocused: boolean
-    description?: string
-    error?: string
-    onChange: (value: boolean) => void
-  },
-) {
-  const { checked, description, error, fieldFocused, label, onChange, onNext, onPrev, remembered } = props
-  const focused = useIsFocused()
-  const highlighted = useIsHighlighted()
-  const navigationActive = useIsFocusNavigationActive()
-  const active = navigationActive ? highlighted : focused
-  const fieldActive = fieldFocused || active || remembered
-
-  useKeybindHandler({
-    enabled: focused,
-    detect: isFieldNavKey,
-    onKey(event) {
-      if (handleFieldNav(event, onPrev, onNext)) return
-    },
-  })
-
-  return (
-    <FormLabel
-      active={fieldActive}
-      description={description}
-      error={error}
-      inputFocused={fieldFocused || (!navigationActive && focused)}
-      name={label}
-    >
-      <CheckboxInput checked={checked} hint="space toggle" onChange={onChange} />
-    </FormLabel>
-  )
-}
-
-function SelectField(
-  props: FieldNavProps & {
-    focusableId: string
-    field: Extract<ConnectionField, { kind: "select" }>
-    value: string
-    description?: string
-    error?: string
-    onChange: (value: string) => void
-  },
-) {
-  return (
-    <Focusable focusable focusableId={props.focusableId}>
-      <SelectFieldBody {...props} />
-    </Focusable>
-  )
-}
-
-function SelectFieldBody(
-  props: FieldNavProps & {
-    field: Extract<ConnectionField, { kind: "select" }>
-    value: string
-    description?: string
-    error?: string
-    onChange: (value: string) => void
-  },
-) {
-  const { description, error, field, onChange, onNext, onPrev, remembered, value } = props
-  const focused = useIsFocused()
-  const highlighted = useIsHighlighted()
-  const navigationActive = useIsFocusNavigationActive()
-  const active = navigationActive ? highlighted : focused
-  const theme = useTheme()
-
-  useKeybindHandler({
-    enabled: focused,
-    detect(event) {
-      return (
-        isFieldNavKey(event) ||
-        event.name === "left" ||
-        event.name === "right" ||
-        event.name === "enter" ||
-        event.name === "return"
-      )
-    },
-    onKey(event) {
-      if (handleFieldNav(event, onPrev, onNext)) return
-      if (event.name === "right" || event.name === "enter" || event.name === "return") {
-        event.preventDefault()
-        event.stopPropagation()
-        cycleOption(1)
-      } else if (event.name === "left") {
-        event.preventDefault()
-        event.stopPropagation()
-        cycleOption(-1)
-      }
-    },
-  })
-
-  function cycleOption(step: number) {
-    const currentIndex = field.options.findIndex((option) => option.value === value)
-    const nextIndex = stepIndex(currentIndex < 0 ? 0 : currentIndex, field.options.length, step)
-    const nextValue = field.options[nextIndex]?.value
-    if (nextValue !== undefined) onChange(nextValue)
-  }
-
-  const displayLabel = field.options.find((option) => option.value === value)?.label ?? value
-
-  return (
-    <FormLabel active={active || remembered} description={description} error={error} name={field.label}>
-      <box alignSelf="stretch" flexDirection="row" gap={1} minWidth={0}>
-        <Text flexGrow={1} flexShrink={1} truncate wrapMode="none">
-          {displayLabel}
-        </Text>
-        {focused && !navigationActive && <Text fg={theme.mutedFg}>{CYCLE_HINT_LABEL}</Text>}
-      </box>
-    </FormLabel>
-  )
-}
-
-function isFieldNavKey(event: KeyEvent): boolean {
-  return event.name === "tab" || event.name === "up" || event.name === "down"
-}
-
-function handleFieldNav(event: KeyEvent, onPrev: () => void, onNext: () => void): boolean {
-  if (event.name === "tab") {
-    event.preventDefault()
-    event.stopPropagation()
-    if (event.shift) {
-      onPrev()
-    } else {
-      onNext()
-    }
-    return true
-  }
-  if (event.name === "up") {
-    event.preventDefault()
-    event.stopPropagation()
-    onPrev()
-    return true
-  }
-  if (event.name === "down") {
-    event.preventDefault()
-    event.stopPropagation()
-    onNext()
-    return true
-  }
-  return false
 }
 
 function hasConnectionSpec(adapter: AnyAdapter): adapter is AdapterWithConnectionSpec {
@@ -840,8 +525,8 @@ function addConnectionFieldPath(key: string) {
   return [ADD_CONNECTION_AREA_ID, key] as const
 }
 
-function resolveDirectChildKey(path: readonly string[] | undefined): string | undefined {
-  if (!path || path[0] !== ADD_CONNECTION_AREA_ID || path.length !== 2) {
+function resolveFieldKey(path: readonly string[] | undefined): string | undefined {
+  if (!path || path[0] !== ADD_CONNECTION_AREA_ID || path.length < 2) {
     return undefined
   }
   return path[1]

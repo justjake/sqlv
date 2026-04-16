@@ -1,31 +1,56 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
+import { Focusable, useIsFocusNavigationActive, useIsFocused, useIsHighlighted } from "../focus"
 import { Text } from "../ui/Text"
 import { useKeybindHandler } from "../ui/keybind"
 import { useTheme } from "../ui/theme"
-import { useFormFieldContext } from "./context"
+import { renderSelectOptionLabel } from "./selectOptionLabel"
 
-type RadioSelectRowOptionKey = string | number
+type SelectOptionRowOptionKey = string | number
 
-export type RadioSelectRowOption<Value extends string = string> = {
-  key: RadioSelectRowOptionKey
+export type SelectOptionRowOption<Value extends string = string> = {
+  key: SelectOptionRowOptionKey
   label: ReactNode
   value: Value
 }
 
-export type RadioSelectRowInputProps<Value extends string = string> = {
+export type SelectOptionRowInputProps<Value extends string = string> = {
+  active?: boolean
   disabled?: boolean
+  focusableId?: string
   hint?: ReactNode
   onChange?: (value: Value) => void
-  options: readonly RadioSelectRowOption<Value>[]
+  options: readonly SelectOptionRowOption<Value>[]
   value?: Value
 }
 
-export function RadioSelectRowInput<Value extends string>(props: RadioSelectRowInputProps<Value>) {
+const DEFAULT_INPUT_ID = "input"
+
+export function SelectOptionRowInput<Value extends string>(props: SelectOptionRowInputProps<Value>) {
+  return (
+    <Focusable
+      alignSelf="stretch"
+      focusSelf
+      focusable
+      focusableId={props.focusableId ?? DEFAULT_INPUT_ID}
+      hideNavigationHalo
+      minWidth={0}
+      width="100%"
+    >
+      <SelectOptionRowInputBody {...props} />
+    </Focusable>
+  )
+}
+
+function SelectOptionRowInputBody<Value extends string>(props: SelectOptionRowInputProps<Value>) {
   const theme = useTheme()
-  const { active, inputFocused } = useFormFieldContext()
+  const focused = useIsFocused()
+  const highlighted = useIsHighlighted()
+  const navigationActive = useIsFocusNavigationActive()
+  const active = props.active ?? (navigationActive ? highlighted : focused)
+  const inputFocused = focused && !navigationActive
   const backgroundColor = active ? theme.formFieldBackgroundActive : theme.formFieldBackground
   const interactive = !props.disabled && !!props.onChange && props.options.length > 0
-  const [lastSelectedKey, setLastSelectedKey] = useState<RadioSelectRowOptionKey | undefined>(() =>
+  const [lastSelectedKey, setLastSelectedKey] = useState<SelectOptionRowOptionKey | undefined>(() =>
     resolveSelectedOptionKey(props.options, props.value, undefined) ?? props.options[0]?.key,
   )
   const selectedOptionKey = resolveSelectedOptionKey(props.options, props.value, lastSelectedKey)
@@ -80,7 +105,7 @@ export function RadioSelectRowInput<Value extends string>(props: RadioSelectRowI
     },
   })
 
-  function handleSelectOption(option: RadioSelectRowOption<Value>) {
+  function handleSelectOption(option: SelectOptionRowOption<Value>) {
     setLastSelectedKey(option.key)
     props.onChange?.(option.value)
   }
@@ -112,7 +137,7 @@ export function RadioSelectRowInput<Value extends string>(props: RadioSelectRowI
                 {selected ? "◉" : "○"}
               </Text>
               <box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-                {renderOptionLabel(option.label, props.disabled ? theme.mutedFg : undefined)}
+                {renderSelectOptionLabel(option.label, props.disabled ? theme.mutedFg : undefined)}
               </box>
             </box>
           )
@@ -124,10 +149,10 @@ export function RadioSelectRowInput<Value extends string>(props: RadioSelectRowI
 }
 
 function resolveSelectedOptionKey<Value extends string>(
-  options: readonly RadioSelectRowOption<Value>[],
+  options: readonly SelectOptionRowOption<Value>[],
   value: Value | undefined,
-  preferredKey: RadioSelectRowOptionKey | undefined,
-): RadioSelectRowOptionKey | undefined {
+  preferredKey: SelectOptionRowOptionKey | undefined,
+): SelectOptionRowOptionKey | undefined {
   if (value === undefined) {
     return undefined
   }
@@ -141,10 +166,10 @@ function resolveSelectedOptionKey<Value extends string>(
 }
 
 function stepRadioSelectOption<Value extends string>(
-  options: readonly RadioSelectRowOption<Value>[],
-  currentKey: RadioSelectRowOptionKey | undefined,
+  options: readonly SelectOptionRowOption<Value>[],
+  currentKey: SelectOptionRowOptionKey | undefined,
   step: number,
-): RadioSelectRowOption<Value> | undefined {
+): SelectOptionRowOption<Value> | undefined {
   if (options.length === 0) {
     return undefined
   }
@@ -155,16 +180,4 @@ function stepRadioSelectOption<Value extends string>(
   }
 
   return options[(currentIndex + step + options.length) % options.length]
-}
-
-function renderOptionLabel(label: ReactNode, textColor?: string) {
-  if (typeof label === "string" || typeof label === "number") {
-    return (
-      <Text fg={textColor} flexShrink={1} truncate wrapMode="none">
-        {label}
-      </Text>
-    )
-  }
-
-  return label
 }

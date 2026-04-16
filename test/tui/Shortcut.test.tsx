@@ -74,7 +74,7 @@ function GlobalShortcutHarness(props: { onHit: (value: string) => void }) {
 
 function NavKeysRegistrar(props: {
   onHit: (value: string) => void
-  prevent?: AliasedByNavKey | readonly AliasedByNavKey[]
+  prevent?: readonly AliasedByNavKey[]
 }) {
   useNavKeys({
     activate: () => props.onHit("activate"),
@@ -92,7 +92,7 @@ function NavKeysRegistrar(props: {
 
 function NavKeysHarness(props: {
   onHit: (value: string) => void
-  prevent?: AliasedByNavKey | readonly AliasedByNavKey[]
+  prevent?: readonly AliasedByNavKey[]
 }) {
   const tree = useFocusTree()
 

@@ -1,21 +1,45 @@
 import type { ReactNode } from "react"
+import { Focusable, useIsFocusNavigationActive, useIsFocused, useIsHighlighted } from "../focus"
 import { Text } from "../ui/Text"
 import { useKeybindHandler } from "../ui/keybind"
 import { useTheme } from "../ui/theme"
-import { useFormFieldContext } from "./context"
 
 export type CheckboxInputProps = {
+  active?: boolean
   checked: boolean
   checkedLabel?: ReactNode
   disabled?: boolean
+  focusableId?: string
   hint?: ReactNode
   onChange?: (value: boolean) => void
   uncheckedLabel?: ReactNode
 }
 
+const DEFAULT_INPUT_ID = "input"
+
 export function CheckboxInput(props: CheckboxInputProps) {
+  return (
+    <Focusable
+      alignSelf="stretch"
+      focusSelf
+      focusable
+      focusableId={props.focusableId ?? DEFAULT_INPUT_ID}
+      hideNavigationHalo
+      minWidth={0}
+      width="100%"
+    >
+      <CheckboxInputBody {...props} />
+    </Focusable>
+  )
+}
+
+function CheckboxInputBody(props: CheckboxInputProps) {
   const theme = useTheme()
-  const { active, inputFocused } = useFormFieldContext()
+  const focused = useIsFocused()
+  const highlighted = useIsHighlighted()
+  const navigationActive = useIsFocusNavigationActive()
+  const active = props.active ?? (navigationActive ? highlighted : focused)
+  const inputFocused = focused && !navigationActive
   const backgroundColor = active ? theme.formFieldBackgroundActive : theme.formFieldBackground
   const interactive = !props.disabled && !!props.onChange
   const indicatorColor = props.disabled ? theme.mutedFg : active ? theme.focusPrimaryFg : undefined

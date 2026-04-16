@@ -1,18 +1,22 @@
 import { RGBA } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
 import { act } from "react"
-import { CheckboxInput } from "../../src/tui/form/CheckboxInput"
-import { FormLabel } from "../../src/tui/form/FormLabel"
+import { CheckboxField } from "../../src/tui/form"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { render } = createTuiRenderHarness()
 
-describe("CheckboxInput", () => {
+describe("CheckboxField", () => {
   test("fills the full checkbox row background and colors the indicator when focused", async () => {
     const ui = await render(
-      <FormLabel active inputFocused name="Readonly">
-        <CheckboxInput checked={false} hint="space toggle" onChange={() => undefined} />
-      </FormLabel>,
+      <CheckboxField
+        autoFocus
+        checked={false}
+        focusableId="readonly"
+        hint="space toggle"
+        label="Readonly"
+        onChange={() => undefined}
+      />,
       { height: 6, width: 40 },
     )
 
@@ -33,9 +37,13 @@ describe("CheckboxInput", () => {
   test("toggles from the keyboard when the field input is focused", async () => {
     const values: boolean[] = []
     const ui = await render(
-      <FormLabel active inputFocused name="Readonly">
-        <CheckboxInput checked={false} onChange={(value) => values.push(value)} />
-      </FormLabel>,
+      <CheckboxField
+        autoFocus
+        checked={false}
+        focusableId="readonly"
+        label="Readonly"
+        onChange={(value) => values.push(value)}
+      />,
       { height: 6, width: 40 },
     )
 
@@ -50,9 +58,15 @@ describe("CheckboxInput", () => {
   test("does not toggle while disabled", async () => {
     const values: boolean[] = []
     const ui = await render(
-      <FormLabel active inputFocused name="Readonly">
-        <CheckboxInput checked={false} disabled hint="space toggle" onChange={(value) => values.push(value)} />
-      </FormLabel>,
+      <CheckboxField
+        autoFocus
+        checked={false}
+        disabled
+        focusableId="readonly"
+        hint="space toggle"
+        label="Readonly"
+        onChange={(value) => values.push(value)}
+      />,
       { height: 6, width: 40 },
     )
 

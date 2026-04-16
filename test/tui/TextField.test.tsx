@@ -1,17 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { act } from "react"
-import { FormLabel } from "../../src/tui/form/FormLabel"
-import { TextInput } from "../../src/tui/form/TextInput"
+import { useState } from "react"
+import { TextField } from "../../src/tui/form"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, render } = createTuiRenderHarness()
 
-describe("TextInput", () => {
+describe("TextField", () => {
   test("fills the full input row background instead of only the typed characters", async () => {
     const ui = await render(
-      <FormLabel active inputFocused name="Connection Name">
-        <TextInput onInput={() => undefined} value="abc" />
-      </FormLabel>,
+      <TextField autoFocus focusableId="connection-name" label="Connection Name" onChange={() => undefined} value="abc" />,
       { height: 6, width: 30 },
     )
 
@@ -27,9 +24,14 @@ describe("TextInput", () => {
   test("ignores typed input while disabled", async () => {
     const values: string[] = []
     const ui = await render(
-      <FormLabel active inputFocused name="Connection Name">
-        <TextInput disabled onInput={(value) => values.push(value)} value="abc" />
-      </FormLabel>,
+      <TextField
+        autoFocus
+        disabled
+        focusableId="connection-name"
+        label="Connection Name"
+        onChange={(value) => values.push(value)}
+        value="abc"
+      />,
       { height: 6, width: 30 },
     )
 
@@ -38,5 +40,19 @@ describe("TextInput", () => {
     expect(values).toEqual([])
     expect(ui.captureCharFrame()).toContain("abc")
     expect(ui.captureCharFrame()).not.toContain("abcz")
+  })
+
+  test("does not treat vim nav aliases as field navigation while editing text", async () => {
+    function Harness() {
+      const [value, setValue] = useState("")
+
+      return <TextField autoFocus focusableId="connection-name" label="Connection Name" onChange={setValue} value={value} />
+    }
+
+    const ui = await render(<Harness />, { height: 6, width: 30 })
+
+    await dispatchInput(ui, () => ui.mockInput.typeText("jk"))
+
+    expect(ui.captureCharFrame()).toContain("jk")
   })
 })

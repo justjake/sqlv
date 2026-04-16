@@ -36,7 +36,6 @@ The engine is intended to be the public API boundary. The TUI should consume eng
 - Built-in adapters currently include:
   - `bunsqlite` via [`src/lib/adapters/BunSqlAdapter.ts`](./src/lib/adapters/BunSqlAdapter.ts)
   - `turso` via [`src/lib/adapters/TursoAdapter.ts`](./src/lib/adapters/TursoAdapter.ts)
-- Adapter registration is explicit through `AdapterRegistry`. Do not reintroduce side-effect registration.
 - Adapters can provide `ConnectionSpec` for UI-driven connection creation. The library should stay UI-agnostic; UI hosts render those specs.
 
 ### Persistence

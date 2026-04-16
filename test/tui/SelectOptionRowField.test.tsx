@@ -1,26 +1,27 @@
 import { RGBA } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
 import { act, useState } from "react"
-import { FormLabel } from "../../src/tui/form/FormLabel"
-import { RadioSelectRowInput } from "../../src/tui/form/RadioSelectRowInput"
+import { SelectOptionRowField } from "../../src/tui/form"
 import { Text } from "../../src/tui/ui/Text"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { render, settleDeferredRender } = createTuiRenderHarness()
 
-describe("RadioSelectRowInput", () => {
+describe("SelectOptionRowField", () => {
   test("fills the full option row background and colors the selected radio dot", async () => {
     const ui = await render(
-      <FormLabel active inputFocused name="Protocol">
-        <RadioSelectRowInput
-          hint="← ⟶ cycle"
-          options={[
-            { key: "bunsqlite", label: "bunsqlite", value: "bunsqlite" },
-            { key: "turso", label: "turso", value: "turso" },
-          ]}
-          value="bunsqlite"
-        />
-      </FormLabel>,
+      <SelectOptionRowField
+        autoFocus
+        focusableId="protocol"
+        hint="← ⟶ cycle"
+        label="Protocol"
+        onChange={() => undefined}
+        options={[
+          { key: "bunsqlite", label: "bunsqlite", value: "bunsqlite" },
+          { key: "turso", label: "turso", value: "turso" },
+        ]}
+        value="bunsqlite"
+      />,
       { height: 6, width: 50 },
     )
 
@@ -43,16 +44,17 @@ describe("RadioSelectRowInput", () => {
       const [value, setValue] = useState<"bunsqlite" | "turso">("bunsqlite")
 
       return (
-        <FormLabel active inputFocused name="Protocol">
-          <RadioSelectRowInput
-            onChange={setValue}
-            options={[
-              { key: "bunsqlite", label: "bunsqlite", value: "bunsqlite" },
-              { key: "turso", label: "turso", value: "turso" },
-            ]}
-            value={value}
-          />
-        </FormLabel>
+        <SelectOptionRowField
+          autoFocus
+          focusableId="protocol"
+          label="Protocol"
+          onChange={setValue}
+          options={[
+            { key: "bunsqlite", label: "bunsqlite", value: "bunsqlite" },
+            { key: "turso", label: "turso", value: "turso" },
+          ]}
+          value={value}
+        />
       )
     }
 
@@ -82,18 +84,19 @@ describe("RadioSelectRowInput", () => {
       const [value, setValue] = useState<"bunsqlite" | "turso">("bunsqlite")
 
       return (
-        <FormLabel active inputFocused name="Protocol">
-          <RadioSelectRowInput
-            disabled
-            hint="← ⟶ cycle"
-            onChange={setValue}
-            options={[
-              { key: "bunsqlite", label: "bunsqlite", value: "bunsqlite" },
-              { key: "turso", label: "turso", value: "turso" },
-            ]}
-            value={value}
-          />
-        </FormLabel>
+        <SelectOptionRowField
+          autoFocus
+          disabled
+          focusableId="protocol"
+          hint="← ⟶ cycle"
+          label="Protocol"
+          onChange={setValue}
+          options={[
+            { key: "bunsqlite", label: "bunsqlite", value: "bunsqlite" },
+            { key: "turso", label: "turso", value: "turso" },
+          ]}
+          value={value}
+        />
       )
     }
 
@@ -129,9 +132,7 @@ describe("RadioSelectRowInput", () => {
       }
 
       return (
-        <FormLabel active inputFocused name="Protocol">
-          <RadioSelectRowInput onChange={setValue} options={options} value={value} />
-        </FormLabel>
+        <SelectOptionRowField autoFocus focusableId="protocol" label="Protocol" onChange={setValue} options={options} value={value} />
       )
     }
 
@@ -155,33 +156,35 @@ describe("RadioSelectRowInput", () => {
 
   test("renders rich multi-line option labels", async () => {
     const ui = await render(
-      <FormLabel active inputFocused name="Icon style">
-        <RadioSelectRowInput
-          options={[
-            {
-              key: "nerdfont",
-              label: (
-                <box flexDirection="column">
-                  <Text>NerdFont</Text>
-                  <Text>Folder</Text>
-                </box>
-              ),
-              value: "nerdfont",
-            },
-            {
-              key: "unicode",
-              label: (
-                <box flexDirection="column">
-                  <Text>Unicode</Text>
-                  <Text>Database</Text>
-                </box>
-              ),
-              value: "unicode",
-            },
-          ]}
-          value="nerdfont"
-        />
-      </FormLabel>,
+      <SelectOptionRowField
+        autoFocus
+        focusableId="icon-style"
+        label="Icon style"
+        onChange={() => undefined}
+        options={[
+          {
+            key: "nerdfont",
+            label: (
+              <box flexDirection="column">
+                <Text>NerdFont</Text>
+                <Text>Folder</Text>
+              </box>
+            ),
+            value: "nerdfont",
+          },
+          {
+            key: "unicode",
+            label: (
+              <box flexDirection="column">
+                <Text>Unicode</Text>
+                <Text>Database</Text>
+              </box>
+            ),
+            value: "unicode",
+          },
+        ]}
+        value="nerdfont"
+      />,
       { height: 8, width: 50 },
     )
 

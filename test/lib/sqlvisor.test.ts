@@ -832,6 +832,59 @@ where
     })
   })
 
+  test("restores a history entry from a deleted connection without selecting a stale connection", async () => {
+    const fakeAdapter = new FakeBunAdapter()
+    fakeAdapter.rowsByQuery.set("select 1", [{ value: 1 }])
+    const first = makeConnection({
+      config: {
+        path: "/tmp/first.db",
+      },
+      createdAt: 1,
+      id: "conn-1",
+      name: "First",
+      protocol: "bunsqlite",
+    })
+    const second = makeConnection({
+      config: {
+        path: "/tmp/second.db",
+      },
+      createdAt: 2,
+      id: "conn-2",
+      name: "Second",
+      protocol: "bunsqlite",
+    })
+
+    const engine = await SqlVisor.create({
+      persistence: createPersistence([first, second]),
+      queryClient: createQueryClient(),
+      registry: new AdapterRegistry([fakeAdapter]),
+    })
+
+    engine.selectConnection(first.id)
+    const query = engine.runQuery({ text: "select 1" })
+    await waitForQueryState(engine, query, (state) => state.status === "success")
+
+    await engine.deleteConnection(first.id)
+    await waitFor(() => engine.getState().selectedConnectionId === second.id)
+
+    engine.restoreQueryExecution(query.queryId)
+
+    expect(engine.getState().selectedConnectionId).toBeUndefined()
+    expect(engine.getState().settings.sidebarState.lastSelectedConnectionId).toBe(second.id)
+    expect(engine.getState().editor).toMatchObject({
+      cursorOffset: "select 1".length,
+      text: "select 1",
+      treeSitterGrammar: undefined,
+    })
+    expect(engine.getState().queryExecution.data?.connectionId).toBe(first.id)
+    expect(engine.getState().queryExecution.data?.id).toBe(query.queryId)
+    expect(engine.getState().detailView).toEqual({
+      kind: "rows",
+      rows: [{ value: 1 }],
+      title: "Results (1)",
+    })
+  })
+
   test("loads persisted saved queries from previous sessions on create", async () => {
     const fakeAdapter = new FakeBunAdapter()
     const olderButUpdated = makeSavedQuery({
@@ -992,6 +1045,63 @@ where
     expect(engine.getState().detailView).toEqual({
       kind: "rows",
       rows: [{ id: 2 }],
+      title: "Results (1)",
+    })
+  })
+
+  test("restores a saved query onto an available connection when its latest execution connection was deleted", async () => {
+    const fakeAdapter = new FakeBunAdapter()
+    const currentConnection = makeConnection({
+      config: {
+        path: "/tmp/current.db",
+      },
+      createdAt: 10,
+      id: "conn-current",
+      name: "Current",
+      protocol: "bunsqlite",
+    })
+    const savedQuery = makeSavedQuery({
+      createdAt: 20,
+      id: "saved-audit",
+      name: "Audit",
+      protocol: "bunsqlite",
+      text: "select * from audit_log",
+    })
+    const staleExecution = makeQueryExecution({
+      connectionId: "conn-deleted",
+      createdAt: 21,
+      finishedAt: 22,
+      id: "exec-deleted-connection",
+      rows: [{ id: 7 }],
+      savedQueryId: savedQuery.id,
+      sessionId: "session-old",
+      sql: savedQuery.text,
+    })
+
+    const engine = await SqlVisor.create({
+      persistence: createPersistence([currentConnection], [staleExecution], [savedQuery]),
+      queryClient: createQueryClient(),
+      registry: new AdapterRegistry([fakeAdapter]),
+    })
+
+    const restored = engine.restoreSavedQuery(savedQuery.id)
+
+    expect(restored).toEqual({
+      queryExecutionId: staleExecution.id,
+      savedQuery,
+    })
+    expect(engine.getState().selectedConnectionId).toBe(currentConnection.id)
+    expect(engine.getState().editor).toMatchObject({
+      cursorOffset: savedQuery.text.length,
+      savedQueryId: savedQuery.id,
+      text: savedQuery.text,
+      treeSitterGrammar: "sql",
+    })
+    expect(engine.getState().queryExecution.data?.connectionId).toBe("conn-deleted")
+    expect(engine.getState().queryExecution.data?.id).toBe(staleExecution.id)
+    expect(engine.getState().detailView).toEqual({
+      kind: "rows",
+      rows: [{ id: 7 }],
       title: "Results (1)",
     })
   })

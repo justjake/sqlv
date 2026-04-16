@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react"
-import { FormLabel, RadioSelectRowInput, type RadioSelectRowOption } from "../form"
-import { Focusable, useIsFocusNavigationActive, useIsFocused, useIsHighlighted } from "../focus"
+import { SelectOptionRowField, type SelectOptionRowOption } from "../form"
+import { Focusable } from "../focus"
 import { IconProvider, resolveIconStyle, useIconGlyph, type IconName, type IconStyle } from "../ui/icons"
 import { Text } from "../ui/Text"
 import { useTheme } from "../ui/theme"
@@ -37,7 +37,7 @@ export function SettingsPane() {
     [engine, iconStyle, saving],
   )
 
-  const iconStyleOptions = useMemo<readonly RadioSelectRowOption<IconStyle>[]>(
+  const iconStyleOptions = useMemo<readonly SelectOptionRowOption<IconStyle>[]>(
     () => [
       {
         key: "nerdfont",
@@ -65,6 +65,7 @@ export function SettingsPane() {
     <Focusable
       autoFocus
       childrenNavigable={false}
+      delegatesFocus
       focusSelf
       focusable
       focusableId={SETTINGS_PANE_FOCUS_ID}
@@ -86,32 +87,24 @@ export function SettingsPane() {
 function SettingsPaneBody(props: {
   error: string | undefined
   iconStyle: IconStyle
-  iconStyleOptions: readonly RadioSelectRowOption<IconStyle>[]
+  iconStyleOptions: readonly SelectOptionRowOption<IconStyle>[]
   onSetIconStyle: (value: IconStyle) => void
   saving: boolean
 }) {
-  const focused = useIsFocused()
-  const highlighted = useIsHighlighted()
-  const navigationActive = useIsFocusNavigationActive()
   const theme = useTheme()
-  const active = navigationActive ? highlighted : focused
 
   return (
     <box flexDirection="column" gap={1} height="100%" paddingBottom={1} paddingLeft={2} paddingRight={2} width="100%">
       <Text fg={theme.mutedFg}>Appearance</Text>
-      <FormLabel
-        active={active}
-        inputFocused={!navigationActive && focused}
-        name="Icon style"
-      >
-        <RadioSelectRowInput
-          disabled={props.saving}
-          hint={ICON_STYLE_HINT}
-          onChange={props.onSetIconStyle}
-          options={props.iconStyleOptions}
-          value={props.iconStyle}
-        />
-      </FormLabel>
+      <SelectOptionRowField
+        disabled={props.saving}
+        focusableId="icon-style"
+        hint={ICON_STYLE_HINT}
+        label="Icon style"
+        onChange={props.onSetIconStyle}
+        options={props.iconStyleOptions}
+        value={props.iconStyle}
+      />
       {props.saving ? <Text fg={theme.mutedFg}>Saving...</Text> : null}
       {props.error ? <Text fg={theme.errorFg}>{props.error}</Text> : null}
     </box>

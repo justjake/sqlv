@@ -9,8 +9,8 @@ import {
   useMemo,
   useRef,
   useSyncExternalStore,
-  type RefObject,
   type ReactNode,
+  type RefObject,
 } from "react"
 import { focusPathKey, type FocusDirection, type FocusPath } from "../../lib/focus"
 import { useFocusNavigationRestoreController, useFocusPath, useFocusTree } from "../focus"
@@ -124,7 +124,9 @@ function shortcutKeyInputSignature(input: ShortcutKeyInput | undefined): string 
     return undefined
   }
 
-  return shortcutKeyAlternatives(input).map((sequence) => shortcutSequenceSignature(sequence)).join("\u0000")
+  return shortcutKeyAlternatives(input)
+    .map((sequence) => shortcutSequenceSignature(sequence))
+    .join("\u0000")
 }
 
 // ---------------------------------------------------------------------------
@@ -782,7 +784,7 @@ export type UseNavKeysOptions = Partial<Record<NavKey, NavKeyHandler>> & {
   detect?: (key: KeyEvent) => boolean
   enabled?: boolean
   global?: boolean
-  prevent?: AliasedByNavKey | readonly AliasedByNavKey[]
+  prevent?: readonly AliasedByNavKey[]
 }
 
 /**
