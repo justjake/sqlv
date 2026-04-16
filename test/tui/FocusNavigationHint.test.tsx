@@ -34,9 +34,9 @@ describe("FocusNavigationHint", () => {
     await dispatchInput(ui, () => ui.mockInput.pressEscape())
     await settleDeferredRender(ui, 30)
 
-    let frame = ui.captureSpans()
-    let hintLine = findHintLine(frame)
-    let hintText = hintLine.spans.map((span) => span.text).join("")
+    const frame = ui.captureSpans()
+    const hintLine = findHintLine(frame)
+    const hintText = hintLine.spans.map((span) => span.text).join("")
     const white = RGBA.fromHex("#ffffff")
     const gray = RGBA.fromHex("#a7a7a7")
     const focusShortcutLabel = labelizeShortcutInput({ or: ["return", "space"] })
@@ -51,7 +51,6 @@ describe("FocusNavigationHint", () => {
     expect(hintText).toContain("focus nav")
     expect(hintText).toContain("↑↓←→/hjkl move")
     expect(hintText).toContain(`${focusShortcutLabel} focus`)
-    expect(hintText).toContain(`${labelizeShortcutInput("e")} ease outCirc`)
     expect(hintText).toContain("⮐")
     expect(hintText).toContain("esc cancel")
     expect(hintText).not.toContain("┌")
@@ -62,15 +61,6 @@ describe("FocusNavigationHint", () => {
     expect(hasGrayMoveLabel).toBe(true)
     expect(grayFocusActions).toHaveLength(1)
     expect(hasBackground(frame.lines.at(-1))).toBe(false)
-
-    await dispatchInput(ui, () => ui.mockInput.pressKey("e"))
-    await settleDeferredRender(ui, 30)
-
-    frame = ui.captureSpans()
-    hintLine = findHintLine(frame)
-    hintText = hintLine.spans.map((span) => span.text).join("")
-
-    expect(hintText).toContain(`${labelizeShortcutInput("e")} ease outQuad`)
   })
 })
 

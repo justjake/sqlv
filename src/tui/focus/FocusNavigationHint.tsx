@@ -1,7 +1,7 @@
 import { Text } from "../ui/Text"
 import { labelizeShortcutInput } from "../ui/keybind"
 import { useTheme } from "../ui/theme"
-import { useFocusHaloAnimationEase, useFocusNavigationState } from "./context"
+import { useFocusNavigationState } from "./context"
 
 const FOCUS_NAV_HINT_Z_INDEX = 1000
 const FOCUS_NAV_HINT_SHORTCUT_FG = "#ffffff"
@@ -9,12 +9,10 @@ const FOCUS_NAV_HINT_ACTION_FG = "#a7a7a7"
 const FOCUS_NAV_MOVE_SHORTCUT = formatCompactShortcutGroup(["up", "down", "left", "right"], ["h", "j", "k", "l"])
 const FOCUS_NAV_FOCUS_SHORTCUT = labelizeShortcutInput({ or: ["return", "space"] })
 const FOCUS_NAV_CANCEL_SHORTCUT = labelizeShortcutInput("esc")
-const FOCUS_NAV_EASING_SHORTCUT = labelizeShortcutInput("e")
 
 export function FocusNavigationHint() {
   const theme = useTheme()
   const state = useFocusNavigationState()
-  const easing = useFocusHaloAnimationEase()
   if (!state.active) {
     return null
   }
@@ -42,7 +40,6 @@ export function FocusNavigationHint() {
         </Text>
         <HintPair action="move" shortcut={FOCUS_NAV_MOVE_SHORTCUT} />
         <HintPair action="focus" shortcut={FOCUS_NAV_FOCUS_SHORTCUT} />
-        <HintPair action={`ease ${easing}`} shortcut={FOCUS_NAV_EASING_SHORTCUT} />
         <HintPair action={formatHintAction(state.escLabel) ?? "cancel"} shortcut={FOCUS_NAV_CANCEL_SHORTCUT} />
       </box>
     </box>
