@@ -354,12 +354,12 @@ Pure helpers used by hosts to compose restore workflows.
 findLatestSavedQueryExecution(
   savedQuery: SavedQuery,
   history: QueryExecution[],
-  connections: Connection<any>[],
+  connections: Connection[],
 ): QueryExecution | undefined
 
 resolveHistoryRestore(
   execution: QueryExecution,
-  connections: Connection<any>[],
+  connections: Connection[],
 ): {
   connectionId?: ConnectionId
   sql: string
@@ -370,7 +370,7 @@ resolveHistoryRestore(
 resolveSavedQueryRestore(
   savedQuery: SavedQuery,
   history: QueryExecution[],
-  connections: Connection<any>[],
+  connections: Connection[],
   selectedConnectionId: ConnectionId | undefined,
 ): {
   savedQuery: SavedQuery
@@ -749,7 +749,7 @@ any row.
 ```ts
 export type SqlVisorState = {
   sessionId: SessionId;
-  connections: QueryState<Connection<any>[]>;
+  connections: QueryState<Connection[]>;
   connectionSuggestions: QueryState<DiscoveredConnectionSuggestion[]>;
   selectedConnectionId?: ConnectionId;
   selectedQueryExecutionId: QueryExecutionId | null;
@@ -902,26 +902,31 @@ Public api `ConnectionsApi`:
 
 ```ts
 export type ConnectionsApi = {
-  list(): Promise<Connection<any>[]>;
-  add<P extends Protocol>(
-    input: AddConnectionInput<P>,
-  ): Promise<Connection<ProtocolConfig<P>>>;
-  update(
-    id: ConnectionId,
-    patch: UpdateConnectionInput,
-  ): Promise<Connection<any>>;
-  delete(id: ConnectionId): Promise<void>;
-  select(id: ConnectionId | undefined): void;
-  refreshSuggestions(): Promise<DiscoveredConnectionSuggestion[]>;
-};
+  list(): Promise<Connection[]>
+  add<P extends Protocol>(input: AddConnectionInput<P>): Promise<ConnectionOf<P>>
+  update<P extends Protocol>(id: ConnectionId, patch: UpdateConnectionInput<P>): Promise<Connection>
+  delete(id: ConnectionId): Promise<void>
+  select(id: ConnectionId | undefined): void
+  refreshSuggestions(): Promise<DiscoveredConnectionSuggestion[]>
+}
 ```
+
+The `add<P>` generic lets TypeScript infer the protocol literal from the
+caller's argument, so `add({ protocol: "postgres", name, config: {…} })`
+gives back a `ConnectionOf<"postgres">` with a fully-typed config. The
+same inference rejects a config that doesn't match the declared protocol.
 
 Module-public:
 
-- `getRunner(id: ConnectionId): Promise<QueryRunnerImpl<any>>` — lazily
-  creates, caches, and returns an audited runner for the connection.
-- `requireConnection(id: ConnectionId): Connection<any>` — synchronous
-  lookup against in-memory state; throws on unknown id.
+- `getRunner(id: ConnectionId): Promise<QueryRunnerImpl<unknown>>` — lazily
+  creates, caches, and returns an audited runner for the connection. The
+  return type is erased at this boundary; callers that need the
+  config-typed shape cast using the connection's narrowed protocol (see
+  §11.6).
+- `requireConnection(id: ConnectionId): Connection` — synchronous lookup
+  against in-memory state; throws on unknown id. Returns the full
+  discriminated union; callers narrow by `protocol` when they need the
+  config.
 - `loadInitial(): Promise<void>` — hydrates state from storage at boot.
 - `evictRunner(id: ConnectionId): void` — called internally on delete to
   cancel outstanding queries and drop the cached runner.
@@ -1235,17 +1240,17 @@ No `api/services/` subfolder. The files are peers.
 import type { ConnectionsApi } from "#api/ConnectionsApi"
 
 export class ConnectionsService implements ConnectionsApi {
-  async list(): Promise<Connection<any>[]> { … }
-  async add(input) { … }
-  async delete(id) { … }
-  select(id) { … }
-  async refreshSuggestions() { … }
-  async update(id, patch) { … }
+  async list(): Promise<Connection[]> { … }
+  async add<P extends Protocol>(input: AddConnectionInput<P>): Promise<ConnectionOf<P>> { … }
+  async update<P extends Protocol>(id: ConnectionId, patch: UpdateConnectionInput<P>): Promise<Connection> { … }
+  async delete(id: ConnectionId): Promise<void> { … }
+  select(id: ConnectionId | undefined): void { … }
+  async refreshSuggestions(): Promise<DiscoveredConnectionSuggestion[]> { … }
   // module-public — not on ConnectionsApi
-  async getRunner(id: ConnectionId) { … }
-  requireConnection(id: ConnectionId) { … }
-  async loadInitial() { … }
-  evictRunner(id: ConnectionId) { … }
+  async getRunner(id: ConnectionId): Promise<QueryRunnerImpl<unknown>> { … }
+  requireConnection(id: ConnectionId): Connection { … }
+  async loadInitial(): Promise<void> { … }
+  evictRunner(id: ConnectionId): void { … }
 }
 ```
 
@@ -1505,7 +1510,10 @@ gracefully (UI shows the id or a snapshot stored in the payload).
 
 ### 11.6 Adapter discipline
 
-- Adapters receive only `QueryRunnerImpl`, never `Executor` or `StorageDb`.
+- Adapters receive only `QueryRunner<Config>`, never `Executor` or
+  `StorageDb`. The runner is typed at the adapter's own `Config` so
+  `fetchObjects(runner)`, `explain(runner, input)`, and
+  `sample(ident, runner)` see the correct config shape.
 - Adapters never call `db.insert` or `db.update` on the storage schema.
 - Every adapter-initiated SQL goes through `runner.execute` /
   `runner.query` / `runner.iterate`, which writes the auditable
@@ -1513,6 +1521,28 @@ gracefully (UI shows the id or a snapshot stored in the payload).
 - Adapters open flows via `runner.openFlow` for multi-query operations;
   the runner handles close in finally blocks, so adapter code doesn't need
   to guarantee close on error.
+
+#### Runner-to-adapter dispatch
+
+The engine's runner cache returns `QueryRunnerImpl<unknown>` because the
+cache key is only `ConnectionId`. When an engine service needs to pass a
+runner into a specific adapter (`CatalogService.load`, editor analysis,
+sample), it narrows the connection's protocol and casts the runner at
+that call site:
+
+```ts
+const connection = this.connections.requireConnection(id)          // Connection
+const adapter    = this.adapters.get(connection.protocol)          // RegisteredAdapter<P>
+const runner     = await this.connections.getRunner(id)            // QueryRunner<unknown>
+await adapter.fetchObjects(runner as QueryRunner<ConfigFor<typeof connection.protocol>>)
+```
+
+The cast is sound because `ConnectionsService.add` validates the
+connection's config against its protocol on creation, so runtime the
+adapter and runner always share the same `Config`. The cast is the only
+`as` in engine dispatch; it exists because TypeScript cannot express the
+cross-row "adapter protocol === connection protocol" invariant without
+dependent types.
 
 ### 11.7 Result payloads
 
