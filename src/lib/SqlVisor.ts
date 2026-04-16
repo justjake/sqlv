@@ -4,6 +4,7 @@ import { PostgresAdapter } from "./adapters/postgres"
 import { sqlite } from "./adapters/sqlite"
 import { TursoAdapter } from "./adapters/TursoAdapter"
 import { createLocalPersistence, type LocalPersistence, type PersistenceStore } from "./createLocalPersistence"
+import { replaceTextRange } from "./editor"
 import { formatQueryText } from "./formatQuery"
 import { AdapterRegistry, type AnyAdapter, type Protocol, type ProtocolConfig } from "./interface/Adapter"
 import { QueryExecutionError, QueryRunnerImpl } from "./QueryRunnerImpl"
@@ -1672,10 +1673,6 @@ function idleEditorAnalysisState(): EditorAnalysisState {
   return {
     status: "idle",
   }
-}
-
-function replaceTextRange(text: string, range: EditorRange, replacement: string): string {
-  return text.slice(0, range.start) + replacement + text.slice(range.end)
 }
 
 function clamp(index: number, length: number): number {
