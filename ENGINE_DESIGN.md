@@ -87,8 +87,6 @@ src/domain/
     formatQuery.ts
   savedQuery/
     SavedQuery.ts
-  appState/
-    AppState.ts
   audit/
     AuditEvent.ts
   catalog/
@@ -133,39 +131,47 @@ factories co-located with each type.
 `JsonObject`, `JsonArray`, `JsonPrimitive` are exported. `JsonEncoded<T>`
 is the phantom-typed stringified form used when JSON is passed as text.
 
-**`Protocol`** — `Extract<keyof ProtocolToConfig, string>`. The
-`ProtocolToConfig` interface is the extension point; adapter modules augment
-it via declaration merging to register their config type for a protocol
-literal. `ConfigFor<P extends Protocol> = ProtocolToConfig[P]` looks up the
-config shape for a given protocol.
+**`Protocol`** — canonical home is `domain/primitive/Protocol.ts`. The
+`ProtocolToConfig` interface is the extension point; adapter modules
+augment it via declaration merging to register their config type for a
+protocol literal. Every registered config must be JSON-safe.
 
 ```ts
-// spi/Adapter.ts
-export interface ProtocolToConfig {}
-export type Protocol = Extract<keyof ProtocolToConfig, string>;
-export type ConfigFor<P extends Protocol> = ProtocolToConfig[P];
+// domain/primitive/Protocol.ts
+import type { Json } from "./Json"
+
+export interface ProtocolToConfig extends Record<string, Json> {}
+export type Protocol = Extract<keyof ProtocolToConfig, string>
+export type ConfigFor<P extends Protocol> = ProtocolToConfig[P]
 ```
 
 ```ts
 // adapters/postgres/PgAdapter.ts
-declare module "#spi/Adapter" {
+declare module "#domain/primitive/Protocol" {
   interface ProtocolToConfig {
-    postgres: PostgresConfig
+    postgres: PostgresConfig     // must satisfy Json
   }
 }
 export class PostgresAdapter implements Adapter<PostgresConfig> { … }
 ```
 
-This keeps the public `Protocol` union narrow to actually-registered
-protocols at compile time, and every downstream type that refers to "the
-config for this protocol" walks through a single indirection
-(`ProtocolToConfig[P]`) rather than inferring the config from an adapter
-class type.
+Putting the registry in `domain/primitive/` keeps the `domain → nothing`
+layer rule intact. `spi/Adapter.ts` is a consumer of the domain-level
+extension point. Every downstream type that refers to "the config for this
+protocol" walks through a single indirection (`ProtocolToConfig[P]`)
+rather than inferring the config from an adapter class type.
 
-**`Adapter<Config>`** (in `spi/`) has exactly one type parameter. No `Arg`
-or `Features` parameters. `RegisteredAdapter<P extends Protocol = Protocol>`
-is `Adapter<ConfigFor<P>> & { readonly protocol: P }` — the shape returned
+**`Adapter<Config extends Json>`** (in `spi/`) has exactly one type
+parameter, constrained to `Json` so configs round-trip through the JSON
+config column without a codec. No `Arg` or `Features` parameters.
+`RegisteredAdapter<P extends Protocol = Protocol>` is
+`Adapter<ConfigFor<P>> & { readonly protocol: P }` — the shape returned
 by `AdaptersService.get(protocol)`.
+
+The `Json` constraint applies only to `Config`. Row and SQL argument types
+are not constrained here; adapters that return non-JSON driver-native
+values are responsible for what they persist. This is deliberately
+permissive — tightening it is a separate design decision.
 
 ### 3.3 Utilities
 
@@ -302,11 +308,11 @@ export type QueryRef = { queryId: QueryExecutionId }
 type QueryExecutionBase = {
   id: QueryExecutionId
   sessionId: SessionId
-  connectionId: ConnectionId
-  connectionNameSnapshot: string        // rendered from Connection at insert time
+  connectionId?: ConnectionId           // set to null when source connection is deleted
+  connectionNameSnapshot: string        // captured at insert; immutable
   connectionProtocolSnapshot: Protocol
-  savedQueryId?: SavedQueryId
-  savedQueryNameSnapshot?: string       // rendered from SavedQuery at insert time
+  savedQueryId?: SavedQueryId           // set to null when source saved query is deleted
+  savedQueryNameSnapshot?: string       // captured at insert when savedQueryId was set
   parentAuditId?: AuditEventId          // set when run inside a flow
   initiator: QueryInitiator
   createdAt: EpochMillis
@@ -350,14 +356,21 @@ export type QueryExecution<Row = object> =
 ```
 
 Every read of a `QueryExecution` loads `rows` if the status is `"success"`.
-There is no summary-vs-detail distinction at the type level: `rows: Row[]`
-on the success arm is always populated (possibly to `[]`). If result
-payloads become a memory concern later, introduce a distinct
-`QueryExecutionSummary` type at that point rather than carrying a
-sentinel-valued `rows` field today.
+There is no summary variant — `rows: Row[]` on the success arm is always
+populated (possibly to `[]`).
+
+Memory is bounded at the access boundary, not at the type level:
+
+- State holds only a small sliding window of recent executions (see
+  `recentHistoryLimit`, §6.6).
+- Older executions are loaded on demand via `queries.getById` or
+  `queries.listPage`.
 
 Connection/saved-query snapshots are stored on every execution so that
 history stays readable after the source row is deleted (see §11.2).
+`connectionId` is optional because the live FK is set to null when the
+source connection is deleted; the snapshots remain the source of truth
+for display.
 
 Lifecycle: inserted with `status: "pending"` before the executor runs,
 updated exactly once into one of `success`, `error`, or `cancelled`.
@@ -409,36 +422,7 @@ export type SavedQuery = {
 Saved queries are user-authored SQL snippets with a name and optional
 protocol hint (used to resolve a compatible connection on restore).
 
-### 3.8 `AppState`
-
-App-scoped keyed JSON, written by hosts and read back by hosts. The engine
-provides the store; it does not interpret the contents. Host-specific
-preferences like "last selected connection", pane sizes, or tree-expansion
-state live here.
-
-```ts
-export type AppStateKey = string; // plain string; host-defined at runtime
-
-export type AppStateRow<Value extends Json = Json> = {
-  app: string;
-  id: AppStateKey;
-  value: Value;
-  createdAt: EpochMillis;
-  updatedAt?: EpochMillis;
-};
-
-export type AppStateSnapshot = Record<AppStateKey, Json>;
-export function defaultAppState(): AppStateSnapshot;
-```
-
-Primary key is composite `(app, id)`. Each host sees only its own
-namespace; the engine scopes all reads/writes by the current session's `app`.
-
-The engine itself reads no app state. Anything that looks like "restore
-UI state across sessions" — last-selected connection, last-opened saved
-query, editor pane sizes — is host policy and belongs here.
-
-### 3.9 `AuditEvent`
+### 3.8 `AuditEvent`
 
 Discriminated union keyed by `kind`. Durable, mostly append-only, with
 mutable `endedAt` and `cancelled` for flow-like events.
@@ -521,7 +505,7 @@ Rules:
   `queryExecutionId` for events that reference a specific query.
 - Payloads are typed per-kind and JSON-serializable.
 
-### 3.10 `Catalog`
+### 3.9 `Catalog`
 
 **`ObjectInfo`** — discoverable database objects (tables, views, indexes).
 Structure is adapter-dependent but always includes identity plus display
@@ -530,7 +514,7 @@ metadata. Cached per-connection in the engine, never persisted.
 **`Explain`** — `ExplainInput`, `ExplainResult` — adapter-provided analysis
 output for editor feedback.
 
-### 3.11 `Editor`
+### 3.10 `Editor`
 
 Existing editor domain types (buffer, completion, analysis, text ranges,
 state) unchanged in structure. The `editor/index.ts` barrel is removed;
@@ -676,7 +660,7 @@ UIs once the live FK is nulled by a delete.
 | Column               | Type                       | Notes                              |
 | -------------------- | -------------------------- | ---------------------------------- |
 | `id`                 | `text, PK, AuditEventId`   |                                    |
-| `session_id`         | `text NOT NULL, SessionId` | indexed, not a DB-level FK         |
+| `session_id`         | `text NOT NULL, SessionId` | hard FK → `sessions.id`            |
 | `created_at`         | `integer NOT NULL`         | event start                        |
 | `ended_at`           | `integer`                  | flow events only                   |
 | `cancelled`          | `integer, boolean mode`    | flow events only                   |
@@ -693,12 +677,50 @@ UIs once the live FK is nulled by a delete.
 Indexes: `(session_id)`, `(kind)`, `(created_at)`, `(parent_audit_id)`,
 `(connection_id)`, `(saved_query_id)`, `(query_execution_id)`.
 
-No column on `audit_events` is a DB-level FK. These are branded-id reference
-columns, kept indexed for filter queries but unconstrained by the database
-so that audit writes never fail because a subject row was deleted
-concurrently. Dangling references are allowed; the audit log is the
-historical record of what happened, not a live consistency check. Read-side
-code treats any referenced id as "may or may not still exist."
+Only `session_id` is a DB-level FK on `audit_events`. Subject reference
+columns (`connection_id`, `saved_query_id`, `query_execution_id`,
+`parent_audit_id`) are branded-id text columns with no FK constraint —
+indexed for filter queries but unconstrained by the database so audit
+writes never fail because a subject row was deleted concurrently.
+Dangling subject references are allowed; the audit log is the historical
+record of what happened, not a live consistency check. Read-side code
+treats any subject id as "may or may not still exist." Sessions are never
+deleted, so `session_id` gets the stronger guarantee.
+
+#### `saved_queries_fts` (FTS5 virtual table)
+
+Full-text index backing `SavedQueriesApi.search`. External-content
+mode with `content='saved_queries'` and `content_rowid='rowid'`:
+`saved_queries` holds the row data; the FTS table stores only tokenized
+index pages over `name` and `text`.
+
+Synchronization triggers on `saved_queries`:
+
+- `AFTER INSERT` → `INSERT INTO saved_queries_fts(rowid, name, text)`
+- `AFTER UPDATE` → `INSERT INTO saved_queries_fts(saved_queries_fts, rowid, name, text) VALUES ('delete', …)` for the old values, then insert new values
+- `AFTER DELETE` → same `('delete', …)` pattern
+
+Queries use `MATCH` and order by `rank`. FTS5 table definitions and
+triggers are raw-SQL migrations managed alongside the Drizzle schema
+push — `pushSQLiteSchema` handles the regular tables; virtual tables
+and triggers run as a paired migration step at boot.
+
+#### `query_executions_fts` (FTS5 virtual table)
+
+Full-text index backing `QueriesApi.search`. External-content mode with
+`content='query_executions'` and `content_rowid='rowid'`. Indexed
+columns: `sql_source`, `connection_name_snapshot`,
+`saved_query_name_snapshot`, `database`, `schema`, `table`.
+
+Synchronization triggers on `query_executions` for insert, update
+(including the `SET NULL` sweeps on connection/saved-query deletion,
+which update the snapshot-adjacent columns), and delete. Same
+external-content pattern as `saved_queries_fts`.
+
+Queries use `MATCH` and order by `rank` (or `bm25(query_executions_fts)`
+for custom weighting later). The service layer joins FTS results back to
+`query_executions` by rowid to return fully-loaded `QueryExecution`
+objects.
 
 ### 4.4 Transaction rules
 
@@ -713,6 +735,8 @@ code treats any referenced id as "may or may not still exist."
   and `recordFailed` are single updates. No transactions needed.
 - Audit events are inserted inside the transaction that wrote their subject
   row. They are never inserted retroactively.
+- FTS5 index maintenance is handled by triggers on `saved_queries` and
+  `query_executions`. Services do not write to the FTS tables directly.
 
 ### 4.5 JSON usage
 
@@ -736,7 +760,7 @@ export type SqlVisorState = {
   selectedConnectionId?: ConnectionId;
   selectedQueryExecutionId: QueryExecutionId | null;
   editor: EditorState;
-  history: QueryExecution[]; // fully loaded; success arms always carry rows
+  recentHistory: QueryExecution[]; // bounded sliding window; see §6.6
   savedQueries: SavedQuery[];
   appState: AppStateSnapshot;
   queryExecution: QueryState<QueryExecution>; // currently-selected execution
@@ -748,6 +772,12 @@ export type SqlVisorState = {
 the engine. Hosts that want "remember the last connection across runs"
 store it in `app_state` and call `sqlv.connections.select(id)` after the
 engine is up.
+
+`recentHistory` is a bounded window (default 10 executions). It never
+grows unbounded at runtime: on a new execution, the oldest is dropped.
+On boot, only the most recent N rows are loaded. Older history is
+reachable through `queries.listPage`, `queries.getById`, and
+`queries.search`.
 
 This is the single public state snapshot delivered to hosts via
 `sqlv.getState()` and `sqlv.subscribe(listener)`.
@@ -794,7 +824,7 @@ through the store but never write them.
 | `sessionId`                                                    | `SessionsService` (write-once at boot) |
 | `connections`, `connectionSuggestions`, `selectedConnectionId` | `ConnectionsService`                   |
 | `objectsByConnectionId`                                        | `CatalogService`                       |
-| `history`, `selectedQueryExecutionId`, `queryExecution`        | `QueriesService`                       |
+| `recentHistory`, `selectedQueryExecutionId`, `queryExecution`  | `QueriesService`                       |
 | `savedQueries`                                                 | `SavedQueriesService`                  |
 | `appState`                                                     | `AppStateService`                      |
 | `editor.*`                                                     | `EditorService`                        |
@@ -892,9 +922,9 @@ export type ConnectionsApi = {
     input: AddConnectionInput<P>,
   ): Promise<ConnectionOf<P>>;
   update<P extends Protocol>(
-    id: ConnectionId,
-    patch: UpdateConnectionInput<P>,
-  ): Promise<Connection>;
+    connection: ConnectionOf<P>,
+    patch: { name?: string; config?: Partial<ConfigFor<P>> },
+  ): Promise<ConnectionOf<P>>;
   delete(id: ConnectionId): Promise<void>;
   select(id: ConnectionId | undefined): void;
   refreshSuggestions(): Promise<DiscoveredConnectionSuggestion[]>;
@@ -906,13 +936,21 @@ caller's argument, so `add({ protocol: "postgres", name, config: {…} })`
 gives back a `ConnectionOf<"postgres">` with a fully-typed config. The
 same inference rejects a config that doesn't match the declared protocol.
 
+`update<P>` takes the already-narrowed `ConnectionOf<P>` record (obtained
+from `list()` or `getById()`) rather than a bare id. That forces the
+caller to have narrowed by protocol before calling update, which in turn
+makes the config patch's `P` honest: TypeScript infers `P` from the
+connection argument and type-checks `config` against `ConfigFor<P>`. The
+service additionally verifies at runtime that the stored row's protocol
+still matches `connection.protocol` (defense against stale state) and
+throws if it doesn't.
+
 Module-public:
 
-- `getRunner(id: ConnectionId): Promise<QueryRunnerImpl<unknown>>` — lazily
+- `getRunner(id: ConnectionId): Promise<QueryRunnerImpl<Protocol>>` — lazily
   creates, caches, and returns an audited runner for the connection. The
-  return type is erased at this boundary; callers that need the
-  config-typed shape cast using the connection's narrowed protocol (see
-  §11.6).
+  return type is protocol-erased; callers that need the config-typed
+  shape cast using the connection's narrowed protocol (see §11.6).
 - `requireConnection(id: ConnectionId): Connection` — synchronous lookup
   against in-memory state; throws on unknown id. Returns the full
   discriminated union; callers narrow by `protocol` when they need the
@@ -972,24 +1010,38 @@ issues `adapter.fetchObjects(db.withFlow(flow))`. The flow closes in a
 
 ### 6.6 `QueriesService`
 
-Owns query history, the currently-selected query, and execution dispatch.
+Owns the currently-selected query, execution dispatch, and a bounded
+in-memory window of recent executions.
 
 Public api `QueriesApi`:
 
 ```ts
 export type QueriesApi = {
-  run(input?: RunQueryInput): QueryRef;
-  getById(id: QueryExecutionId): Promise<QueryExecution | undefined>;
-  listHistory(): QueryExecution[]; // full executions; success arms include rows
-  select(id: QueryExecutionId | null): void;
-  cancel(ref: QueryRef): void;
-  cancelAll(): void;
-};
+  run(input?: RunQueryInput): QueryRef
+  getById(id: QueryExecutionId): Promise<QueryExecution | undefined>
+  listRecent(): QueryExecution[]                         // bounded window from state
+  listPage(query: HistoryPageQuery): Promise<QueryExecution[]>
+  search(text: string, options?: HistorySearchOptions): Promise<QueryExecution[]>
+  select(id: QueryExecutionId | null): void
+  cancel(ref: QueryRef): void
+  cancelAll(): void
+}
 
 export type RunQueryInput = {
-  text?: string;
-  connectionId?: ConnectionId;
-};
+  text?: string
+  connectionId?: ConnectionId
+}
+
+export type HistoryPageQuery = {
+  limit: number                                          // hard cap per call
+  before?: EpochMillis                                   // paginate by createdAt desc
+  connectionId?: ConnectionId                            // optional filter
+}
+
+export type HistorySearchOptions = {
+  limit?: number                                         // default 50
+  connectionId?: ConnectionId
+}
 ```
 
 Module-public (called by `QueryRunnerImpl`):
@@ -998,25 +1050,62 @@ Module-public (called by `QueryRunnerImpl`):
 - `recordFinished<Row>(id: QueryExecutionId, patch: QueryExecutionFinishPatch<Row>): Promise<SuccessQueryExecution<Row>>` — transition pending → success
 - `recordFailed(id: QueryExecutionId, patch: QueryExecutionFailPatch): Promise<FailedQueryExecution>` — transition pending → error
 - `recordCancelled(id: QueryExecutionId): Promise<CancelledQueryExecution>` — transition pending → cancelled
-- `loadInitial(): Promise<void>` — hydrate full history at boot (all rows, including `result_data`)
+- `loadInitial(): Promise<void>` — hydrate `state.recentHistory` with the most recent `recentHistoryLimit` executions (fully loaded)
 
-`run` semantics:
+#### `recentHistoryLimit`
 
-1. Resolve `text` (defaults to `state.editor.buffer.text`) and `connectionId`
-   (defaults to `state.selectedConnectionId`).
+Construction option, default `10`:
+
+```ts
+SqlVisor.create({ …, recentHistoryLimit: 10 })
+createBunSqlVisor({ …, recentHistoryLimit: 10 })
+```
+
+On boot, `QueriesService.loadInitial()` loads the `recentHistoryLimit`
+most recent executions by `createdAt` descending. On every subsequent
+`run` completion, the new execution is prepended to `state.recentHistory`
+and the oldest is dropped if the window is full.
+
+Hosts that want to browse older history call `listPage` or `search`.
+Neither touches `state.recentHistory`; they query storage and return
+detached result arrays.
+
+#### `run` semantics
+
+1. Resolve `text` (defaults to `state.editor.buffer.text`) and
+   `connectionId` (defaults to `state.selectedConnectionId`).
 2. Validate non-empty + connection-exists.
-3. Build a pending `QueryExecution` and `patch` it into
-   `state.history` + `state.queryExecution` + `state.selectedQueryExecutionId`.
-4. Fetch via TanStack Query, dispatching through `ConnectionsService.getRunner(id).execute(sql, options)`.
-5. On resolve: `replaceHistoryExecution` + update `state.queryExecution` if still selected.
-6. On reject: derive execution from error (or use the one carried on
-   `QueryExecutionError`), persist via `recordFailed` if not already
-   persisted, update state.
+3. Build a pending `QueryExecution` and patch it into
+   `state.recentHistory` (with window eviction),
+   `state.queryExecution`, and `state.selectedQueryExecutionId`.
+4. Dispatch through `ConnectionsService.getRunner(id).execute(sql, options)`.
+5. On resolve/reject: replace the pending slot in `state.recentHistory`
+   with the terminal record.
 
-`getById` and `listHistory` both return fully-loaded executions. There is
-no summary variant today. If hot-path memory pressure from large
-`result_data` becomes an issue, introduce a `QueryExecutionSummary` type
-plus a summary-read path at that point — not before.
+#### `listPage`
+
+Paginated storage read. Orders by `createdAt` DESC. `before` acts as a
+cursor: pass the oldest returned `createdAt` on the previous page. Each
+returned `QueryExecution` is fully hydrated (success arm carries rows).
+
+#### `search`
+
+Storage-backed fuzzy text search over query history, backed by a
+SQLite FTS5 virtual table (`query_executions_fts`, see §4.3). Indexed
+columns: `sql_source`, `connection_name_snapshot`,
+`saved_query_name_snapshot`, `database`, `schema`, `table`. Triggers on
+`query_executions` keep the FTS index in sync with inserts, updates, and
+`SET NULL` sweeps.
+
+Search input is passed to FTS5's match syntax (tokenized prefix by
+default). Results are ordered by FTS relevance (`rank`) and hydrated
+into full `QueryExecution` objects via the primary table, capped by
+`options.limit` (default 50).
+
+#### `getById`
+
+Loads a single execution with full data, regardless of whether it's in
+the recent window.
 
 ### 6.7 `SavedQueriesService`
 
@@ -1032,6 +1121,7 @@ export type SavedQueriesApi = {
   ): Promise<SavedQuery>;
   delete(id: SavedQueryId): Promise<void>;
   findLatestExecution(id: SavedQueryId): QueryExecution | undefined;
+  search(text: string, options?: { limit?: number }): Promise<SavedQuery[]>;
 };
 ```
 
@@ -1040,29 +1130,57 @@ Module-public: `loadInitial()`.
 Saved-query mutations emit `saved_query.created/updated/deleted` audit
 events in the same transaction as the row write.
 
+`search` is storage-backed fuzzy text search over `name` and `text`,
+backed by a SQLite FTS5 virtual table (`saved_queries_fts`, see §4.3).
+Triggers keep the index in sync with inserts, updates, and deletes. It
+is not limited to `state.savedQueries` — it queries the full table.
+Results are ordered by FTS relevance and returned as hydrated
+`SavedQuery[]`.
+
 ### 6.8 `AppStateService`
 
-Public api `AppStateApi`:
+App state is host-written opaque JSON that the engine persists and
+retrieves without interpreting. The types (`AppStateKey`, `AppStateRow`,
+`AppStateSnapshot`, `AppStateApi`) live in `api/AppStateApi.ts` — they
+are engine-provided storage with no domain semantics.
 
 ```ts
+// api/AppStateApi.ts
+export type AppStateKey = string  // plain string; host-defined at runtime
+
+export type AppStateRow<Value extends Json = Json> = {
+  app: string
+  id: AppStateKey
+  value: Value
+  createdAt: EpochMillis
+  updatedAt?: EpochMillis
+}
+
+export type AppStateSnapshot = Record<AppStateKey, Json>
+
 export type AppStateApi = {
-  get<Value extends Json = Json>(id: AppStateKey): Value | undefined;
-  getOrDefault<Value extends Json>(id: AppStateKey, fallback: Value): Value;
+  get<Value extends Json = Json>(id: AppStateKey): Value | undefined
+  getOrDefault<Value extends Json>(id: AppStateKey, fallback: Value): Value
   update<Value extends JsonObject>(
     id: AppStateKey,
     patch: Partial<Value>,
     fallback: Value,
-  ): Promise<Value>;
-  replace<Value extends Json>(id: AppStateKey, value: Value): Promise<Value>;
-};
+  ): Promise<Value>
+  replace<Value extends Json>(id: AppStateKey, value: Value): Promise<Value>
+}
 ```
 
 Module-public: `loadInitial()`.
 
-All reads and writes are scoped to the current session's `app`. The service
-never sees rows from other apps.
+Primary key is composite `(app, id)`. All reads and writes are scoped to
+the current session's `app`. The service never sees rows from other apps.
 
-Each write emits `app_state.changed` audit event in the same transaction.
+The engine itself reads no app state. Anything that looks like "restore
+UI state across sessions" — last-selected connection, last-opened saved
+query, editor pane sizes — is host policy and lives here.
+
+Each write emits an `app_state.changed` audit event in the same
+transaction.
 
 ### 6.9 `EditorService`
 
@@ -1169,13 +1287,8 @@ export type SqlVisor = {
 
   subscribe(listener: () => void): () => void;
   getState(): SqlVisorState;
-  dispose(): Promise<void>;
 };
 ```
-
-`dispose` cancels all outstanding queries, closes the storage client, ends
-the session (writes `sessions.ended_at` + emits `session.ended`), and
-releases in-memory state.
 
 ### 8.2 `*Api` types
 
@@ -1216,12 +1329,15 @@ import type { ConnectionsApi } from "#api/ConnectionsApi"
 export class ConnectionsService implements ConnectionsApi {
   async list(): Promise<Connection[]> { … }
   async add<P extends Protocol>(input: AddConnectionInput<P>): Promise<ConnectionOf<P>> { … }
-  async update<P extends Protocol>(id: ConnectionId, patch: UpdateConnectionInput<P>): Promise<Connection> { … }
+  async update<P extends Protocol>(
+    connection: ConnectionOf<P>,
+    patch: { name?: string; config?: Partial<ConfigFor<P>> },
+  ): Promise<ConnectionOf<P>> { … }
   async delete(id: ConnectionId): Promise<void> { … }
   select(id: ConnectionId | undefined): void { … }
   async refreshSuggestions(): Promise<DiscoveredConnectionSuggestion[]> { … }
   // module-public — not on ConnectionsApi
-  async getRunner(id: ConnectionId): Promise<QueryRunnerImpl<unknown>> { … }
+  async getRunner(id: ConnectionId): Promise<QueryRunnerImpl<Protocol>> { … }
   requireConnection(id: ConnectionId): Connection { … }
   async loadInitial(): Promise<void> { … }
   evictRunner(id: ConnectionId): void { … }
@@ -1313,7 +1429,11 @@ Responsibilities:
 5. Build the Drizzle instance against `storageSchema`.
 6. Run `pushSQLiteSchema(storageSchema, db)`; if the diff is destructive
    and `allowDestructiveMigration` is false, throw `StorageMigrationError`.
-7. Return the handle.
+7. Apply FTS5 virtual tables and their synchronization triggers via an
+   idempotent raw-SQL migration step (`CREATE VIRTUAL TABLE IF NOT EXISTS`
+   + `CREATE TRIGGER IF NOT EXISTS`). These sit outside Drizzle's schema
+   push because `drizzle-kit` does not model FTS5 virtual tables.
+8. Return the handle.
 
 Session creation does _not_ live here — that is the engine's
 `SessionsService.start()` job. `openLocalStorageDb` returns only storage.
@@ -1343,8 +1463,6 @@ Behavior:
 3. `SqlVisor.create({ db, app, adapters, queryClient, suggestionProviders, close })`.
 4. Return the engine.
 
-The engine's `dispose()` calls the storage `close` passed through
-composition.
 
 ### 9.4 Platform-specific surface
 
@@ -1454,23 +1572,30 @@ for `saved_query_id` and its `saved_query_name_snapshot`.
 
 `audit_events`:
 
-| Column               | Relationship                           |
-| -------------------- | -------------------------------------- |
-| `session_id`         | soft reference — indexed, no FK        |
-| `parent_audit_id`    | soft reference — self                  |
-| `connection_id`      | soft reference                         |
-| `saved_query_id`     | soft reference                         |
-| `query_execution_id` | soft reference                         |
+| Column               | Relationship                                  |
+| -------------------- | --------------------------------------------- |
+| `session_id`         | hard FK → `sessions.id` (RESTRICT)            |
+| `parent_audit_id`    | soft reference — self                         |
+| `connection_id`      | soft reference                                |
+| `saved_query_id`     | soft reference                                |
+| `query_execution_id` | soft reference                                |
 
-Audit events never carry a DB-level foreign key. This is intentional:
+Subject reference columns (connection/saved-query/query-execution) are
+unconstrained by the database. Dangling references are allowed and
+expected:
 
 1. Audit writes must never fail because a subject row was deleted in a
    concurrent transaction.
-2. The audit log is a historical record of what happened. A `connection.deleted`
-   event carries the `connection_id` of the row that was just deleted —
-   an FK would make that row impossible to insert.
-3. Dangling references preserve history: a `connection.created` event
-   from months ago still points at its (now-deleted) `connection_id`.
+2. The audit log is a historical record of what happened. A
+   `connection.deleted` event carries the `connection_id` of the row
+   that was just deleted — an FK would make that row impossible to
+   insert.
+3. Historical events preserve their subject id: a `connection.created`
+   event from months ago still points at its (now-deleted) `connection_id`.
+
+`session_id` is the exception: sessions are never deleted, so a dangling
+`session_id` on an audit event is corruption rather than expected state.
+The DB-level FK ensures it can't happen.
 
 Indexes on those columns support efficient filter queries without
 committing to referential enforcement.
@@ -1500,8 +1625,6 @@ have no outgoing FKs.
   before deleting.
 - `QueriesService.cancel(ref)` aborts the TanStack query for that
   execution; the runner's catch path writes a `cancelled` status row.
-- `SqlVisor.dispose` cancels every outstanding query across all runners,
-  ends the session, and closes storage.
 
 ### 11.5 State discipline
 
@@ -1556,15 +1679,18 @@ dependent types.
 
 ### 11.7 Result payloads
 
-- `query_executions.result_data` is always loaded on read. `getById` and
-  `listHistory` both hydrate `rows` on `SuccessQueryExecution`.
+- `query_executions.result_data` is always loaded on read. `getById`,
+  `listRecent`, `listPage`, and `search` all hydrate `rows` on
+  `SuccessQueryExecution`.
+- Memory is bounded by the access boundary, not by the data model:
+  `state.recentHistory` is capped at `recentHistoryLimit` (default 10);
+  `listPage` and `search` enforce per-call limits; `getById` is a single
+  row. The engine never loads the full `query_executions` table at once.
 - The engine never truncates, samples, or summarizes `result_data` on
   write. Payloads of several MB are acceptable.
-- `result_data` for non-`success` statuses is `NULL` in storage and omitted
-  from the domain type (the `rows` field is only present on
+- `result_data` for non-`success` statuses is `NULL` in storage and
+  omitted from the domain type (the `rows` field is only present on
   `SuccessQueryExecution<Row>`).
-- If memory pressure from large `result_data` becomes a real problem, add
-  a distinct `QueryExecutionSummary` type and a summary-read path then.
 
 ---
 
