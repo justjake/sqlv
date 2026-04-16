@@ -19,7 +19,12 @@ type Report = { message: string; fixOps: FixOp[] }
 
 function makeContext(filename: string, body: unknown[] = []) {
   const reports: Report[] = []
-  const sourceCode = { ast: { type: "Program", body: body as { type: string; [k: string]: unknown }[] } }
+  const sourceCode = {
+    ast: {
+      type: "Program" as const,
+      body: body as { type: string; [k: string]: unknown }[],
+    },
+  }
   const context = {
     filename,
     sourceCode,

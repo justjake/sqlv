@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 
 import {
-  ALLOWED,
+  ALLOWED_TYPE_ONLY,
+  ALLOWED_VALUE,
   LAYERS,
   isCompositionRoot,
   layerFromFilePath,
@@ -91,24 +92,38 @@ describe("isCompositionRoot", () => {
   })
 })
 
-describe("ALLOWED policy table", () => {
-  test("every known layer has an entry", () => {
+describe("ALLOWED policy tables", () => {
+  test("every known layer has a value-import entry", () => {
     for (const layer of LAYERS) {
-      expect(ALLOWED[layer]).toBeDefined()
+      expect(ALLOWED_VALUE[layer]).toBeDefined()
     }
   })
 
-  test("domain is pure — imports nothing", () => {
-    expect(ALLOWED.domain).toEqual([])
+  test("every known layer has a type-only-import entry", () => {
+    for (const layer of LAYERS) {
+      expect(ALLOWED_TYPE_ONLY[layer]).toBeDefined()
+    }
+  })
+
+  test("domain is pure for both value and type-only imports", () => {
+    expect(ALLOWED_VALUE.domain).toEqual([])
+    expect(ALLOWED_TYPE_ONLY.domain).toEqual([])
   })
 
   test("apps may only reach the public surface", () => {
-    expect(ALLOWED.apps).toEqual(["api", "domain"])
+    expect(ALLOWED_VALUE.apps).toEqual(["api", "domain"])
+    expect(ALLOWED_TYPE_ONLY.apps).toEqual(["api", "domain"])
   })
 
   test("adapters may not import engine, platforms, or apps", () => {
     for (const forbidden of ["engine", "platforms", "apps"] as const) {
-      expect(ALLOWED.adapters).not.toContain(forbidden)
+      expect(ALLOWED_VALUE.adapters).not.toContain(forbidden)
+      expect(ALLOWED_TYPE_ONLY.adapters).not.toContain(forbidden)
     }
+  })
+
+  test("engine may import api only via type-only imports", () => {
+    expect(ALLOWED_VALUE.engine).not.toContain("api")
+    expect(ALLOWED_TYPE_ONLY.engine).toContain("api")
   })
 })

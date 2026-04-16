@@ -21,7 +21,8 @@
 import * as path from "node:path"
 
 import {
-  ALLOWED,
+  ALLOWED_TYPE_ONLY,
+  ALLOWED_VALUE,
   isLayerBoundaryExempt,
   layerInfoFromFilePath,
   parseAliasSpecifier,
@@ -29,7 +30,15 @@ import {
 } from "../layers.ts"
 
 type Literal = { type: "Literal"; value: unknown; range?: [number, number] }
-type ImportLike = { type: string; source: Literal | null }
+type ImportKind = "type" | "value"
+type ImportSpecifier = { type: "ImportSpecifier"; importKind?: ImportKind }
+type ImportLike = {
+  type: string
+  source: Literal | null
+  importKind?: ImportKind
+  exportKind?: ImportKind
+  specifiers?: ImportSpecifier[]
+}
 
 type Fixer = {
   replaceText(node: unknown, text: string): unknown
@@ -103,6 +112,20 @@ function resolveAliasImport(specifier: string, source: FileLayerInfo): ResolvedT
   }
 }
 
+function isTypeOnlyImport(node: ImportLike): boolean {
+  if (node.type === "ImportDeclaration") {
+    if (node.importKind === "type") return true
+    const specifiers = node.specifiers ?? []
+    return specifiers.length > 0 && specifiers.every((specifier) => specifier.importKind === "type")
+  }
+
+  if (node.type === "ExportNamedDeclaration" || node.type === "ExportAllDeclaration") {
+    return node.exportKind === "type"
+  }
+
+  return false
+}
+
 function checkImportSource(
   context: LintContext,
   node: ImportLike,
@@ -124,6 +147,7 @@ function checkImportSource(
   if (!target || !target.layer) return
 
   const sameLayer = target.layer === source.layer
+  const allowed = isTypeOnlyImport(node) ? ALLOWED_TYPE_ONLY : ALLOWED_VALUE
 
   // Check if the import target file itself is a composition root (e.g. createBunSqlVisor.ts).
   // Composition roots are publicly importable from anywhere — skip the allowed-layer check.
@@ -145,7 +169,7 @@ function checkImportSource(
     // Even if forbidden, normalize to alias first so the violation is visible under a canonical form.
     const newSpec = target.aliasForm
     const forbidden =
-      !sourceIsExempt && !targetIsExempt && !ALLOWED[source.layer].includes(target.layer)
+      !sourceIsExempt && !targetIsExempt && !allowed[source.layer].includes(target.layer)
     const message = forbidden
       ? `layer '${source.layer}' may not import from layer '${target.layer}' (fix rewrites to '${newSpec}' but the dependency is still forbidden)`
       : `cross-layer import should use an alias: '${newSpec}'`
@@ -160,7 +184,7 @@ function checkImportSource(
   // --- Dependency dimension: flag forbidden cross-layer imports that don't need a rewrite.
   if (!sameLayer) {
     if (sourceIsExempt || targetIsExempt) return
-    if (ALLOWED[source.layer].includes(target.layer)) return
+    if (allowed[source.layer].includes(target.layer)) return
     context.report({
       node: src,
       message: `layer '${source.layer}' may not import from layer '${target.layer}' ('${specifier}')`,

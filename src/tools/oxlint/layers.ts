@@ -9,11 +9,22 @@
 export const LAYERS = ["domain", "spi", "engine", "platforms", "adapters", "api", "apps"] as const
 export type Layer = (typeof LAYERS)[number]
 
-/** For each layer, the other layers it is allowed to import from (besides itself). */
-export const ALLOWED: Record<Layer, readonly Layer[]> = {
+/** For each layer, the other layers it is allowed to import as values (besides itself). */
+export const ALLOWED_VALUE: Record<Layer, readonly Layer[]> = {
   domain: [],
   spi: ["domain"],
   engine: ["domain", "spi"],
+  platforms: ["domain", "spi", "engine"],
+  adapters: ["domain", "spi"],
+  api: ["domain", "spi", "engine"],
+  apps: ["api", "domain"],
+}
+
+/** For each layer, the other layers it is allowed to import via `import type` (besides itself). */
+export const ALLOWED_TYPE_ONLY: Record<Layer, readonly Layer[]> = {
+  domain: [],
+  spi: ["domain"],
+  engine: ["domain", "spi", "api"],
   platforms: ["domain", "spi", "engine"],
   adapters: ["domain", "spi"],
   api: ["domain", "spi", "engine"],

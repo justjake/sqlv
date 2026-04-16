@@ -14,6 +14,11 @@ type ReportArg = {
   fix?: (fixer: FixerLike) => unknown
 }
 
+type ImportShape = {
+  importKind?: "type" | "value"
+  specifierKinds?: Array<"type" | "value">
+}
+
 function makeContext(filename: string) {
   const reports: CapturedReport[] = []
   const context = {
@@ -30,17 +35,22 @@ function makeContext(filename: string) {
   return { context, reports }
 }
 
-function makeImport(specifier: string) {
+function makeImport(specifier: string, shape: ImportShape = {}) {
   return {
     type: "ImportDeclaration" as const,
     source: { type: "Literal" as const, value: specifier },
+    importKind: shape.importKind,
+    specifiers: (shape.specifierKinds ?? []).map((importKind) => ({
+      type: "ImportSpecifier" as const,
+      importKind,
+    })),
   }
 }
 
-function run(filename: string, specifier: string): CapturedReport[] {
+function run(filename: string, specifier: string, shape: ImportShape = {}): CapturedReport[] {
   const { context, reports } = makeContext(filename)
   const visitors = rule.create(context)
-  visitors.ImportDeclaration?.(makeImport(specifier))
+  visitors.ImportDeclaration?.(makeImport(specifier, shape))
   return reports
 }
 
@@ -82,6 +92,36 @@ describe("layer-boundaries", () => {
     test("allowed cross-layer alias passes silently", () => {
       const reports = run(`${ROOT}/src/engine/SqlVisor.ts`, "#domain/Connection")
       expect(reports).toEqual([])
+    })
+
+    test("engine may import api with import type", () => {
+      const reports = run(`${ROOT}/src/engine/SqlVisor.ts`, "#api/ConnectionsApi", {
+        importKind: "type",
+      })
+      expect(reports).toEqual([])
+    })
+
+    test("engine may import api when every imported specifier is type-only", () => {
+      const reports = run(`${ROOT}/src/engine/SqlVisor.ts`, "#api/ConnectionsApi", {
+        specifierKinds: ["type"],
+      })
+      expect(reports).toEqual([])
+    })
+
+    test("engine may not import api as a value", () => {
+      const reports = run(`${ROOT}/src/engine/SqlVisor.ts`, "#api/ConnectionsApi")
+      expect(reports).toHaveLength(1)
+      expect(reports[0]?.message).toContain("'engine' may not import from layer 'api'")
+      expect(reports[0]?.fixText).toBeNull()
+    })
+
+    test("domain still may not import api even with import type", () => {
+      const reports = run(`${ROOT}/src/domain/Connection.ts`, "#api/ConnectionsApi", {
+        importKind: "type",
+      })
+      expect(reports).toHaveLength(1)
+      expect(reports[0]?.message).toContain("'domain' may not import from layer 'api'")
+      expect(reports[0]?.fixText).toBeNull()
     })
 
     test("forbidden cross-layer alias reports error without fix", () => {
