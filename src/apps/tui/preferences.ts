@@ -1,4 +1,4 @@
-import type { SqlVisorState } from "../../api/SqlVisor"
+import type { SqlVisorState } from "#api/SqlVisor"
 import type { IconStyle } from "./ui/icons"
 
 export type TuiPreferences = {

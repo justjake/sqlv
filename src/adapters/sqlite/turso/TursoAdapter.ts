@@ -7,18 +7,18 @@ import {
   type ConnectionFormValues,
   type ConnectionSpec,
   type ConnectionSuggestion,
-} from "../../../spi/Adapter"
-import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "../../../spi/Executor"
+} from "#spi/Adapter"
+import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "#spi/Executor"
 import {
   defaultStorageLocation,
   getExistingLocalStorageEncryptionKey,
-} from "../../../platforms/bun/storage/createLocalStorage"
+} from "#platforms/bun/storage/createLocalStorage"
 import { findLocalSqliteDatabaseFiles, localDatabaseSuggestionName } from "../localDiscovery"
-import { aborter } from "../../../domain/defer"
-import type { ExplainInput, ExplainResult } from "../../../domain/Explain"
-import type { ObjectInfo } from "../../../domain/objects"
-import { ident, type SQL } from "../../../domain/SQL"
-import type { QueryRunner } from "../../../spi/QueryRunner"
+import { aborter } from "#domain/defer"
+import type { ExplainInput, ExplainResult } from "#domain/Explain"
+import type { ObjectInfo } from "#domain/objects"
+import { ident, type SQL } from "#domain/SQL"
+import type { QueryRunner } from "#spi/QueryRunner"
 import type { SqliteArg } from "../sqlite"
 import {
   createSqliteIndexOriginResolver,

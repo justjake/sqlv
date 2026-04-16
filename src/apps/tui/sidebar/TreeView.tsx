@@ -1,7 +1,7 @@
 import { TextAttributes, type BoxRenderable } from "@opentui/core"
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { focusPath, sameFocusPath } from "../../framework/focus/paths"
-import type { DiscoveredConnectionSuggestion } from "../../../api/SqlVisor"
+import type { DiscoveredConnectionSuggestion } from "#api/SqlVisor"
 import { Focusable, type FocusableProps } from "../focus/Focusable"
 import {
   useFocusedDescendantPath,

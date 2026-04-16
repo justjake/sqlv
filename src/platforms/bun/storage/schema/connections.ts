@@ -1,7 +1,7 @@
 import { index, sqliteTable, text } from "drizzle-orm/sqlite-core"
-import type { Json } from "../../../../domain/Json"
-import { OrderString, type OrderString as OrderStringType } from "../../../../domain/Order"
-import type { Protocol } from "../../../../spi/Adapter"
+import type { Json } from "#domain/Json"
+import { OrderString, type OrderString as OrderStringType } from "#domain/Order"
+import type { Protocol } from "#spi/Adapter"
 import { epochMillis, jsonText } from "./shared"
 
 export type ConnectionConfigData = Json

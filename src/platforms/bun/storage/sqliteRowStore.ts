@@ -1,5 +1,5 @@
-import { jsonb_patch, sqlite as sql } from "../../../adapters/sqlite/sqlite"
-import { EpochMillis } from "../../../domain/Log"
+import { jsonb_patch, sqlite as sql } from "#adapters/sqlite/sqlite"
+import { EpochMillis } from "#domain/Log"
 import {
   rowDispatcher,
   type BaseRow,
@@ -11,10 +11,10 @@ import {
   type RowQuery,
   type RowUpdate,
   type RowUpsert,
-} from "../../../domain/RowStore"
-import { Identifier, type SQL } from "../../../domain/SQL"
-import { unreachable } from "../../../domain/unreachable"
-import type { QueryRunner } from "../../../spi/QueryRunner"
+} from "#domain/RowStore"
+import { Identifier, type SQL } from "#domain/SQL"
+import { unreachable } from "#domain/unreachable"
+import type { QueryRunner } from "#spi/QueryRunner"
 
 export function createRowStoreTableSql(table: Identifier) {
   return sql`CREATE TABLE IF NOT EXISTS ${table} (

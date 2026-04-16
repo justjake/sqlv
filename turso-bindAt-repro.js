@@ -4,6 +4,6 @@ const stmt = db.prepare("select $1")
 
 await db.connect()
 
-debugger
+
 
 console.log(await stmt.bind(["wat"]).all())

@@ -75,9 +75,9 @@ describe("isCompositionRoot", () => {
     expect(isCompositionRoot("/abs/src/platforms/bun/createBunSqlVisor")).toBe(true)
   })
 
-  test("matches engine composition files", () => {
-    expect(isCompositionRoot("/abs/src/engine/composition/buildEngine.ts")).toBe(true)
-    expect(isCompositionRoot("/abs/src/engine/composition/nested/thing.ts")).toBe(true)
+  test("matches engine glue files", () => {
+    expect(isCompositionRoot("/abs/src/engine/glue/buildEngine.ts")).toBe(true)
+    expect(isCompositionRoot("/abs/src/engine/glue/nested/thing.ts")).toBe(true)
   })
 
   test("does not match other files under platforms/", () => {

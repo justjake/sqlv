@@ -1,7 +1,7 @@
-import type { Connection } from "../../domain/Connection"
-import type { SuggestionItem } from "../../domain/editor/completion"
-import type { QueryableObjectInfo } from "../../domain/objects"
-import type { SuggestionContext, SuggestionProvider, SuggestionRequest } from "../../spi/SuggestionProvider"
+import type { Connection } from "#domain/Connection"
+import type { SuggestionItem } from "#domain/editor/completion"
+import type { QueryableObjectInfo } from "#domain/objects"
+import type { SuggestionContext, SuggestionProvider, SuggestionRequest } from "#spi/SuggestionProvider"
 
 type RankedSuggestion = {
   item: SuggestionItem

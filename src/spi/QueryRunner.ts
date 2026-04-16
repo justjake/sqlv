@@ -1,6 +1,6 @@
-import type { Connection } from "../domain/Connection"
-import type { QueryExecution, QueryFlow, QueryInitiator } from "../domain/Log"
-import type { Paginated, PaginatedParams, SQL } from "../domain/SQL"
+import type { Connection } from "#domain/Connection"
+import type { QueryExecution, QueryFlow, QueryInitiator } from "#domain/Log"
+import type { Paginated, PaginatedParams, SQL } from "#domain/SQL"
 
 export type QueryRunOptions = {
   abortSignal?: AbortSignal

@@ -6,13 +6,13 @@ import {
   type ConnectionFormValues,
   type ConnectionSpec,
   type ConnectionSuggestion,
-} from "../../../spi/Adapter"
-import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "../../../spi/Executor"
+} from "#spi/Adapter"
+import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "#spi/Executor"
 import { findLocalSqliteDatabaseFiles, localDatabaseSuggestionName } from "../localDiscovery"
-import type { ExplainInput, ExplainResult } from "../../../domain/Explain"
-import type { ObjectInfo } from "../../../domain/objects"
-import { ident, type SQL } from "../../../domain/SQL"
-import type { QueryRunner } from "../../../spi/QueryRunner"
+import type { ExplainInput, ExplainResult } from "#domain/Explain"
+import type { ObjectInfo } from "#domain/objects"
+import { ident, type SQL } from "#domain/SQL"
+import type { QueryRunner } from "#spi/QueryRunner"
 import type { SqliteArg } from "../sqlite"
 import {
   createSqliteIndexOriginResolver,

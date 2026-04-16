@@ -5,20 +5,20 @@ import {
   type AppStateRow,
   type AppStateSnapshot,
   type AppStateStore,
-} from "../domain/AppState"
+} from "#domain/AppState"
 import {
   createEditorAnalysisSubject,
   idleEditorAnalysisState,
   type EditorAnalysisState,
   type EditorAnalysisSubject,
-} from "../domain/editor/analysis"
+} from "#domain/editor/analysis"
 import {
   applyEditorBufferPatch,
   clampCursorOffset,
   type EditorBuffer,
   type EditorBufferPatch,
   type EditorChange,
-} from "../domain/editor/buffer"
+} from "#domain/editor/buffer"
 import {
   closedEditorCompletionState,
   decideEditorCompletion,
@@ -29,20 +29,20 @@ import {
   type EditorCompletionScopeMode,
   type EditorCompletionState,
   type SuggestionItem,
-} from "../domain/editor/completion"
-import { createEmptyEditorState, type EditorState } from "../domain/editor/state"
-import { replaceTextRange, type EditorRange } from "../domain/editor/text"
-import { formatQueryText } from "../domain/formatQuery"
-import type { Json, JsonObject } from "../domain/Json"
-import { findLatestSavedQueryExecution } from "../domain/queryExecution"
-import type { Connection } from "../domain/Connection"
-import { createId } from "../domain/Id"
-import { EpochMillis, type LogEntry, type QueryExecution, type QueryFlow, type Session } from "../domain/Log"
-import type { ObjectInfo } from "../domain/objects"
-import { OrderString } from "../domain/Order"
-import { pendingQueryState, queryStateOrPending, type QueryState } from "../domain/QueryState"
-import type { RowStore } from "../domain/RowStore"
-import type { SavedQuery } from "../domain/SavedQuery"
+} from "#domain/editor/completion"
+import { createEmptyEditorState, type EditorState } from "#domain/editor/state"
+import { replaceTextRange, type EditorRange } from "#domain/editor/text"
+import { formatQueryText } from "#domain/formatQuery"
+import type { Json, JsonObject } from "#domain/Json"
+import { findLatestSavedQueryExecution } from "#domain/queryExecution"
+import type { Connection } from "#domain/Connection"
+import { createId } from "#domain/Id"
+import { EpochMillis, type LogEntry, type QueryExecution, type QueryFlow, type Session } from "#domain/Log"
+import type { ObjectInfo } from "#domain/objects"
+import { OrderString } from "#domain/Order"
+import { pendingQueryState, queryStateOrPending, type QueryState } from "#domain/QueryState"
+import type { RowStore } from "#domain/RowStore"
+import type { SavedQuery } from "#domain/SavedQuery"
 import {
   defaultSettingsState,
   type AnySettingsRow,
@@ -51,12 +51,12 @@ import {
   type SettingsRow,
   type SettingsSchema,
   type SettingsState,
-} from "../domain/Settings"
-import { unsafeRawSQL } from "../domain/SQL"
+} from "#domain/Settings"
+import { unsafeRawSQL } from "#domain/SQL"
 import { QueryExecutionError, QueryRunnerImpl } from "./runtime/QueryRunnerImpl"
 import { KnownObjectsSuggestionProvider } from "./suggestions/KnownObjectsSuggestionProvider"
-import { AdapterRegistry, type Protocol, type ProtocolConfig } from "../spi/Adapter"
-import type { SuggestionProvider, SuggestionRequest } from "../spi/SuggestionProvider"
+import { AdapterRegistry, type Protocol, type ProtocolConfig } from "#spi/Adapter"
+import type { SuggestionProvider, SuggestionRequest } from "#spi/SuggestionProvider"
 
 export type {
   EditorAnalysisState,

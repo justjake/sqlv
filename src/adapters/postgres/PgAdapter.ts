@@ -5,10 +5,10 @@ import {
   type ConnectionFormValues,
   type ConnectionSpec,
   type ConnectionSuggestion,
-} from "../../spi/Adapter"
-import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "../../spi/Executor"
+} from "#spi/Adapter"
+import { type ExecuteRequest, type ExecuteSuccess, type Executor } from "#spi/Executor"
 import { findLocalPostgresPorts, probePostgresPort } from "./localDiscovery"
-import { aborter } from "../../domain/defer"
+import { aborter } from "#domain/defer"
 import type {
   DatabaseInfo,
   MaterializedViewInfo,
@@ -17,10 +17,10 @@ import type {
   SchemaInfo,
   TableInfo,
   ViewInfo,
-} from "../../domain/objects"
-import { SQL, sql, unsafeRawSQL, type SQLValue } from "../../domain/SQL"
-import type { ExplainInput, ExplainResult } from "../../domain/Explain"
-import type { QueryRunner } from "../../spi/QueryRunner"
+} from "#domain/objects"
+import { SQL, sql, unsafeRawSQL, type SQLValue } from "#domain/SQL"
+import type { ExplainInput, ExplainResult } from "#domain/Explain"
+import type { QueryRunner } from "#spi/QueryRunner"
 
 export type PostgresArg = string | number | boolean | bigint | Uint8Array | Date | null
 export type PostgresSQL<Row> = SQL<Row>

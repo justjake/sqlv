@@ -4,6 +4,15 @@ This document describes the **canonical module architecture** for `sqlv`.
 
 The repo now mostly matches this layout. When code and this document disagree, treat this file as the intended direction and clean the code toward it rather than preserving the drift.
 
+## Policy vs Mechanism
+
+A core design rule in this repo is to keep **policy** separate from **mechanism**.
+
+- **Policy** decides what the system should do: workflows, defaults, sequencing, selection, and user-facing behavior.
+- **Mechanism** defines how those decisions are carried out: storage backends, transport, database drivers, rendering bindings, and other implementation details.
+
+Following the Unix design tradition described in *The Art of Unix Programming*, we prefer simple, generic mechanisms and put product-specific choices in policy layers above them. Lower layers should provide capabilities, not make surprising decisions on behalf of higher layers.
+
 ## Goals
 
 - Keep the `SqlVisor` engine usable by multiple hosts, not just the TUI.
@@ -16,13 +25,17 @@ The repo now mostly matches this layout. When code and this document disagree, t
 
 ```text
 src/
-  api/
-  domain/
-  spi/
-  engine/
-  platforms/
-  adapters/
+  api/        - policy facade
+  domain/     - semantics
+  spi/        - contracts
+  engine/     - policy
+  platforms/  - mechanism
+  adapters/   - mechanism
   apps/
+    framework/      - mechanism
+    */framework/    - mechanism
+    */features/     - host policy
+    */app/          - host policy
 ```
 
 ## Module Responsibilities
@@ -196,7 +209,7 @@ src/
       SettingsService.ts
       SuggestionService.ts
       AnalysisService.ts
-    composition/
+    glue/
       buildEngine.ts
 
   platforms/
@@ -251,6 +264,13 @@ src/
 
 ## Dependency Rules
 
+Enforced by the `sqlv/layer-boundaries` oxlint rule. The allowed flow below is
+mirrored by the `ALLOWED` table in
+[`src/tools/oxlint/layers.ts`](./src/tools/oxlint/layers.ts); keep them in sync.
+Run `bun run lint:fix` to autofix same-layer/cross-layer specifier direction;
+`bun run lint` to see remaining violations. See
+[`src/tools/oxlint/README.md`](./src/tools/oxlint/README.md) for full details.
+
 Allowed dependency flow:
 
 ```text
@@ -261,7 +281,7 @@ spi -> domain
 engine/deps -> domain + spi
 engine/workspace -> domain
 engine/services -> domain + spi + engine/deps
-engine/composition -> engine/* + domain + spi
+engine/glue -> engine/* + domain + spi
 
 platforms/* -> domain + spi + engine/deps + external libs
 
@@ -293,7 +313,7 @@ There should be a small number of places where concrete implementations are inst
 
 Examples:
 
-- `engine/composition/buildEngine.ts`
+- `engine/glue/buildEngine.ts`
 - `platforms/bun/createBunSqlVisor.ts`
 - `platforms/browser/createBrowserSqlVisor.ts`
 - app bootstrap files

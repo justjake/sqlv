@@ -1,4 +1,4 @@
-import type { Protocol } from "../spi/Adapter"
+import type { Protocol } from "#spi/Adapter"
 import type { EpochMillis } from "./Log"
 import type { OrderString } from "./Order"
 

@@ -1,1 +1,1 @@
-export { AdapterRegistry } from "../spi/Adapter"
+export { AdapterRegistry } from "#spi/Adapter"

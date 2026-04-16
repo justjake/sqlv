@@ -1,9 +1,9 @@
-import type { Executor } from "../../spi/Executor"
-import type { QueryFlowInput, QueryRunOptions, QueryRunner } from "../../spi/QueryRunner"
-import type { Connection } from "../../domain/Connection"
-import { aborter } from "../../domain/defer"
-import { preserveErrorStack } from "../../domain/errors"
-import { createId } from "../../domain/Id"
+import type { Executor } from "#spi/Executor"
+import type { QueryFlowInput, QueryRunOptions, QueryRunner } from "#spi/QueryRunner"
+import type { Connection } from "#domain/Connection"
+import { aborter } from "#domain/defer"
+import { preserveErrorStack } from "#domain/errors"
+import { createId } from "#domain/Id"
 import {
   EpochMillis,
   type FlowEntry,
@@ -11,10 +11,10 @@ import {
   type QueryExecution,
   type QueryFlow,
   type Session,
-} from "../../domain/Log"
-import { Result } from "../../domain/Result"
-import { RowHandle } from "../../domain/RowStore"
-import type { Paginated, SQL } from "../../domain/SQL"
+} from "#domain/Log"
+import { Result } from "#domain/Result"
+import { RowHandle } from "#domain/RowStore"
+import type { Paginated, SQL } from "#domain/SQL"
 
 export class QueryExecutionError<Row = object> extends Error {
   constructor(

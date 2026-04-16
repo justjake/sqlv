@@ -1,6 +1,6 @@
 import { index, sqliteTable, text } from "drizzle-orm/sqlite-core"
-import type { Json } from "../../../../domain/Json"
-import type { QueryInitiator } from "../../../../domain/Log"
+import type { Json } from "#domain/Json"
+import type { QueryInitiator } from "#domain/Log"
 import { epochMillis, jsonText } from "./shared"
 
 export type AuditEventPayload = Record<string, Json>

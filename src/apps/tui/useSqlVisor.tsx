@@ -1,5 +1,5 @@
 import { createContext, useContext, useSyncExternalStore, type ReactNode } from "react"
-import { type SqlVisor, type SqlVisorState } from "../../api/SqlVisor"
+import { type SqlVisor, type SqlVisorState } from "#api/SqlVisor"
 
 const SqlVisorContext = createContext<SqlVisor | undefined>(undefined)
 SqlVisorContext.displayName = "SqlVisorContext"

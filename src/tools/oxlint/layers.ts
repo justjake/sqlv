@@ -44,8 +44,8 @@ export const COMPOSITION_ROOTS: readonly CompositionRootSpec[] = [
   },
   {
     layer: "engine",
-    subpathGlob: "composition/**",
-    description: "Engine composition assemblers (e.g. engine/composition/buildEngine.ts)",
+    subpathGlob: "glue/**",
+    description: "Engine composition assemblers (e.g. engine/glue/buildEngine.ts)",
   },
 ]
 

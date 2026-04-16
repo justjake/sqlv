@@ -83,6 +83,9 @@ If you notice stale abstractions, duplicate representations, or unused compatibi
 - Do not use `index.ts` or other barrel modules without duress.
 - Prefer direct file imports for internal code.
 - Keep barrel files only when they are serving a real boundary such as the package public API.
+- Layer dependency rules are declared in [`MODULES.md`](./MODULES.md) and enforced by the `sqlv/layer-boundaries` oxlint rule (source in [`src/tools/oxlint/`](./src/tools/oxlint/README.md)).
+  - Same-layer imports use relative paths (`./sibling`); cross-layer imports use aliases (`#domain/Foo`, `#engine/Bar`, …). `bun run lint:fix` autofixes the direction of both.
+  - If the autofix rewrites a relative import to `#platforms/...` from inside `adapters/`, that's a layer violation to resolve, not a specifier style to argue with.
 
 ### Focus Path Discipline
 

@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react"
-import type { ConnectionSuggestionsState, DiscoveredConnectionSuggestion } from "../../../api/SqlVisor"
+import type { ConnectionSuggestionsState, DiscoveredConnectionSuggestion } from "#api/SqlVisor"
 import { Focusable } from "../focus/Focusable"
 import { getTuiPreferences } from "../preferences"
 import { Shortcut } from "../Shortcut"

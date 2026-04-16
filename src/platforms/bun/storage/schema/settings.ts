@@ -1,5 +1,5 @@
 import { index, sqliteTable, text } from "drizzle-orm/sqlite-core"
-import type { SettingsId, SettingsSchema } from "../../../../domain/Settings"
+import type { SettingsId, SettingsSchema } from "#domain/Settings"
 import { epochMillis, jsonText } from "./shared"
 
 type StoredSettings = SettingsSchema[SettingsId]

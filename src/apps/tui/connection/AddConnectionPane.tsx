@@ -1,7 +1,7 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { focusPath, isAncestorFocusPath } from "../../framework/focus/paths"
-import type { DiscoveredConnectionSuggestion } from "../../../api/SqlVisor"
+import type { DiscoveredConnectionSuggestion } from "#api/SqlVisor"
 import type {
   AnyAdapter,
   ConnectionField,
@@ -9,7 +9,7 @@ import type {
   ConnectionSpec,
   ConnectionSpecDraft,
   Protocol,
-} from "../../../spi/Adapter"
+} from "#spi/Adapter"
 import { Focusable } from "../focus/Focusable"
 import { useFocusedDescendantPath, useFocusTree, useRememberedDescendantPath } from "../focus/context"
 import { useOpaqueIdMap } from "../focus/opaqueIds"

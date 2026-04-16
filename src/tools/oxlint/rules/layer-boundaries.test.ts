@@ -6,14 +6,21 @@ type CapturedReport = {
   fixText: string | null
 }
 
+type FixerLike = { replaceText(node: unknown, text: string): unknown }
+type ReportArg = {
+  node: unknown
+  message: string
+  fix?: (fixer: FixerLike) => unknown
+}
+
 function makeContext(filename: string) {
   const reports: CapturedReport[] = []
   const context = {
     filename,
-    report({ message, fix }: { message: string; fix?: (fixer: unknown) => unknown }) {
+    report({ message, fix }: ReportArg) {
       let fixText: string | null = null
       if (fix) {
-        const fixer = { replaceText: (_node: unknown, text: string) => text }
+        const fixer: FixerLike = { replaceText: (_node, text) => text }
         fixText = fix(fixer) as string
       }
       reports.push({ message, fixText })
