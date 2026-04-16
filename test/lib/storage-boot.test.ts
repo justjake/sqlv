@@ -5,8 +5,8 @@ import {
   bootLocalStorage,
   defaultStoragePath,
   getOrCreateLocalStorageEncryptionKey,
-} from "../../src/lib/storage/boot"
-import { sessions } from "../../src/lib/storage/schema/sessions"
+} from "../../src/platforms/bun/storage/boot"
+import { sessions } from "../../src/platforms/bun/storage/schema/sessions"
 import { createTempDir, removePath } from "../support"
 
 async function listTableNames(db: Awaited<ReturnType<typeof bootLocalStorage>>["db"]): Promise<string[]> {
@@ -110,7 +110,7 @@ describe("storage boot", () => {
     process.env.XDG_DATA_HOME = "/tmp/sqlv-storage"
 
     try {
-      expect(defaultStoragePath()).toBe("/tmp/sqlv-storage/sqlv/sqlv-storage.db")
+      expect(defaultStoragePath()).toBe("/tmp/sqlv-storage/sqlv/sqlv.db")
 
       const values = new Map<string, string>()
       const secrets = {

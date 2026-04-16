@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import type { ReactElement } from "react"
-import { ConfirmModal } from "../../src/tui/ui/ConfirmModal"
-import { ResolvableProvider, useResolvable, type ResolvableResolver } from "../../src/tui/ui/resolvable"
-import { Text } from "../../src/tui/ui/Text"
+import { ConfirmModal } from "../../src/apps/tui/ui/ConfirmModal"
+import { ResolvableProvider, useResolvable, type ResolvableResolver } from "../../src/apps/tui/ui/resolvable"
+import { Text } from "../../src/apps/tui/ui/Text"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()
@@ -17,7 +17,7 @@ describe("useResolvable", () => {
     }
 
     const ui = await render(<Harness />)
-    const element = <Text>After</Text> as unknown as ReactElement
+    const element = (<Text>After</Text>) as unknown as ReactElement
     const resolvable = resolver!
 
     expect(ui.captureCharFrame()).toContain("Body")

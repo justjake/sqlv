@@ -22,7 +22,7 @@ type GrammarSource = {
 const scriptPath = fileURLToPath(import.meta.url)
 const scriptDir = path.dirname(scriptPath)
 const projectRoot = path.resolve(scriptDir, "..")
-const treeSitterRoot = path.join(projectRoot, "src", "tui", "tree-sitter")
+const treeSitterRoot = path.join(projectRoot, "src", "apps", "tui", "tree-sitter")
 const assetsRoot = path.join(treeSitterRoot, "assets")
 const parserModulePath = path.join(treeSitterRoot, "parsers.ts")
 
@@ -46,8 +46,8 @@ const grammarSources = [
 function printUsage() {
   console.log(`Usage: bun scripts/fetch-treesitter-grammars.ts
 
-Fetches vendored tree-sitter grammar assets into src/tui/tree-sitter/assets
-and regenerates src/tui/tree-sitter/parsers.ts.
+Fetches vendored tree-sitter grammar assets into src/apps/tui/tree-sitter/assets
+and regenerates src/apps/tui/tree-sitter/parsers.ts.
 
 The script prefers a prebuilt wasm from the fetched archive. If the archive does
 not contain one, it falls back to building the wasm locally with
@@ -147,7 +147,10 @@ async function findProjectRoot(extractedRoot: string): Promise<string | undefine
   return configPath ? path.dirname(configPath) : undefined
 }
 
-async function ensureWasmFile(source: GrammarSource, extractedRoot: string): Promise<{ builtLocally: boolean; path: string }> {
+async function ensureWasmFile(
+  source: GrammarSource,
+  extractedRoot: string,
+): Promise<{ builtLocally: boolean; path: string }> {
   const prebuiltWasmPath = await findSingleFile(extractedRoot, source.archiveMatchers.wasm, `${source.id} wasm`)
   if (prebuiltWasmPath) {
     return {
@@ -186,7 +189,11 @@ async function fetchGrammar(source: GrammarSource, workingDir: string): Promise<
   run("tar", ["-xzf", archivePath, "-C", workingDir])
 
   const extractedRoot = path.join(workingDir, archiveRoot)
-  const highlightPath = await findSingleFile(extractedRoot, source.archiveMatchers.highlights, `${source.id} highlights`)
+  const highlightPath = await findSingleFile(
+    extractedRoot,
+    source.archiveMatchers.highlights,
+    `${source.id} highlights`,
+  )
   if (!highlightPath) {
     throw new Error(`Could not find highlights query for ${source.id}`)
   }

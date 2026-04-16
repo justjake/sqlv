@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 
 const REPO_ROOT = join(import.meta.dir, "../..")
-const TUI_DIR = join(REPO_ROOT, "src/tui")
+const TUI_DIR = join(REPO_ROOT, "src/apps/tui")
 const TEXT_WRAPPER_FILE = join(TUI_DIR, "ui/Text.tsx")
 const RAW_TEXT_ELEMENT_PATTERN = /<\/?text(?=[\s>])/
 

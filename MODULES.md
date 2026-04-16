@@ -1,8 +1,8 @@
 # Modules
 
-This document describes the **target module architecture** for `sqlv`.
+This document describes the **canonical module architecture** for `sqlv`.
 
-It is intentionally forward-looking. The current repo does not match this layout yet.
+The repo now mostly matches this layout. When code and this document disagree, treat this file as the intended direction and clean the code toward it rather than preserving the drift.
 
 ## Goals
 
@@ -72,6 +72,7 @@ Private platform-neutral orchestration and state.
 Examples:
 
 - workspace snapshot/store
+- app state and workspace selection persistence boundaries
 - query service
 - catalog service
 - connection service

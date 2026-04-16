@@ -1,5 +1,5 @@
-import { ConfirmModal } from "../../src/tui/ui/ConfirmModal"
-import { usePresentModal } from "../../src/tui/ui/presentModal"
+import { ConfirmModal } from "../../src/apps/tui/ui/ConfirmModal"
+import { usePresentModal } from "../../src/apps/tui/ui/presentModal"
 
 declare const presentModal: ReturnType<typeof usePresentModal>
 

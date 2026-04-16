@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { BunSqlAdapter } from "../../src/lib/adapters/BunSqlAdapter"
-import { createSession } from "../../src/lib/createLocalPersistence"
-import { createNoopLogStore } from "../../src/lib/createNoopLogStore"
-import { QueryRunnerImpl } from "../../src/lib/QueryRunnerImpl"
-import { unsafeRawSQL } from "../../src/lib/types/SQL"
+import { BunSqlAdapter } from "../../src/adapters/sqlite/bun/BunSqliteAdapter"
+import { createSession } from "../../src/platforms/bun/storage/createLocalStorage"
+import { createNoopLogStore } from "../../src/engine/runtime/createNoopLogStore"
+import { QueryRunnerImpl } from "../../src/engine/runtime/QueryRunnerImpl"
+import { unsafeRawSQL } from "../../src/model/SQL"
 import { loadSqliteExampleErrorCases } from "../sqlite/exampleErrors"
 import { makeConnection } from "../support"
 
@@ -18,7 +18,12 @@ describe("sqlite example error fixtures", () => {
         protocol: "bunsqlite",
       })
       const executor = await adapter.connect(connection.config)
-      const db = new QueryRunnerImpl(createSession(`fixture:${exampleCase.id}`), connection, executor, createNoopLogStore())
+      const db = new QueryRunnerImpl(
+        createSession(`fixture:${exampleCase.id}`),
+        connection,
+        executor,
+        createNoopLogStore(),
+      )
 
       await db.query(unsafeRawSQL("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"))
 

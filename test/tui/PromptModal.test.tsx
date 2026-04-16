@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { PromptModal } from "../../src/tui/ui/PromptModal"
-import { Text } from "../../src/tui/ui/Text"
+import { PromptModal } from "../../src/apps/tui/ui/PromptModal"
+import { Text } from "../../src/apps/tui/ui/Text"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { render, settleDeferredRender } = createTuiRenderHarness()
@@ -8,11 +8,7 @@ const { render, settleDeferredRender } = createTuiRenderHarness()
 describe("PromptModal", () => {
   test("auto-sizes its frame without borders while staying vertically centered inside the three-cell screen inset", async () => {
     const ui = await render(
-      <PromptModal
-        focusableId="prompt-modal"
-        footer={<Text>Footer</Text>}
-        title="Title"
-      >
+      <PromptModal focusableId="prompt-modal" footer={<Text>Footer</Text>} title="Title">
         Hi
       </PromptModal>,
       {

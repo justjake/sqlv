@@ -1,8 +1,8 @@
 import { RGBA, TextAttributes, type CapturedFrame, type CapturedLine } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
 import { useEffect } from "react"
-import { FocusChrome, Focusable, useFocusTree } from "../../src/tui/focus"
-import { labelizeShortcutInput } from "../../src/tui/ui/keybind"
+import { FocusChrome, Focusable, useFocusTree } from "../../src/apps/tui/focus"
+import { labelizeShortcutInput } from "../../src/apps/tui/ui/keybind"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()
@@ -41,9 +41,11 @@ describe("FocusNavigationHint", () => {
     const gray = RGBA.fromHex("#a7a7a7")
     const focusShortcutLabel = labelizeShortcutInput({ or: ["return", "space"] })
     const hasBoldWhiteHeading = hintLine.spans.some(
-      (span) => span.fg.equals(white) && ((span.attributes & TextAttributes.BOLD) === TextAttributes.BOLD),
+      (span) => span.fg.equals(white) && (span.attributes & TextAttributes.BOLD) === TextAttributes.BOLD,
     )
-    const hasHaloOutsideHint = hintLine.spans.some((span) => span.text.trim() === "" && span.bg.a > 0 && span.bg.a < 0.5)
+    const hasHaloOutsideHint = hintLine.spans.some(
+      (span) => span.text.trim() === "" && span.bg.a > 0 && span.bg.a < 0.5,
+    )
     const hasOpaqueHeadingBackground = hintLine.spans.some((span) => span.text === "focus nav" && span.bg.a > 0.99)
     const grayFocusActions = hintLine.spans.filter((span) => span.text === "focus" && span.fg.equals(gray))
     const hasGrayMoveLabel = hintLine.spans.some((span) => span.text.includes("move") && span.fg.equals(gray))
@@ -65,7 +67,12 @@ describe("FocusNavigationHint", () => {
 })
 
 function findHintLine(frame: CapturedFrame): CapturedLine {
-  const line = frame.lines.find((candidate) => candidate.spans.map((span) => span.text).join("").includes("focus nav"))
+  const line = frame.lines.find((candidate) =>
+    candidate.spans
+      .map((span) => span.text)
+      .join("")
+      .includes("focus nav"),
+  )
 
   if (!line) {
     throw new Error("Expected a line containing the focus navigation hint")

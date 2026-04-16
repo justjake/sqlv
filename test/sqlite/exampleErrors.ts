@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { dirname, extname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import type { EditorRange } from "../../src/lib/editor/text"
+import type { EditorRange } from "../../src/model/editor/text"
 
 export type SqliteExampleErrorCase = {
   id: string
@@ -20,10 +20,7 @@ export function loadSqliteExampleErrorCases(): SqliteExampleErrorCase[] {
 }
 
 export function loadSqliteExampleErrorCase(id: string): SqliteExampleErrorCase {
-  return parseSqliteExampleErrorCase(
-    id,
-    readFileSync(join(EXAMPLE_ERRORS_DIR, `${id}.sql`), "utf8"),
-  )
+  return parseSqliteExampleErrorCase(id, readFileSync(join(EXAMPLE_ERRORS_DIR, `${id}.sql`), "utf8"))
 }
 
 function parseSqliteExampleErrorCase(id: string, source: string): SqliteExampleErrorCase {

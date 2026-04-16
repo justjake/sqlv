@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { useState } from "react"
-import { clampHistoryIndex, QueryHistory } from "../../../src/tui/editor/QueryHistory"
+import { clampHistoryIndex, QueryHistory } from "../../../src/apps/tui/editor/QueryHistory"
 import { makeConnection, makeQueryExecution, makeSavedQuery } from "../../support"
 import { createTuiRenderHarness } from "../testUtils"
 
@@ -96,7 +96,8 @@ describe("QueryHistory", () => {
         onToggleShowSystemQueries={() => undefined}
         onBack={() => undefined}
         onRestore={(entry) =>
-          restored.push(entry.kind === "saved" ? `saved:${entry.savedQuery.id}` : `history:${entry.entry.id}`)}
+          restored.push(entry.kind === "saved" ? `saved:${entry.savedQuery.id}` : `history:${entry.entry.id}`)
+        }
       />,
       { height: 14, width: 80 },
     )

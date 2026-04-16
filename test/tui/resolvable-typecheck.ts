@@ -1,5 +1,5 @@
-import { ConfirmModal } from "../../src/tui/ui/ConfirmModal"
-import type { InferResolvableComponentResult } from "../../src/tui/ui/resolvable"
+import { ConfirmModal } from "../../src/apps/tui/ui/ConfirmModal"
+import type { InferResolvableComponentResult } from "../../src/apps/tui/ui/resolvable"
 
 const confirmModalResult: InferResolvableComponentResult<typeof ConfirmModal> = true
 

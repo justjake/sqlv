@@ -1,6 +1,6 @@
 import { RGBA } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
-import { ConfirmModal } from "../../src/tui/ui/ConfirmModal"
+import { ConfirmModal } from "../../src/apps/tui/ui/ConfirmModal"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()
@@ -37,13 +37,11 @@ describe("ConfirmModal", () => {
 
     await settleDeferredRender(ui)
 
-    const footerLines = ui.captureSpans().lines.filter((line) =>
-      line.spans.some((span) => span.bg.equals(RGBA.fromHex("#639ee4"))),
-    )
+    const footerLines = ui
+      .captureSpans()
+      .lines.filter((line) => line.spans.some((span) => span.bg.equals(RGBA.fromHex("#639ee4"))))
     const focusBackgroundWidths = footerLines.map((line) =>
-      line.spans
-        .filter((span) => span.bg.equals(RGBA.fromHex("#639ee4")))
-        .reduce((sum, span) => sum + span.width, 0),
+      line.spans.filter((span) => span.bg.equals(RGBA.fromHex("#639ee4"))).reduce((sum, span) => sum + span.width, 0),
     )
 
     expect(footerLines).toHaveLength(3)

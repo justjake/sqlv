@@ -3,8 +3,8 @@ import {
   closedEditorCompletionState,
   decideEditorCompletion,
   detectIdentifierCompletion,
-} from "../../../src/lib/editor/completion"
-import { createEditorBuffer, createEditorChange } from "../../../src/lib/editor/buffer"
+} from "../../../src/model/editor/completion"
+import { createEditorBuffer, createEditorChange } from "../../../src/model/editor/buffer"
 
 describe("editorCompletion", () => {
   test("detects object-name identifier completions without opening for aliases", () => {

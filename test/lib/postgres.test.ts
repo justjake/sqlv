@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { parseIntoClientConfig } from "pg-connection-string"
-import type { Protocol } from "../../src/lib/interface/Adapter"
+import type { Protocol } from "../../src/spi/Adapter"
 import {
   PostgresAdapter,
   postgres,
   postgresqlProtocolResolver,
   resolvePostgresConfig,
-} from "../../src/lib/adapters/postgres"
+} from "../../src/adapters/postgres/PgAdapter"
 
 const RoundTripDSNs = [
   "postgresql://alice:s3cret@db.example.com:5432/app",

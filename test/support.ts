@@ -1,21 +1,17 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { BunSqlAdapter, type BunSqlConfig } from "../src/lib/adapters/BunSqlAdapter"
-import { PostgresAdapter } from "../src/lib/adapters/postgres"
-import { TursoAdapter } from "../src/lib/adapters/TursoAdapter"
-import { createSession } from "../src/lib/createLocalPersistence"
-import { createNoopLogStore } from "../src/lib/createNoopLogStore"
+import { BunSqlAdapter, type BunSqlConfig } from "../src/adapters/sqlite/bun/BunSqliteAdapter"
+import { PostgresAdapter } from "../src/adapters/postgres/PgAdapter"
+import { TursoAdapter } from "../src/adapters/sqlite/turso/TursoAdapter"
+import { createSession } from "../src/platforms/bun/storage/createLocalStorage"
+import { createNoopLogStore } from "../src/engine/runtime/createNoopLogStore"
 import {
   createEditorAnalysisSubject,
   idleEditorAnalysisState,
   type EditorAnalysisState,
-} from "../src/lib/editor/analysis"
-import {
-  applyEditorBufferPatch,
-  type EditorBufferPatch,
-  type EditorChange,
-} from "../src/lib/editor/buffer"
+} from "../src/model/editor/analysis"
+import { applyEditorBufferPatch, type EditorBufferPatch, type EditorChange } from "../src/model/editor/buffer"
 import {
   closedEditorCompletionState,
   decideEditorCompletion,
@@ -23,12 +19,12 @@ import {
   type EditorCompletionItemFocusInput,
   type EditorCompletionItemRef,
   type EditorCompletionState,
-} from "../src/lib/editor/completion"
-import { createEmptyEditorState, type EditorState } from "../src/lib/editor/state"
-import { replaceTextRange } from "../src/lib/editor/text"
-import { AdapterRegistry, type Protocol } from "../src/lib/interface/Adapter"
-import { findLatestSavedQueryExecution } from "../src/lib/queryExecution"
-import { QueryRunnerImpl } from "../src/lib/QueryRunnerImpl"
+} from "../src/model/editor/completion"
+import { createEmptyEditorState, type EditorState } from "../src/model/editor/state"
+import { replaceTextRange } from "../src/model/editor/text"
+import { AdapterRegistry, type Protocol } from "../src/spi/Adapter"
+import { findLatestSavedQueryExecution } from "../src/model/queryExecution"
+import { QueryRunnerImpl } from "../src/engine/runtime/QueryRunnerImpl"
 import {
   type AddConnectionInput,
   type QueryRef,
@@ -38,21 +34,23 @@ import {
   type SaveSavedQueryChangesInput,
   type SqlVisor,
   type SqlVisorState,
-} from "../src/lib/SqlVisor"
-import type { ExplainResult } from "../src/lib/types/Explain"
-import type { Connection } from "../src/lib/types/Connection"
-import { EpochMillis, type QueryExecution, type QueryInitiator } from "../src/lib/types/Log"
-import type { ObjectInfo } from "../src/lib/types/objects"
-import { OrderString } from "../src/lib/types/Order"
-import { pendingQueryState, type QueryState } from "../src/lib/types/QueryState"
-import type { SavedQuery } from "../src/lib/types/SavedQuery"
+} from "../src/api/SqlVisor"
+import { defaultAppState, type AppStateRow, type AppStateSnapshot } from "../src/model/AppState"
+import type { ExplainResult } from "../src/model/Explain"
+import type { JsonObject } from "../src/model/Json"
+import type { Connection } from "../src/model/Connection"
+import { EpochMillis, type QueryExecution, type QueryInitiator } from "../src/model/Log"
+import type { ObjectInfo } from "../src/model/objects"
+import { OrderString } from "../src/model/Order"
+import { pendingQueryState, type QueryState } from "../src/model/QueryState"
+import type { SavedQuery } from "../src/model/SavedQuery"
 import {
   defaultSettingsState,
   type SettingsId,
   type SettingsRow,
   type SettingsSchema,
   type SettingsState,
-} from "../src/lib/types/Settings"
+} from "../src/model/Settings"
 
 export async function createTempDir(prefix = "sqlv-test-"): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix))
@@ -181,14 +179,32 @@ export function makeSettingsRow<Id extends SettingsId>(
   }
 }
 
+export function makeAppStateRow(
+  id: string,
+  value: AppStateRow["value"],
+  args: {
+    createdAt?: number
+    updatedAt?: number
+  } = {},
+): AppStateRow {
+  return {
+    createdAt: EpochMillis(args.createdAt ?? 1),
+    id,
+    type: "appState",
+    updatedAt: args.updatedAt === undefined ? undefined : EpochMillis(args.updatedAt),
+    value,
+  }
+}
+
 type EditorStatePatch = Partial<Omit<EditorState, "analysis" | "buffer" | "completion">> & {
   analysis?: Partial<EditorAnalysisState>
   buffer?: EditorBufferPatch
   completion?: Partial<EditorCompletionState>
 }
 
-type SqlVisorStatePatch = Partial<Omit<SqlVisorState, "editor" | "settings">> & {
+type SqlVisorStatePatch = Partial<Omit<SqlVisorState, "editor" | "settings" | "appState">> & {
   editor?: EditorStatePatch
+  appState?: AppStateSnapshot
   settings?: Partial<SettingsState>
 }
 
@@ -197,8 +213,8 @@ export function createSqlVisorState(patch: SqlVisorStatePatch = {}): SqlVisorSta
   const history = patch.history ?? []
   const hasSelectedQueryExecutionId = Object.hasOwn(patch, "selectedQueryExecutionId")
   const selectedQueryExecutionId = hasSelectedQueryExecutionId
-    ? patch.selectedQueryExecutionId ?? null
-    : history[0]?.id ?? null
+    ? (patch.selectedQueryExecutionId ?? null)
+    : (history[0]?.id ?? null)
   const selectedQueryExecution = selectedQueryExecutionId
     ? history.find((entry) => entry.id === selectedQueryExecutionId)
     : undefined
@@ -224,6 +240,10 @@ export function createSqlVisorState(patch: SqlVisorStatePatch = {}): SqlVisorSta
     editor,
     history,
     savedQueries: patch.savedQueries ?? [],
+    appState: {
+      ...defaultAppState(),
+      ...patch.appState,
+    },
     settings: {
       ...defaultSettingsState(),
       ...patch.settings,
@@ -272,6 +292,7 @@ type EngineMethodOverrides = {
   loadConnectionObjects?: (connectionId: string) => Promise<ObjectInfo[]>
   openEditorCompletion?: (context: EditorCompletionContext) => void
   refreshConnectionSuggestions?: () => Promise<any[]>
+  replaceAppState?: <Value extends AppStateRow["value"]>(id: string, value: Value) => Promise<Value>
   requestEditorAnalysis?: (parentFlowId?: string) => void
   restoreSavedQuery?: (savedQueryId: string) => RestoreSavedQueryResult | undefined
   runQuery?: (input?: RunQueryInput) => QueryRef
@@ -283,6 +304,7 @@ type EngineMethodOverrides = {
   saveSavedQueryChanges?: (input?: SaveSavedQueryChangesInput) => Promise<SavedQuery>
   replaceSettings?: <Id extends SettingsId>(id: Id, settings: SettingsSchema[Id]) => Promise<SettingsSchema[Id]>
   setEditorBuffer?: (patch: EditorBufferPatch & { savedQueryId?: string | null }) => void
+  updateAppState?: <Value extends JsonObject>(id: string, patch: Partial<Value>, fallback: Value) => Promise<Value>
   updateSettings?: <Id extends SettingsId>(id: Id, patch: Partial<SettingsSchema[Id]>) => Promise<SettingsSchema[Id]>
 }
 
@@ -313,6 +335,7 @@ export function createEngineStub(
     loadConnectionObjects: string[]
     openEditorCompletion: EditorCompletionContext[]
     refreshConnectionSuggestions: number
+    replaceAppState: Array<{ id: string; value: unknown }>
     requestEditorAnalysis: Array<string | undefined>
     restoreHistoryEntry: string[]
     restoreQueryExecution: string[]
@@ -324,6 +347,7 @@ export function createEngineStub(
     selectQueryExecution: Array<string | null>
     selectConnection: Array<string | undefined>
     setEditorBuffer: Array<EditorBufferPatch & { savedQueryId?: string | null }>
+    updateAppState: Array<{ id: string; fallback: unknown; patch: object }>
     updateSettings: Array<{ id: SettingsId; patch: object }>
   } = {
     addConnection: [],
@@ -339,6 +363,7 @@ export function createEngineStub(
     loadConnectionObjects: [],
     openEditorCompletion: [],
     refreshConnectionSuggestions: 0,
+    replaceAppState: [],
     requestEditorAnalysis: [],
     restoreHistoryEntry: [],
     restoreQueryExecution: [],
@@ -350,6 +375,7 @@ export function createEngineStub(
     selectQueryExecution: [],
     selectConnection: [],
     setEditorBuffer: [],
+    updateAppState: [],
     updateSettings: [],
   }
 
@@ -432,14 +458,20 @@ export function createEngineStub(
         objectsByConnectionId: nextObjectsByConnectionId,
         settings: {
           ...state.settings,
-          sidebarState: {
-            ...state.settings.sidebarState,
+          workspace: {
+            ...state.settings.workspace,
             lastSelectedConnectionId: nextSelectedConnectionId ?? "",
           },
         },
         selectedConnectionId: nextSelectedConnectionId,
       }
       notify()
+    },
+    getAppState<Value extends AppStateRow["value"]>(id: string) {
+      return state.appState[id] as Value | undefined
+    },
+    getAppStateOrDefault<Value extends AppStateRow["value"]>(id: string, fallback: Value) {
+      return (state.appState[id] as Value | undefined) ?? fallback
     },
     runQuery(input: RunQueryInput = {}) {
       calls.runQuery.push(input)
@@ -568,7 +600,8 @@ export function createEngineStub(
         return
       }
 
-      const execution = queryExecutionId === null ? undefined : state.history.find((entry) => entry.id === queryExecutionId)
+      const execution =
+        queryExecutionId === null ? undefined : state.history.find((entry) => entry.id === queryExecutionId)
       state = {
         ...state,
         queryExecution: execution
@@ -731,6 +764,43 @@ export function createEngineStub(
       notify()
       return settings
     },
+    async updateAppState<Value extends JsonObject>(id: string, patch: Partial<Value>, fallback: Value) {
+      calls.updateAppState.push({ fallback, id, patch })
+      if (overrides.updateAppState) {
+        return overrides.updateAppState(id, patch, fallback)
+      }
+
+      const value = {
+        ...fallback,
+        ...(state.appState[id] as Value | undefined),
+        ...patch,
+      } as Value
+      state = {
+        ...state,
+        appState: {
+          ...state.appState,
+          [id]: value,
+        },
+      }
+      notify()
+      return value
+    },
+    async replaceAppState<Value extends AppStateRow["value"]>(id: string, value: Value) {
+      calls.replaceAppState.push({ id, value })
+      if (overrides.replaceAppState) {
+        return overrides.replaceAppState(id, value)
+      }
+
+      state = {
+        ...state,
+        appState: {
+          ...state.appState,
+          [id]: value,
+        },
+      }
+      notify()
+      return value
+    },
     cancelEditorAnalysis() {
       calls.cancelEditorAnalysis += 1
       if (overrides.cancelEditorAnalysis) {
@@ -757,8 +827,8 @@ export function createEngineStub(
         ...state,
         settings: {
           ...state.settings,
-          sidebarState: {
-            ...state.settings.sidebarState,
+          workspace: {
+            ...state.settings.workspace,
             lastSelectedConnectionId: connectionId ?? "",
           },
         },
@@ -775,8 +845,7 @@ export function createEngineStub(
 
       setEditorState({
         buffer: patch,
-        savedQueryId:
-          patch.savedQueryId === undefined ? state.editor.savedQueryId : (patch.savedQueryId ?? undefined),
+        savedQueryId: patch.savedQueryId === undefined ? state.editor.savedQueryId : (patch.savedQueryId ?? undefined),
       })
       notify()
     },
@@ -983,9 +1052,16 @@ export function createEngineStub(
             ...patch.settings,
           }
         : state.settings
+      const nextAppState = patch.appState
+        ? {
+            ...state.appState,
+            ...patch.appState,
+          }
+        : state.appState
       state = {
         ...state,
         ...patch,
+        appState: nextAppState,
         editor: nextEditor,
         settings: nextSettings,
       }
@@ -1004,6 +1080,8 @@ export function createEngineStub(
     | "deleteConnection"
     | "formatEditorQuery"
     | "focusEditorCompletionItem"
+    | "getAppState"
+    | "getAppStateOrDefault"
     | "getQueryState"
     | "getState"
     | "loadConnectionObjects"
@@ -1016,12 +1094,14 @@ export function createEngineStub(
     | "restoreSavedQuery"
     | "runQuery"
     | "replaceSettings"
+    | "replaceAppState"
     | "selectQueryExecution"
     | "selectConnection"
     | "saveQueryAsNew"
     | "saveSavedQueryChanges"
     | "setEditorBuffer"
     | "subscribe"
+    | "updateAppState"
     | "updateSettings"
   > & {
     __notify: () => void

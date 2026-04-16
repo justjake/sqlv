@@ -2,8 +2,8 @@ import { testRender } from "@opentui/react/test-utils"
 import type { TestRendererOptions } from "@opentui/core/testing"
 import { afterEach } from "bun:test"
 import { act, type ReactNode } from "react"
-import { FocusProvider } from "../../src/tui/focus/context"
-import { KeybindProvider } from "../../src/tui/ui/keybind/KeybindProvider"
+import { FocusProvider } from "../../src/apps/tui/focus/context"
+import { KeybindProvider } from "../../src/apps/tui/ui/keybind/KeybindProvider"
 
 export type RenderedUi = Awaited<ReturnType<typeof testRender>>
 
@@ -15,7 +15,10 @@ export function createTuiRenderHarness() {
     rendered = undefined
   })
 
-  async function render(node: ReactNode, size: Pick<TestRendererOptions, "height" | "width"> & Partial<TestRendererOptions> = { height: 12, width: 60 }) {
+  async function render(
+    node: ReactNode,
+    size: Pick<TestRendererOptions, "height" | "width"> & Partial<TestRendererOptions> = { height: 12, width: 60 },
+  ) {
     rendered = await testRender(
       <FocusProvider>
         <KeybindProvider>{node}</KeybindProvider>

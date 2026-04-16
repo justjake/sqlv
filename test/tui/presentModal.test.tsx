@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { useEffect, useRef } from "react"
-import { ConfirmModal } from "../../src/tui/ui/ConfirmModal"
-import { ModalPresenterProvider, usePresentModal } from "../../src/tui/ui/presentModal"
-import { Text } from "../../src/tui/ui/Text"
+import { ConfirmModal } from "../../src/apps/tui/ui/ConfirmModal"
+import { ModalPresenterProvider, usePresentModal } from "../../src/apps/tui/ui/presentModal"
+import { Text } from "../../src/apps/tui/ui/Text"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()

@@ -1,24 +1,22 @@
 import { QueryClient } from "@tanstack/query-core"
 import { describe, expect, test } from "bun:test"
-import { type LocalPersistence, createSession } from "../../src/lib/createLocalPersistence"
-import { createEditorAnalysisSubject } from "../../src/lib/editor/analysis"
-import { createEditorBuffer } from "../../src/lib/editor/buffer"
-import {
-  type EditorCompletionContext,
-  type SuggestionItem,
-} from "../../src/lib/editor/completion"
-import { init } from "../../src/lib/init"
-import { AdapterRegistry, type Adapter } from "../../src/lib/interface/Adapter"
-import { SqlVisor, type QueryRef } from "../../src/lib/SqlVisor"
-import type { SuggestionProvider, SuggestionRequest } from "../../src/lib/suggestions/types"
-import type { ExplainResult } from "../../src/lib/types/Explain"
-import { type LogEntry } from "../../src/lib/types/Log"
-import type { ObjectInfo } from "../../src/lib/types/objects"
-import { rowDispatcher, type BaseRow } from "../../src/lib/types/RowStore"
-import type { SavedQuery } from "../../src/lib/types/SavedQuery"
-import { defaultSettingsState, type AnySettingsRow } from "../../src/lib/types/Settings"
-import { unsafeRawSQL, type SQL } from "../../src/lib/types/SQL"
-import { makeConnection, makeQueryExecution, makeSavedQuery, makeSettingsRow } from "../support"
+import { type LocalStorage, createSession } from "../../src/platforms/bun/storage/createLocalStorage"
+import type { AppStateRow } from "../../src/model/AppState"
+import { createEditorAnalysisSubject } from "../../src/model/editor/analysis"
+import { createEditorBuffer } from "../../src/model/editor/buffer"
+import { type EditorCompletionContext, type SuggestionItem } from "../../src/model/editor/completion"
+import { init } from "../../src/api/init"
+import { AdapterRegistry, type Adapter } from "../../src/spi/Adapter"
+import { SqlVisor, type QueryRef } from "../../src/api/SqlVisor"
+import type { SuggestionProvider, SuggestionRequest } from "../../src/spi/SuggestionProvider"
+import type { ExplainResult } from "../../src/model/Explain"
+import { type LogEntry } from "../../src/model/Log"
+import type { ObjectInfo } from "../../src/model/objects"
+import { rowDispatcher, type BaseRow } from "../../src/model/RowStore"
+import type { SavedQuery } from "../../src/model/SavedQuery"
+import { defaultSettingsState, type AnySettingsRow } from "../../src/model/Settings"
+import { unsafeRawSQL, type SQL } from "../../src/model/SQL"
+import { makeAppStateRow, makeConnection, makeQueryExecution, makeSavedQuery, makeSettingsRow } from "../support"
 
 class FakeBunAdapter implements Adapter<{ path: string }, unknown, {}> {
   readonly protocol = "bunsqlite"
@@ -136,6 +134,7 @@ function createMemoryStore<Row extends BaseRow>(initialRows: Row[], sortRows: (r
 
   return rowDispatcher<Row>(async <T2 extends Row>(action: any) => {
     switch (action.type) {
+      case "list":
       case "query":
         return sortRows(Array.from(rows.values())) as T2[]
       case "get":
@@ -168,19 +167,21 @@ function createPersistence(
   initialLogEntries: LogEntry[] = [],
   initialSavedQueries: SavedQuery[] = [],
   initialSettings: AnySettingsRow[] = [],
+  initialAppState: AppStateRow[] = [],
 ) {
   const session = createSession("sqlvisor")
-  const persist: LocalPersistence["persist"] = {
+  const storage: LocalStorage["storage"] = {
     connections: createMemoryStore(initialConnections, (rows) => rows.toSorted((a, b) => b.createdAt - a.createdAt)),
     log: createMemoryStore<LogEntry>(initialLogEntries),
     savedQueries: createMemoryStore(initialSavedQueries, (rows) =>
       rows.toSorted((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt)),
     ),
+    appState: createMemoryStore(initialAppState),
     settings: createMemoryStore(initialSettings),
   }
 
   return {
-    persist,
+    storage,
     session,
   }
 }
@@ -225,7 +226,7 @@ function createCompletionContext(patch: Partial<EditorCompletionContext> = {}): 
 }
 
 describe("SqlVisor", () => {
-  test("creates an engine, registers built-in adapters, and loads stored connections", async () => {
+  test("creates an engine and loads stored connections", async () => {
     const fakeAdapter = new FakeBunAdapter()
     const registry = new AdapterRegistry([fakeAdapter])
     const first = makeConnection({
@@ -246,10 +247,10 @@ describe("SqlVisor", () => {
       name: "Second",
       protocol: "bunsqlite",
     })
-    const persistence = createPersistence([first, second])
+    const storage = createPersistence([first, second])
 
     const engine = await SqlVisor.create({
-      persistence,
+      storage,
       queryClient: createQueryClient(),
       registry,
     })
@@ -257,17 +258,13 @@ describe("SqlVisor", () => {
     const state = engine.getState()
 
     expect(registry.get("bunsqlite")).toBe(fakeAdapter)
-    expect(registry.has("turso")).toBe(true)
-    expect(registry.has("postgresql")).toBe(true)
     expect(state.connections.data?.map((connection) => connection.id)).toEqual(["conn-2", "conn-1"])
     expect(state.selectedConnectionId).toBe("conn-2")
     expect(state.editor.treeSitterGrammar).toBe("sql")
-    expect(await persistence.persist.log.get({ id: persistence.session.id, type: "session" })).toEqual(
-      persistence.session,
-    )
+    expect(await storage.storage.log.get({ id: storage.session.id, type: "session" })).toEqual(storage.session)
     expect(state.settings).toEqual({
       ...defaultSettingsState(),
-      sidebarState: {
+      workspace: {
         lastSelectedConnectionId: "conn-2",
       },
     })
@@ -286,7 +283,7 @@ describe("SqlVisor", () => {
       },
     ]
 
-    const persistence = createPersistence([
+    const storage = createPersistence([
       makeConnection({
         config: {
           path: "/tmp/existing.db",
@@ -298,8 +295,7 @@ describe("SqlVisor", () => {
     ])
 
     const engine = await SqlVisor.create({
-      adapters: [fakeAdapter],
-      persistence,
+      storage,
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -327,8 +323,7 @@ describe("SqlVisor", () => {
 
     const freshConnectionId = engine
       .getState()
-      .connections.data?.find((connection) => connection.config.path === "/tmp/fresh.db")
-      ?.id
+      .connections.data?.find((connection) => connection.config.path === "/tmp/fresh.db")?.id
     expect(freshConnectionId).toBeDefined()
 
     await engine.deleteConnection(freshConnectionId!)
@@ -342,55 +337,44 @@ describe("SqlVisor", () => {
     })
   })
 
-  test("loads and updates persisted settings", async () => {
+  test("loads and updates persisted app state", async () => {
     const fakeAdapter = new FakeBunAdapter()
     const registry = new AdapterRegistry([fakeAdapter])
-    const persistence = createPersistence(
+    const storage = createPersistence(
       undefined,
       [],
       [],
-      [makeSettingsRow("appearance", { useNerdFont: true }, { createdAt: 10 })],
+      [],
+      [makeAppStateRow("preferences", { iconStyle: "unicode" }, { createdAt: 10 })],
     )
 
     const engine = await SqlVisor.create({
-      persistence,
+      storage,
       queryClient: createQueryClient(),
       registry,
     })
 
-    expect(engine.getState().settings).toEqual({
-      ...defaultSettingsState(),
-      appearance: {
-        useNerdFont: true,
-      },
-      sidebarState: {
-        lastSelectedConnectionId: "conn-1",
-      },
+    expect(engine.getAppState("preferences")).toEqual({
+      iconStyle: "unicode",
     })
 
-    await engine.updateSettings("appearance", { useNerdFont: false })
+    await engine.updateAppState("preferences", { iconStyle: "nerdfont" }, { iconStyle: "unicode" })
 
-    expect(engine.getState().settings).toEqual({
-      ...defaultSettingsState(),
-      appearance: {
-        useNerdFont: false,
-      },
-      sidebarState: {
-        lastSelectedConnectionId: "conn-1",
-      },
+    expect(engine.getAppState("preferences")).toEqual({
+      iconStyle: "nerdfont",
     })
-    expect(await persistence.persist.settings.get({ id: "appearance", type: "settings" })).toMatchObject({
+    expect(await storage.storage.appState.get({ id: "preferences", type: "appState" })).toMatchObject({
       createdAt: 10,
-      id: "appearance",
-      settings: {
-        useNerdFont: false,
-      },
-      type: "settings",
+      id: "preferences",
+      type: "appState",
       updatedAt: expect.any(Number),
+      value: {
+        iconStyle: "nerdfont",
+      },
     })
   })
 
-  test("restores the selected connection from sidebar settings and only loads that branch", async () => {
+  test("restores the selected connection from workspace settings and only loads that branch", async () => {
     const fakeAdapter = new FakeBunAdapter()
     fakeAdapter.objects = [{ name: "main", type: "database" }]
     const first = makeConnection({
@@ -409,15 +393,15 @@ describe("SqlVisor", () => {
       name: "Second",
       protocol: "bunsqlite",
     })
-    const persistence = createPersistence(
+    const storage = createPersistence(
       [first, second],
       [],
       [],
-      [makeSettingsRow("sidebarState", { lastSelectedConnectionId: "conn-1" }, { createdAt: 10 })],
+      [makeSettingsRow("workspace", { lastSelectedConnectionId: "conn-1" }, { createdAt: 10 })],
     )
 
     const engine = await SqlVisor.create({
-      persistence,
+      storage,
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -427,7 +411,7 @@ describe("SqlVisor", () => {
     expect(engine.getState().selectedConnectionId).toBe("conn-1")
     expect(engine.getState().settings).toEqual({
       ...defaultSettingsState(),
-      sidebarState: {
+      workspace: {
         lastSelectedConnectionId: "conn-1",
       },
     })
@@ -436,7 +420,7 @@ describe("SqlVisor", () => {
     expect(fakeAdapter.fetchObjectsCalls).toBe(1)
   })
 
-  test("persists sidebar selection when the selected connection changes", async () => {
+  test("persists workspace selection when the selected connection changes", async () => {
     const fakeAdapter = new FakeBunAdapter()
     fakeAdapter.objects = [{ name: "main", type: "database" }]
     const first = makeConnection({
@@ -455,22 +439,22 @@ describe("SqlVisor", () => {
       name: "Second",
       protocol: "bunsqlite",
     })
-    const persistence = createPersistence([first, second])
+    const storage = createPersistence([first, second])
 
     const engine = await SqlVisor.create({
-      persistence,
+      storage,
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
 
     engine.selectConnection(first.id)
 
-    await waitFor(() => engine.getState().settings.sidebarState.lastSelectedConnectionId === first.id)
+    await waitFor(() => engine.getState().settings.workspace.lastSelectedConnectionId === first.id)
 
     expect(engine.getState().selectedConnectionId).toBe(first.id)
-    expect(engine.getState().settings.sidebarState.lastSelectedConnectionId).toBe(first.id)
-    expect(await persistence.persist.settings.get({ id: "sidebarState", type: "settings" })).toMatchObject({
-      id: "sidebarState",
+    expect(engine.getState().settings.workspace.lastSelectedConnectionId).toBe(first.id)
+    expect(await storage.storage.settings.get({ id: "workspace", type: "settings" })).toMatchObject({
+      id: "workspace",
       settings: {
         lastSelectedConnectionId: first.id,
       },
@@ -499,10 +483,10 @@ describe("SqlVisor", () => {
       name: "Second",
       protocol: "bunsqlite",
     })
-    const persistence = createPersistence([first, second])
+    const storage = createPersistence([first, second])
 
     const engine = await SqlVisor.create({
-      persistence,
+      storage,
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -515,11 +499,11 @@ describe("SqlVisor", () => {
 
     expect(engine.getState().connections.data?.map((connection) => connection.id)).toEqual([second.id])
     expect(engine.getState().selectedConnectionId).toBe(second.id)
-    expect(engine.getState().settings.sidebarState.lastSelectedConnectionId).toBe(second.id)
+    expect(engine.getState().settings.workspace.lastSelectedConnectionId).toBe(second.id)
     expect(engine.getState().objectsByConnectionId[first.id]).toBeUndefined()
-    expect(await persistence.persist.connections.get({ id: first.id, type: "connection" })).toBeUndefined()
-    expect(await persistence.persist.settings.get({ id: "sidebarState", type: "settings" })).toMatchObject({
-      id: "sidebarState",
+    expect(await storage.storage.connections.get({ id: first.id, type: "connection" })).toBeUndefined()
+    expect(await storage.storage.settings.get({ id: "workspace", type: "settings" })).toMatchObject({
+      id: "workspace",
       settings: {
         lastSelectedConnectionId: second.id,
       },
@@ -547,7 +531,7 @@ describe("SqlVisor", () => {
     ]
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence(),
+      storage: createPersistence(),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -597,7 +581,7 @@ describe("SqlVisor", () => {
 
   test("formats the editor query using the selected adapter dialect", async () => {
     const engine = await SqlVisor.create({
-      persistence: createPersistence(),
+      storage: createPersistence(),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([new FakeBunAdapter()]),
     })
@@ -639,10 +623,10 @@ where
       diagnostics: [],
       status: "ok",
     })
-    const persistence = createPersistence()
+    const storage = createPersistence()
 
     const engine = await SqlVisor.create({
-      persistence,
+      storage,
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -667,7 +651,7 @@ where
       subject: createEditorAnalysisSubject(createEditorBuffer("select 1", "select 1".length, 1), "conn-1"),
     })
 
-    const logEntries = await persistence.persist.log.query(() => unsafeRawSQL<LogEntry>("select"))
+    const logEntries = await storage.storage.log.query(() => unsafeRawSQL<LogEntry>("select"))
     expect(logEntries).toContainEqual(
       expect.objectContaining({
         connectionId: "conn-1",
@@ -687,7 +671,7 @@ where
     })
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence(),
+      storage: createPersistence(),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -728,7 +712,7 @@ where
     })
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence(),
+      storage: createPersistence(),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -763,7 +747,7 @@ where
     fakeAdapter.rowsByQuery.set("select 1", [{ value: 1 }])
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence(),
+      storage: createPersistence(),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -814,7 +798,7 @@ where
     })
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence(undefined, [older, newer]),
+      storage: createPersistence(undefined, [older, newer]),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -852,7 +836,7 @@ where
     })
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence([first, second]),
+      storage: createPersistence([first, second]),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -867,7 +851,7 @@ where
     engine.restoreQueryExecution(query.queryId)
 
     expect(engine.getState().selectedConnectionId).toBeUndefined()
-    expect(engine.getState().settings.sidebarState.lastSelectedConnectionId).toBe(second.id)
+    expect(engine.getState().settings.workspace.lastSelectedConnectionId).toBe(second.id)
     expect(engine.getState().editor).toMatchObject({
       buffer: {
         cursorOffset: "select 1".length,
@@ -898,7 +882,7 @@ where
     })
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence(undefined, [], [newerButStale, olderButUpdated]),
+      storage: createPersistence(undefined, [], [newerButStale, olderButUpdated]),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -909,10 +893,10 @@ where
   test("saves a new query, persists it, and tags subsequent executions", async () => {
     const fakeAdapter = new FakeBunAdapter()
     fakeAdapter.rowsByQuery.set("select 7", [{ value: 7 }])
-    const persistence = createPersistence()
+    const storage = createPersistence()
 
     const engine = await SqlVisor.create({
-      persistence,
+      storage,
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -927,7 +911,7 @@ where
     expect(savedQuery.protocol).toBe("bunsqlite")
     expect(engine.getState().editor.savedQueryId).toBe(savedQuery.id)
     expect(engine.getState().savedQueries[0]).toEqual(savedQuery)
-    expect(await persistence.persist.savedQueries.get({ id: savedQuery.id, type: "savedQuery" })).toEqual(savedQuery)
+    expect(await storage.storage.savedQueries.get({ id: savedQuery.id, type: "savedQuery" })).toEqual(savedQuery)
 
     const query = engine.runQuery()
     const queryState = await waitForQueryState(engine, query, (state) => state.status === "success")
@@ -945,7 +929,7 @@ where
       id: query.queryId,
       savedQueryId: savedQuery.id,
     })
-    expect(await persistence.persist.log.get({ id: query.queryId, type: "queryExecution" })).toMatchObject({
+    expect(await storage.storage.log.get({ id: query.queryId, type: "queryExecution" })).toMatchObject({
       id: query.queryId,
       savedQueryId: savedQuery.id,
       status: "success",
@@ -960,10 +944,10 @@ where
       name: "Audit",
       text: "select * from audit_log",
     })
-    const persistence = createPersistence(undefined, [], [initialSavedQuery])
+    const storage = createPersistence(undefined, [], [initialSavedQuery])
 
     const engine = await SqlVisor.create({
-      persistence,
+      storage,
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -986,9 +970,7 @@ where
     expect(updated.updatedAt!).toBeGreaterThan(initialSavedQuery.createdAt)
     expect(engine.getState().editor.savedQueryId).toBe(initialSavedQuery.id)
     expect(engine.getState().savedQueries[0]).toEqual(updated)
-    expect(await persistence.persist.savedQueries.get({ id: initialSavedQuery.id, type: "savedQuery" })).toEqual(
-      updated,
-    )
+    expect(await storage.storage.savedQueries.get({ id: initialSavedQuery.id, type: "savedQuery" })).toEqual(updated)
   })
 
   test("restores a saved query and loads its latest execution into the detail view", async () => {
@@ -1021,7 +1003,7 @@ where
     })
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence(undefined, [older, newer], [savedQuery]),
+      storage: createPersistence(undefined, [older, newer], [savedQuery]),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -1074,7 +1056,7 @@ where
     })
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence([currentConnection], [staleExecution], [savedQuery]),
+      storage: createPersistence([currentConnection], [staleExecution], [savedQuery]),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -1127,7 +1109,7 @@ where
     })
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence(undefined, [historicalExecution], [fallbackSavedQuery, noResultSavedQuery]),
+      storage: createPersistence(undefined, [historicalExecution], [fallbackSavedQuery, noResultSavedQuery]),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -1162,7 +1144,7 @@ where
 
   test("rejects invalid queries and records failed executions", async () => {
     const emptyEngine = await SqlVisor.create({
-      persistence: createPersistence([]),
+      storage: createPersistence([]),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([new FakeBunAdapter()]),
     })
@@ -1172,7 +1154,7 @@ where
     const fakeAdapter = new FakeBunAdapter()
     fakeAdapter.errorsByQuery.set("fail", new Error("query failed"))
     const engine = await SqlVisor.create({
-      persistence: createPersistence(),
+      storage: createPersistence(),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -1208,7 +1190,7 @@ where
     fakeAdapter.blockedQueries.add("wait 2")
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence(),
+      storage: createPersistence(),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -1217,9 +1199,12 @@ where
     const second = engine.runQuery({ text: "wait 2" })
 
     await waitFor(() => engine.getState().history.filter((entry) => entry.status === "pending").length === 2)
-    expect(engine.getState().history.filter((entry) => entry.status === "pending").map((entry) => entry.id)).toEqual(
-      expect.arrayContaining([first.queryId, second.queryId]),
-    )
+    expect(
+      engine
+        .getState()
+        .history.filter((entry) => entry.status === "pending")
+        .map((entry) => entry.id),
+    ).toEqual(expect.arrayContaining([first.queryId, second.queryId]))
 
     engine.cancelQuery(first)
     const firstState = await waitForQueryState(engine, first, (state) => state.status === "error")
@@ -1297,7 +1282,7 @@ where
     }
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence([firstConnection, secondConnection]),
+      storage: createPersistence([firstConnection, secondConnection]),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
       suggestionProviders: [provider],
@@ -1317,10 +1302,7 @@ where
     await waitFor(() => engine.getState().editor.completion.status === "ready")
 
     expect(requests[0]?.completion.scope).toEqual({ kind: "all-connections" })
-    expect(engine.getState().editor.completion.items.map((item) => item.id)).toEqual([
-      "conn-2:users",
-      "conn-1:users",
-    ])
+    expect(engine.getState().editor.completion.items.map((item) => item.id)).toEqual(["conn-2:users", "conn-1:users"])
 
     const query = engine.runQuery({ text: "select 1" })
     expect(engine.getState().editor.completion.status).toBe("ready")
@@ -1383,7 +1365,7 @@ where
 
   test("cancels superseded suggestion requests and ignores stale results", async () => {
     const engine = await SqlVisor.create({
-      persistence: createPersistence(),
+      storage: createPersistence(),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([new FakeBunAdapter()]),
       suggestionProviders: [
@@ -1492,7 +1474,7 @@ where
     })
 
     const engine = await SqlVisor.create({
-      persistence: createPersistence([firstConnection, secondConnection]),
+      storage: createPersistence([firstConnection, secondConnection]),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([fakeAdapter]),
     })
@@ -1551,7 +1533,7 @@ where
 
   test("initializes through the public init helper", async () => {
     const engine = await init({
-      persistence: createPersistence(),
+      storage: createPersistence(),
       queryClient: createQueryClient(),
       registry: new AdapterRegistry([new FakeBunAdapter()]),
     })

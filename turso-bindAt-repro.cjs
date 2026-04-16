@@ -1,13 +1,13 @@
 const turso = require("@tursodatabase/database")
 
 async function main() {
-  const db = new turso.Database("./foo.db");
-  const stmt = db.prepare("select $1");
+  const db = new turso.Database("./foo.db")
+  const stmt = db.prepare("select $1")
 
-  await db.connect();
+  await db.connect()
 
-  debugger;
+  debugger
 
-  console.log(await stmt.bind(["wat"]).all());
+  console.log(await stmt.bind(["wat"]).all())
 }
 main()

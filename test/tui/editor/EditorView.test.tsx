@@ -1,14 +1,12 @@
 import { RGBA, createTextAttributes } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
 import { act, useEffect, useState } from "react"
-import { createEditorAnalysisSubject, type EditorAnalysisState } from "../../../src/lib/editor/analysis"
-import { applyEditorBufferPatch, type EditorBufferPatch, type EditorChange } from "../../../src/lib/editor/buffer"
-import { closedEditorCompletionState, type EditorCompletionState } from "../../../src/lib/editor/completion"
-import { createEmptyEditorState, type EditorState } from "../../../src/lib/editor/state"
-import {
-  EditorView,
-} from "../../../src/tui/editor/EditorView"
-import { editorCursorLineColors } from "../../../src/tui/editor/syntaxHighlighting"
+import { createEditorAnalysisSubject, type EditorAnalysisState } from "../../../src/model/editor/analysis"
+import { applyEditorBufferPatch, type EditorBufferPatch, type EditorChange } from "../../../src/model/editor/buffer"
+import { closedEditorCompletionState, type EditorCompletionState } from "../../../src/model/editor/completion"
+import { createEmptyEditorState, type EditorState } from "../../../src/model/editor/state"
+import { EditorView } from "../../../src/apps/tui/editor/EditorView"
+import { editorCursorLineColors } from "../../../src/apps/tui/editor/syntaxHighlighting"
 import { loadSqliteExampleErrorCase } from "../../sqlite/exampleErrors"
 import { createTuiRenderHarness } from "../testUtils"
 
@@ -257,7 +255,10 @@ describe("EditorView", () => {
                 focusedItemId = items[Math.min(Math.max(input.index, 0), items.length - 1)]?.id
               } else {
                 const currentIndex = items.findIndex((item) => item.id === current.completion.focusedItemId)
-                const nextIndex = Math.min(Math.max((currentIndex >= 0 ? currentIndex : 0) + input.delta, 0), items.length - 1)
+                const nextIndex = Math.min(
+                  Math.max((currentIndex >= 0 ? currentIndex : 0) + input.delta, 0),
+                  items.length - 1,
+                )
                 focusedItemId = items[nextIndex]?.id
               }
 
@@ -342,9 +343,12 @@ describe("EditorView", () => {
     const inlineDiagnosticLine = frame.split("\n").find((line) => line.includes(example.message))
     expect(inlineDiagnosticLine).toContain(example.sql)
 
-    const sqlLine = ui
-      .captureSpans()
-      .lines.find((line) => line.spans.map((span) => span.text).join("").includes(example.sql))
+    const sqlLine = ui.captureSpans().lines.find((line) =>
+      line.spans
+        .map((span) => span.text)
+        .join("")
+        .includes(example.sql),
+    )
     const underlineAttributes = createTextAttributes({ underline: true })
     const highlightedSpan = sqlLine?.spans.find((span) => span.text.includes("from"))
 
@@ -417,12 +421,17 @@ describe("EditorView", () => {
     const frame = ui.captureCharFrame()
     expect(frame).not.toContain("incomplete input")
 
-    const sqlLine = ui
-      .captureSpans()
-      .lines.find((line) => line.spans.map((span) => span.text).join("").includes("select"))
+    const sqlLine = ui.captureSpans().lines.find((line) =>
+      line.spans
+        .map((span) => span.text)
+        .join("")
+        .includes("select"),
+    )
     const underlineAttributes = createTextAttributes({ underline: true })
 
-    expect(sqlLine?.spans.some((span) => ((span.attributes ?? 0) & underlineAttributes) === underlineAttributes)).toBe(false)
+    expect(sqlLine?.spans.some((span) => ((span.attributes ?? 0) & underlineAttributes) === underlineAttributes)).toBe(
+      false,
+    )
   })
 
   test("renders line numbers beside multiline editor content", async () => {
@@ -464,9 +473,12 @@ describe("EditorView", () => {
       { height: 12, width: 80 },
     )
 
-    const highlightedRow = ui
-      .captureSpans()
-      .lines.find((line) => line.spans.map((span) => span.text).join("").includes("from users"))
+    const highlightedRow = ui.captureSpans().lines.find((line) =>
+      line.spans
+        .map((span) => span.text)
+        .join("")
+        .includes("from users"),
+    )
     const lineHighlightBg = RGBA.fromHex(editorCursorLineColors.contentBackgroundColor)
 
     expect(highlightedRow?.spans.some((span) => span.bg?.equals(lineHighlightBg))).toBe(true)
@@ -489,9 +501,12 @@ describe("EditorView", () => {
 
     await settleDeferredRender(ui, 150)
 
-    const sqlLine = ui
-      .captureSpans()
-      .lines.find((line) => line.spans.map((span) => span.text).join("").includes(sql))
+    const sqlLine = ui.captureSpans().lines.find((line) =>
+      line.spans
+        .map((span) => span.text)
+        .join("")
+        .includes(sql),
+    )
     const keywordSpan = sqlLine?.spans.find((span) => span.text.toLowerCase().includes("select"))
     const functionSpan = sqlLine?.spans.find((span) => span.text.toLowerCase().includes("count"))
     const numberSpan = sqlLine?.spans.filter((span) => span.text.includes("1")).at(-1)

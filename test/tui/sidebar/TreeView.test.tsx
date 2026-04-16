@@ -1,9 +1,9 @@
 import { TextAttributes } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
 import { useEffect } from "react"
-import { useFocusNavigationState, useFocusTree } from "../../../src/tui/focus/context"
-import { flattenTree, clampTreeIndex, TreeView } from "../../../src/tui/sidebar/TreeView"
-import { IconProvider } from "../../../src/tui/ui/icons"
+import { useFocusNavigationState, useFocusTree } from "../../../src/apps/tui/focus/context"
+import { flattenTree, clampTreeIndex, TreeView } from "../../../src/apps/tui/sidebar/TreeView"
+import { IconProvider } from "../../../src/apps/tui/ui/icons"
 import { createTuiRenderHarness } from "../testUtils"
 
 const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()
@@ -188,13 +188,7 @@ describe("TreeView", () => {
       },
     ]
 
-    const ui = await render(
-      <TreeViewHarness
-        initialPath={["sidebar-tree"]}
-        nodes={nodes}
-      />,
-      { height: 10, width: 80 },
-    )
+    const ui = await render(<TreeViewHarness initialPath={["sidebar-tree"]} nodes={nodes} />, { height: 10, width: 80 })
 
     await settleDeferredRender(ui)
     expect(focusedPath).toEqual(["sidebar-tree", "row-0"])
@@ -240,10 +234,7 @@ describe("TreeView", () => {
       },
     ]
 
-    const ui = await render(
-      <TreeView nodes={nodes} />,
-      { height: 8, width: 40 },
-    )
+    const ui = await render(<TreeView nodes={nodes} />, { height: 8, width: 40 })
 
     const lines = frameLines(ui)
     const rootLine = lineContaining(lines, "Root")
@@ -277,10 +268,7 @@ describe("TreeView", () => {
       },
     ]
 
-    const ui = await render(
-      <TreeView nodes={nodes} />,
-      { height: 6, width: 30 },
-    )
+    const ui = await render(<TreeView nodes={nodes} />, { height: 6, width: 30 })
 
     const lines = frameLines(ui)
     const rootLine = lineContaining(lines, "A root")
@@ -301,10 +289,7 @@ describe("TreeView", () => {
       },
     ]
 
-    const ui = await render(
-      <TreeView nodes={nodes} />,
-      { height: 4, width: 30 },
-    )
+    const ui = await render(<TreeView nodes={nodes} />, { height: 4, width: 30 })
 
     const rootLine = lineContaining(frameLines(ui), "Local DB")
 
@@ -322,10 +307,7 @@ describe("TreeView", () => {
       },
     ]
 
-    const ui = await render(
-      <TreeView nodes={nodes} />,
-      { height: 4, width: 17 },
-    )
+    const ui = await render(<TreeView nodes={nodes} />, { height: 4, width: 17 })
 
     const rootLine = lineContaining(frameLines(ui), "LabelPriority")
 
@@ -345,10 +327,7 @@ describe("TreeView", () => {
       },
     ]
 
-    const ui = await render(
-      <TreeView nodes={nodes} />,
-      { height: 4, width: 30 },
-    )
+    const ui = await render(<TreeView nodes={nodes} />, { height: 4, width: 30 })
 
     const rootLine = lineContaining(frameLines(ui), "Mem")
 
@@ -368,10 +347,7 @@ describe("TreeView", () => {
       },
     ]
 
-    const ui = await render(
-      <TreeView nodes={nodes} />,
-      { height: 4, width: 40 },
-    )
+    const ui = await render(<TreeView nodes={nodes} />, { height: 4, width: 40 })
 
     const rootLine = lineContaining(frameLines(ui), "Mem")
     const rootSpanLine = ui.captureSpans().lines[0]
@@ -398,16 +374,19 @@ describe("TreeView", () => {
       },
     ]
 
-    const ui = await render(
-      <TreeView nodes={nodes} />,
-      { height: 5, width: 60 },
-    )
+    const ui = await render(<TreeView nodes={nodes} />, { height: 5, width: 60 })
 
     const manualLine = ui.captureSpans().lines.find((line) =>
-      line.spans.map((span) => span.text).join("").includes("users_name_idx"),
+      line.spans
+        .map((span) => span.text)
+        .join("")
+        .includes("users_name_idx"),
     )
     const automaticLine = ui.captureSpans().lines.find((line) =>
-      line.spans.map((span) => span.text).join("").includes("sqlite_autoindex_users_1"),
+      line.spans
+        .map((span) => span.text)
+        .join("")
+        .includes("sqlite_autoindex_users_1"),
     )
     const manualLabelSpan = manualLine?.spans.find((span) => span.text.includes("users_name_idx"))
     const automaticLabelSpan = automaticLine?.spans.find((span) => span.text.includes("sqlite_autoindex_users_1"))
@@ -433,10 +412,7 @@ describe("TreeView", () => {
       },
     ]
 
-    const ui = await render(
-      <TreeView nodes={nodes} />,
-      { height: 4, width: 40 },
-    )
+    const ui = await render(<TreeView nodes={nodes} />, { height: 4, width: 40 })
 
     const lines = frameLines(ui)
     const openLine = lineContaining(lines, "open-empty")
@@ -457,10 +433,7 @@ describe("TreeView", () => {
       },
     ]
 
-    const ui = await render(
-      <TreeView nodes={nodes} />,
-      { height: 4, width: 40 },
-    )
+    const ui = await render(<TreeView nodes={nodes} />, { height: 4, width: 40 })
 
     const childLine = lineContaining(frameLines(ui), "email_idx")
 
@@ -478,10 +451,7 @@ describe("TreeView", () => {
       },
     ]
 
-    const ui = await render(
-      <TreeView nodes={nodes} />,
-      { height: 4, width: 40 },
-    )
+    const ui = await render(<TreeView nodes={nodes} />, { height: 4, width: 40 })
 
     const lines = frameLines(ui)
     const tableLine = lineContaining(lines, "users")

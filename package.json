@@ -4,7 +4,7 @@
   "type": "module",
   "module": "src/index.ts",
   "scripts": {
-    "dev": "bun run --watch src/tui/index.tsx",
+    "dev": "bun run --watch src/apps/tui/index.tsx",
     "fetch:treesitter-grammars": "bun scripts/fetch-treesitter-grammars.ts",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",

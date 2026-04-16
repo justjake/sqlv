@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { act } from "react"
-import { App } from "../../../src/tui/index"
-import { SqlVisorProvider } from "../../../src/tui/useSqlVisor"
+import { App } from "../../../src/apps/tui/index"
+import { SqlVisorProvider } from "../../../src/apps/tui/useSqlVisor"
 import { createEngineStub, createQueryState } from "../../support"
 import { createTuiRenderHarness } from "../testUtils"
 
 const { render, settleDeferredRender } = createTuiRenderHarness()
 
 describe("Sidebar settings", () => {
-  test("opens from the global ctrl+, shortcut and updates appearance settings", async () => {
+  test("opens from the global ctrl+, shortcut and updates app preferences", async () => {
     const stub = createEngineStub({
       connections: createQueryState({
         data: [],
@@ -48,12 +48,11 @@ describe("Sidebar settings", () => {
     })
     await settleDeferredRender(ui)
 
-    expect(stub.calls.updateSettings).toEqual([
+    expect(stub.calls.updateAppState).toEqual([
       {
-        id: "appearance",
-        patch: {
-          useNerdFont: false,
-        },
+        fallback: { iconStyle: "nerdfont" },
+        id: "preferences",
+        patch: { iconStyle: "unicode" },
       },
     ])
     expect(ui.captureCharFrame()).toContain("◉ Unicode")

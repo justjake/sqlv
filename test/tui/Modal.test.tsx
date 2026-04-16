@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { Modal } from "../../src/tui/ui/Modal"
-import { Text } from "../../src/tui/ui/Text"
+import { Modal } from "../../src/apps/tui/ui/Modal"
+import { Text } from "../../src/apps/tui/ui/Text"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { render } = createTuiRenderHarness()
@@ -29,7 +29,12 @@ describe("Modal", () => {
     const saveLineIndex = findLineIndex(lines, "Save")
     const saveLine = lines[saveLineIndex]
 
-    expect(bodyLineIndexes).toEqual([bodyLineIndexes[0]!, bodyLineIndexes[0]! + 1, bodyLineIndexes[0]! + 2, bodyLineIndexes[0]! + 3])
+    expect(bodyLineIndexes).toEqual([
+      bodyLineIndexes[0]!,
+      bodyLineIndexes[0]! + 1,
+      bodyLineIndexes[0]! + 2,
+      bodyLineIndexes[0]! + 3,
+    ])
     expect(saveLineIndex).toBe(dLineIndex)
     expect(saveLine).toContain("D")
     expect(saveLine?.indexOf("Save")).toBeGreaterThan(saveLine?.indexOf("D") ?? -1)

@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { createSession } from "../../src/lib/createLocalPersistence"
-import { type Executor } from "../../src/lib/interface/Executor"
-import { QueryRunnerImpl } from "../../src/lib/QueryRunnerImpl"
-import { EpochMillis, type FlowLogEntry, type LogEntry, type QueryExecution } from "../../src/lib/types/Log"
-import { rowDispatcher } from "../../src/lib/types/RowStore"
-import { Paginated, sql, unsafeRawSQL } from "../../src/lib/types/SQL"
+import { createSession } from "../../src/platforms/bun/storage/createLocalStorage"
+import { type Executor } from "../../src/spi/Executor"
+import { QueryRunnerImpl } from "../../src/engine/runtime/QueryRunnerImpl"
+import { EpochMillis, type FlowLogEntry, type LogEntry, type QueryExecution } from "../../src/model/Log"
+import { rowDispatcher } from "../../src/model/RowStore"
+import { Paginated, sql, unsafeRawSQL } from "../../src/model/SQL"
 import { makeConnection } from "../support"
 
 function createMemoryLogStore() {

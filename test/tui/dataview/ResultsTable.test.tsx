@@ -4,8 +4,8 @@ import {
   ResultsTable,
   RESULTS_TABLE_FOCUS_ID,
   RESULTS_TABLE_GRID_AREA_ID,
-} from "../../../src/tui/dataview/ResultsTable"
-import { useFocusNavigationState, useFocusTree } from "../../../src/tui/focus/context"
+} from "../../../src/apps/tui/dataview/ResultsTable"
+import { useFocusNavigationState, useFocusTree } from "../../../src/apps/tui/focus/context"
 import { createTuiRenderHarness } from "../testUtils"
 
 const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()

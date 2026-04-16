@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { BunSqlAdapter } from "../../src/lib/adapters/BunSqlAdapter"
+import { BunSqlAdapter } from "../../src/adapters/sqlite/bun/BunSqliteAdapter"
 import {
   IterateSqliteSchema,
   PragmaDatabaseList,
@@ -9,17 +9,21 @@ import {
   parseSqliteSchemaRow,
   sqlite,
   type SqliteSchemaRow,
-} from "../../src/lib/adapters/sqlite"
-import { createSession } from "../../src/lib/createLocalPersistence"
-import { createNoopLogStore } from "../../src/lib/createNoopLogStore"
-import { Persist } from "../../src/lib/Persist"
-import { QueryRunnerImpl } from "../../src/lib/QueryRunnerImpl"
-import { createRowStoreTableSql, createSqliteRowStore, selectStoredRows } from "../../src/lib/sqliteRowStore"
-import type { Connection } from "../../src/lib/types/Connection"
-import { EpochMillis, type LogEntry } from "../../src/lib/types/Log"
-import { OrderString } from "../../src/lib/types/Order"
-import type { BaseRow } from "../../src/lib/types/RowStore"
-import { ident, unsafeRawSQL } from "../../src/lib/types/SQL"
+} from "../../src/adapters/sqlite/sqlite"
+import { createSession } from "../../src/platforms/bun/storage/createLocalStorage"
+import { createNoopLogStore } from "../../src/engine/runtime/createNoopLogStore"
+import { Storage } from "../../src/platforms/bun/storage/Storage"
+import { QueryRunnerImpl } from "../../src/engine/runtime/QueryRunnerImpl"
+import {
+  createRowStoreTableSql,
+  createSqliteRowStore,
+  selectStoredRows,
+} from "../../src/platforms/bun/storage/sqliteRowStore"
+import type { Connection } from "../../src/model/Connection"
+import { EpochMillis, type LogEntry } from "../../src/model/Log"
+import { OrderString } from "../../src/model/Order"
+import type { BaseRow } from "../../src/model/RowStore"
+import { ident, unsafeRawSQL } from "../../src/model/SQL"
 import { createBunQueryRunner, makeConnection } from "../support"
 
 type StoredRow = BaseRow & {
@@ -186,11 +190,11 @@ describe("sqlite-backed storage", () => {
     expect(await store.get({ id: row.id, type: row.type })).toBeUndefined()
   })
 
-  test("migrates persistence tables and exposes row stores", async () => {
+  test("migrates storage tables and exposes row stores", async () => {
     const { db } = await createBunQueryRunner()
-    const persist = new Persist(db)
+    const storage = new Storage(db)
 
-    await persist.migrate()
+    await storage.migrate()
 
     const connection: Connection<{ path: string }> = makeConnection({
       config: {
@@ -198,13 +202,13 @@ describe("sqlite-backed storage", () => {
       },
       protocol: "bunsqlite",
     })
-    const session = createSession("persist")
+    const session = createSession("storage")
 
-    await persist.connections.upsert(connection)
-    await persist.log.upsert(session)
+    await storage.connections.upsert(connection)
+    await storage.log.upsert(session)
 
-    expect(await persist.connections.get({ id: connection.id, type: "connection" })).toMatchObject(connection)
-    expect(await persist.log.get({ id: session.id, type: "session" })).toMatchObject(session)
+    expect(await storage.connections.get({ id: connection.id, type: "connection" })).toMatchObject(connection)
+    expect(await storage.log.get({ id: session.id, type: "session" })).toMatchObject(session)
   })
 
   test("introspects sqlite objects through the Bun adapter", async () => {

@@ -3,16 +3,12 @@ import {
   createEditorAnalysisSubject,
   getDiagnosticLogicalLine,
   getVisibleEditorAnalysis,
-} from "../../src/lib/editor/analysis"
-import { createEditorBuffer } from "../../src/lib/editor/buffer"
-import {
-  offsetToLineColumn,
-  normalizeHighlightRange,
-  replaceTextRange,
-} from "../../src/lib/editor/text"
-import { selectVisibleSuggestionItems } from "../../src/lib/editor/suggestionMenu"
+} from "../../src/model/editor/analysis"
+import { createEditorBuffer } from "../../src/model/editor/buffer"
+import { offsetToLineColumn, normalizeHighlightRange, replaceTextRange } from "../../src/model/editor/text"
+import { selectVisibleSuggestionItems } from "../../src/model/editor/suggestionMenu"
 
-describe("lib/editor", () => {
+describe("model/editor", () => {
   test("hides stale analysis results and incomplete-input-only diagnostics", () => {
     const previousBuffer = createEditorBuffer("select 1")
     const nextBuffer = createEditorBuffer("select 2", "select 2".length, 1)
@@ -57,7 +53,9 @@ describe("lib/editor", () => {
       column: 3,
       line: 2,
     })
-    expect(getDiagnosticLogicalLine("select\nfrom users", { start: "select\nfr".length, end: "select\nfrom".length })).toBe(1)
+    expect(
+      getDiagnosticLogicalLine("select\nfrom users", { start: "select\nfr".length, end: "select\nfrom".length }),
+    ).toBe(1)
   })
 
   test("selects a focused window of visible suggestion items", () => {
@@ -68,8 +66,8 @@ describe("lib/editor", () => {
   })
 
   test("replaces text ranges with inserted suggestion text", () => {
-    expect(replaceTextRange("select * from us", { start: "select * from ".length, end: "select * from us".length }, "users")).toBe(
-      "select * from users",
-    )
+    expect(
+      replaceTextRange("select * from us", { start: "select * from ".length, end: "select * from us".length }, "users"),
+    ).toBe("select * from users")
   })
 })

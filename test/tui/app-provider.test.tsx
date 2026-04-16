@@ -1,19 +1,21 @@
 import { testRender } from "@opentui/react/test-utils"
 import { afterEach, describe, expect, test } from "bun:test"
 import { act, useEffect, type ReactNode } from "react"
+import { RESULTS_TABLE_FOCUS_ID, RESULTS_TABLE_GRID_AREA_ID } from "../../src/apps/tui/dataview/ResultsTable"
 import {
-  RESULTS_TABLE_FOCUS_ID,
-  RESULTS_TABLE_GRID_AREA_ID,
-} from "../../src/tui/dataview/ResultsTable"
-import { FocusProvider, focusPathSignature, useFocusNavigationState, useFocusTree } from "../../src/tui/focus/context"
-import { App, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID } from "../../src/tui/index"
-import { AddConnectionPane, ADD_CONNECTION_AREA_ID } from "../../src/tui/connection/AddConnectionPane"
-import { PostgresAdapter } from "../../src/lib/adapters/postgres"
-import { onOpenNode, onSelectNode, SIDEBAR_AREA_ID, Sidebar } from "../../src/tui/sidebar/Sidebar"
-import { SIDEBAR_TREE_AREA_ID } from "../../src/tui/sidebar/TreeView"
-import { KeybindProvider } from "../../src/tui/ui/keybind/KeybindProvider"
-import { Text } from "../../src/tui/ui/Text"
-import { SqlVisorProvider, useSqlVisor, useSqlVisorState } from "../../src/tui/useSqlVisor"
+  FocusProvider,
+  focusPathSignature,
+  useFocusNavigationState,
+  useFocusTree,
+} from "../../src/apps/tui/focus/context"
+import { App, RECENT_QUERY_AREA_ID, RECENT_QUERY_FOCUS_ID } from "../../src/apps/tui/index"
+import { AddConnectionPane, ADD_CONNECTION_AREA_ID } from "../../src/apps/tui/connection/AddConnectionPane"
+import { PostgresAdapter } from "../../src/adapters/postgres/PgAdapter"
+import { onOpenNode, onSelectNode, SIDEBAR_AREA_ID, Sidebar } from "../../src/apps/tui/sidebar/Sidebar"
+import { SIDEBAR_TREE_AREA_ID } from "../../src/apps/tui/sidebar/TreeView"
+import { KeybindProvider } from "../../src/apps/tui/ui/keybind/KeybindProvider"
+import { Text } from "../../src/apps/tui/ui/Text"
+import { SqlVisorProvider, useSqlVisor, useSqlVisorState } from "../../src/apps/tui/useSqlVisor"
 import { createEngineStub, createQueryState, makeConnection, makeQueryExecution, makeSavedQuery } from "../support"
 
 type RenderedUi = Awaited<ReturnType<typeof testRender>>
@@ -458,7 +460,7 @@ describe("SqlVisor provider and app", () => {
 
     expectTextOrder(connectionLine, [connection.name, "main", connection.protocol])
     expect(findLineIndex(lines, connection.name)).toBeLessThan(findLineIndex(lines, "some_table"))
-    expect((tableLine?.indexOf("some_table") ?? -1)).toBeGreaterThan(connectionLine?.indexOf(connection.name) ?? -1)
+    expect(tableLine?.indexOf("some_table") ?? -1).toBeGreaterThan(connectionLine?.indexOf(connection.name) ?? -1)
     expect(lines.some((line) => line.includes("main") && !line.includes(connection.name))).toBe(false)
   })
 

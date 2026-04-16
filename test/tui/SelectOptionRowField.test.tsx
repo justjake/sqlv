@@ -1,8 +1,8 @@
 import { RGBA } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
 import { act, useState } from "react"
-import { SelectOptionRowField } from "../../src/tui/form/SelectOptionRowField"
-import { Text } from "../../src/tui/ui/Text"
+import { SelectOptionRowField } from "../../src/apps/tui/form/SelectOptionRowField"
+import { Text } from "../../src/apps/tui/ui/Text"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { render, settleDeferredRender } = createTuiRenderHarness()
@@ -132,7 +132,14 @@ describe("SelectOptionRowField", () => {
       }
 
       return (
-        <SelectOptionRowField autoFocus focusableId="protocol" label="Protocol" onChange={setValue} options={options} value={value} />
+        <SelectOptionRowField
+          autoFocus
+          focusableId="protocol"
+          label="Protocol"
+          onChange={setValue}
+          options={options}
+          value={value}
+        />
       )
     }
 

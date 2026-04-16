@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { useState } from "react"
-import { TextField } from "../../src/tui/form/TextField"
+import { TextField } from "../../src/apps/tui/form/TextField"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, render } = createTuiRenderHarness()
@@ -8,15 +8,24 @@ const { dispatchInput, render } = createTuiRenderHarness()
 describe("TextField", () => {
   test("fills the full input row background instead of only the typed characters", async () => {
     const ui = await render(
-      <TextField autoFocus focusableId="connection-name" label="Connection Name" onChange={() => undefined} value="abc" />,
+      <TextField
+        autoFocus
+        focusableId="connection-name"
+        label="Connection Name"
+        onChange={() => undefined}
+        value="abc"
+      />,
       { height: 6, width: 30 },
     )
 
-    const inputLine = ui.captureSpans().lines.find((line) => line.spans.map((span) => span.text).join("").includes("abc"))
+    const inputLine = ui.captureSpans().lines.find((line) =>
+      line.spans
+        .map((span) => span.text)
+        .join("")
+        .includes("abc"),
+    )
     const backgroundWidth =
-      inputLine?.spans
-        .filter((span) => span.bg.a > 0)
-        .reduce((width, span) => width + span.width, 0) ?? 0
+      inputLine?.spans.filter((span) => span.bg.a > 0).reduce((width, span) => width + span.width, 0) ?? 0
 
     expect(backgroundWidth).toBeGreaterThan("abc".length)
   })
@@ -46,7 +55,9 @@ describe("TextField", () => {
     function Harness() {
       const [value, setValue] = useState("")
 
-      return <TextField autoFocus focusableId="connection-name" label="Connection Name" onChange={setValue} value={value} />
+      return (
+        <TextField autoFocus focusableId="connection-name" label="Connection Name" onChange={setValue} value={value} />
+      )
     }
 
     const ui = await render(<Harness />, { height: 6, width: 30 })

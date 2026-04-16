@@ -1,20 +1,20 @@
 import { describe, expect, test } from "bun:test"
-import type { ConnectionSpec } from "../../src/lib/interface/Adapter"
-import { createId } from "../../src/lib/types/Id"
-import { EpochMillis } from "../../src/lib/types/Log"
-import { OrderString } from "../../src/lib/types/Order"
-import { pendingQueryState, queryStateOrPending } from "../../src/lib/types/QueryState"
-import { Err, Ok, Result, UnwrapError } from "../../src/lib/types/Result"
-import { RowHandle, rowDispatcher, type BaseRow } from "../../src/lib/types/RowStore"
-import { Argument, Identifier, Paginated, ident, namedArg, sql, unsafeRawSQL } from "../../src/lib/types/SQL"
-import { aborter, asyncDefer, cleanup, defer } from "../../src/lib/types/defer"
+import type { ConnectionSpec } from "../../src/spi/Adapter"
+import { createId } from "../../src/model/Id"
+import { EpochMillis } from "../../src/model/Log"
+import { OrderString } from "../../src/model/Order"
+import { pendingQueryState, queryStateOrPending } from "../../src/model/QueryState"
+import { Err, Ok, Result, UnwrapError } from "../../src/model/Result"
+import { RowHandle, rowDispatcher, type BaseRow } from "../../src/model/RowStore"
+import { Argument, Identifier, Paginated, ident, namedArg, sql, unsafeRawSQL } from "../../src/model/SQL"
+import { aborter, asyncDefer, cleanup, defer } from "../../src/model/defer"
 import {
   mustBeArray,
   mustBeDefined,
   mustBeOptionalSingle,
   mustBeSingle,
   unreachable,
-} from "../../src/lib/types/unreachable"
+} from "../../src/model/unreachable"
 
 type TestRow = BaseRow & {
   count?: number

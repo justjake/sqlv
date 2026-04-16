@@ -1,13 +1,13 @@
 import type { KeyEvent } from "@opentui/core"
 import { describe, expect, test } from "bun:test"
 import { act, useEffect } from "react"
-import { Focusable } from "../../src/tui/focus/Focusable"
-import { useFocusNavigationState, useFocusTree } from "../../src/tui/focus/context"
-import { Shortcut } from "../../src/tui/Shortcut"
-import { normalizeShortcutKeyName } from "../../src/tui/ui/shortcutKeys"
-import { type AliasedByNavKey, translateNavKey } from "../../src/tui/ui/keybind/navKeys"
-import { labelizeShortcutInput, parseKeys, stepMatches } from "../../src/tui/ui/keybind/shortcutSyntax"
-import { useNavKeys } from "../../src/tui/ui/keybind/useNavKeys"
+import { Focusable } from "../../src/apps/tui/focus/Focusable"
+import { useFocusNavigationState, useFocusTree } from "../../src/apps/tui/focus/context"
+import { Shortcut } from "../../src/apps/tui/Shortcut"
+import { normalizeShortcutKeyName } from "../../src/apps/tui/ui/shortcutKeys"
+import { type AliasedByNavKey, translateNavKey } from "../../src/apps/tui/ui/keybind/navKeys"
+import { labelizeShortcutInput, parseKeys, stepMatches } from "../../src/apps/tui/ui/keybind/shortcutSyntax"
+import { useNavKeys } from "../../src/apps/tui/ui/keybind/useNavKeys"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { dispatchInput, render, settleDeferredRender } = createTuiRenderHarness()
@@ -73,10 +73,7 @@ function GlobalShortcutHarness(props: { onHit: (value: string) => void }) {
   )
 }
 
-function NavKeysRegistrar(props: {
-  onHit: (value: string) => void
-  preventAliases?: readonly AliasedByNavKey[]
-}) {
+function NavKeysRegistrar(props: { onHit: (value: string) => void; preventAliases?: readonly AliasedByNavKey[] }) {
   useNavKeys({
     handlers: {
       activate: () => props.onHit("activate"),
@@ -93,10 +90,7 @@ function NavKeysRegistrar(props: {
   return null
 }
 
-function NavKeysHarness(props: {
-  onHit: (value: string) => void
-  preventAliases?: readonly AliasedByNavKey[]
-}) {
+function NavKeysHarness(props: { onHit: (value: string) => void; preventAliases?: readonly AliasedByNavKey[] }) {
   const tree = useFocusTree()
 
   useEffect(() => {
@@ -151,7 +145,9 @@ describe("Shortcut", () => {
 
   test("supports alternative shortcut sequences", async () => {
     const hits: string[] = []
-    const ui = await render(<Shortcut keys={{ or: ["up", "k"] }} enabled label="Prev" onKey={() => hits.push("prev")} />)
+    const ui = await render(
+      <Shortcut keys={{ or: ["up", "k"] }} enabled label="Prev" onKey={() => hits.push("prev")} />,
+    )
 
     expect(ui.captureCharFrame()).toContain("↑ / k Prev")
 
@@ -351,12 +347,8 @@ describe("Shortcut", () => {
   test("collapses ctrl and command alternatives for display by platform", () => {
     expect(labelizeShortcutInput({ or: ["command+return", "ctrl+return"] }, "darwin")).toBe("⌘⮐")
     expect(labelizeShortcutInput({ or: ["command+return", "ctrl+return"] }, "linux")).toBe("⌃⮐")
-    expect(labelizeShortcutInput({ or: ["option+home", "command+home", "ctrl+home"] }, "darwin")).toBe(
-      "⌥home / ⌘home",
-    )
-    expect(labelizeShortcutInput({ or: ["option+home", "command+home", "ctrl+home"] }, "linux")).toBe(
-      "⌥home / ⌃home",
-    )
+    expect(labelizeShortcutInput({ or: ["option+home", "command+home", "ctrl+home"] }, "darwin")).toBe("⌥home / ⌘home")
+    expect(labelizeShortcutInput({ or: ["option+home", "command+home", "ctrl+home"] }, "linux")).toBe("⌥home / ⌃home")
   })
 
   test("renders platform-preferred ctrl and command alternatives once", async () => {

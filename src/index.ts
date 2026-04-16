@@ -1,4 +1,25 @@
-export { BunSqlAdapter, type BunSqlConfig } from "./lib/adapters/BunSqlAdapter"
+export { AdapterRegistry } from "./api/AdapterRegistry"
+export {
+  SqlVisor,
+  type AddConnectionInput,
+  type ConnectionObjectsState,
+  type ConnectionsState,
+  type ConnectionSuggestionsState,
+  type DiscoveredConnectionSuggestion,
+  type QueryRef,
+  type QueryExecutionState,
+  type RestoreSavedQueryResult,
+  type RunQueryInput,
+  type SaveQueryAsNewInput,
+  type SaveSavedQueryChangesInput,
+  type StorageStore,
+  type SqlVisorCreateOptions,
+  type SqlVisorStorage,
+  type SqlVisorState,
+} from "./api/SqlVisor"
+export { createBunSqlVisor, type CreateBunSqlVisorOptions } from "./platforms/bun/createBunSqlVisor"
+export { init } from "./api/init"
+export { BunSqlAdapter, type BunSqlConfig } from "./adapters/sqlite/bun/BunSqliteAdapter"
 export {
   PostgresAdapter,
   postgres,
@@ -8,13 +29,28 @@ export {
   type PostgresConfig,
   type PostgresqlProtocolResolution,
   type PostgresSQL,
-} from "./lib/adapters/postgres"
-export { sqlite, type SqliteArg, type SqliteSQL } from "./lib/adapters/sqlite"
-export { TursoAdapter, type TursoConfig } from "./lib/adapters/TursoAdapter"
-export { createLocalPersistence, createLocalPersistenceConnection } from "./lib/createLocalPersistence"
-export { FocusTree } from "./lib/focus/FocusTree"
-export { chooseNextFocusNavigable, type MeasuredFocusNode } from "./lib/focus/navigation"
-export { ROOT_FOCUS_PATH, focusPath, focusPathAncestors, focusPathKey, focusPathSubpath, isAncestorFocusPath, sameFocusPath } from "./lib/focus/paths"
+} from "./adapters/postgres/PgAdapter"
+export { sqlite, type SqliteArg, type SqliteSQL } from "./adapters/sqlite/sqlite"
+export { TursoAdapter, type TursoConfig } from "./adapters/sqlite/turso/TursoAdapter"
+export {
+  createLocalStorage,
+  createLocalStorageConnection,
+  createSession,
+  defaultStorageLocation,
+  type LocalStorage,
+  type StorageStore as LocalStorageStore,
+} from "./platforms/bun/storage/createLocalStorage"
+export { FocusTree } from "./apps/framework/focus/FocusTree"
+export { chooseNextFocusNavigable, type MeasuredFocusNode } from "./apps/framework/focus/navigation"
+export {
+  ROOT_FOCUS_PATH,
+  focusPath,
+  focusPathAncestors,
+  focusPathKey,
+  focusPathSubpath,
+  isAncestorFocusPath,
+  sameFocusPath,
+} from "./apps/framework/focus/paths"
 export {
   type FocusApplyContext,
   type FocusApplyReason,
@@ -35,9 +71,8 @@ export {
   type FocusNavigationParticipant,
   type FocusNavigationSnapshot,
   type FocusNodeRegistration,
-} from "./lib/focus/types"
+} from "./apps/framework/focus/types"
 export {
-  AdapterRegistry,
   type Adapter,
   type ConnectionBooleanField,
   type ConnectionField,
@@ -50,23 +85,7 @@ export {
   type ConnectionTextField,
   type Protocol,
   type ProtocolConfig,
-} from "./lib/interface/Adapter"
-export {
-  SqlVisor,
-  type AddConnectionInput,
-  type ConnectionObjectsState,
-  type ConnectionsState,
-  type ConnectionSuggestionsState,
-  type DiscoveredConnectionSuggestion,
-  type QueryRef,
-  type QueryExecutionState,
-  type RestoreSavedQueryResult,
-  type RunQueryInput,
-  type SaveQueryAsNewInput,
-  type SaveSavedQueryChangesInput,
-  type SqlVisorCreateOptions,
-  type SqlVisorState,
-} from "./lib/SqlVisor"
+} from "./spi/Adapter"
 export {
   createEditorAnalysisSubject,
   filterDisplayableEditorAnalysis,
@@ -77,7 +96,7 @@ export {
   type EditorAnalysisState,
   type EditorAnalysisStatus,
   type EditorAnalysisSubject,
-} from "./lib/editor/analysis"
+} from "./model/editor/analysis"
 export {
   applyEditorBufferPatch,
   clampCursorOffset,
@@ -88,7 +107,7 @@ export {
   type EditorChange,
   type EditorChangeKind,
   type EditorTextEdit,
-} from "./lib/editor/buffer"
+} from "./model/editor/buffer"
 export {
   closedEditorCompletionState,
   decideEditorCompletion,
@@ -104,15 +123,20 @@ export {
   type EditorCompletionState,
   type EditorCompletionStatus,
   type SuggestionItem,
-} from "./lib/editor/completion"
-export { createEmptyEditorState, type EditorState } from "./lib/editor/state"
-export { selectVisibleSuggestionItems } from "./lib/editor/suggestionMenu"
-export { normalizeHighlightRange, offsetToLineColumn, replaceTextRange, type EditorRange } from "./lib/editor/text"
+} from "./model/editor/completion"
+export { createEmptyEditorState, type EditorState } from "./model/editor/state"
+export { selectVisibleSuggestionItems } from "./model/editor/suggestionMenu"
+export { normalizeHighlightRange, offsetToLineColumn, replaceTextRange, type EditorRange } from "./model/editor/text"
+export { KnownObjectsSuggestionProvider } from "./engine/suggestions/KnownObjectsSuggestionProvider"
+export { type SuggestionProvider, type SuggestionRequest } from "./spi/SuggestionProvider"
+export { type SavedQuery } from "./model/SavedQuery"
 export {
-  KnownObjectsSuggestionProvider,
-} from "./lib/suggestions/KnownObjectsSuggestionProvider"
-export { type SuggestionProvider, type SuggestionRequest } from "./lib/suggestions/types"
-export { type SavedQuery } from "./lib/types/SavedQuery"
+  defaultAppState,
+  type AppStateId,
+  type AppStateRow,
+  type AppStateSnapshot,
+  type AppStateStore,
+} from "./model/AppState"
 export {
   createSettingsRow,
   defaultSettingsState,
@@ -122,20 +146,20 @@ export {
   type SettingsSchema,
   type SettingsState,
   type SettingsStore,
-} from "./lib/types/Settings"
-export { type QueryExecution, type QueryExecutionStatus, type QueryFlow, type QueryInitiator } from "./lib/types/Log"
+} from "./model/Settings"
+export { type QueryExecution, type QueryExecutionStatus, type QueryFlow, type QueryInitiator } from "./model/Log"
 export {
   type ExplainColumn,
   type ExplainDiagnostic,
   type ExplainDiagnosticSeverity,
   type ExplainInput,
   type ExplainResult,
-} from "./lib/types/Explain"
+} from "./model/Explain"
 export {
   pendingQueryState,
   queryStateOrPending,
   type FetchStatus,
   type QueryState,
   type QueryStatus,
-} from "./lib/types/QueryState"
-export { SQL, unsafeRawSQL as rawSQL, sql, type SQLSourceOptions, type SQLValue } from "./lib/types/SQL"
+} from "./model/QueryState"
+export { SQL, unsafeRawSQL as rawSQL, sql, type SQLSourceOptions, type SQLValue } from "./model/SQL"

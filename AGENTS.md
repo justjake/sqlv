@@ -7,9 +7,9 @@ This file gives repo-specific guidance for agents working in `sqlv`.
 `sqlv` is a Bun + TypeScript project with two main surfaces:
 
 - a reusable library exported from [`src/index.ts`](./src/index.ts)
-- an OpenTUI application rooted at [`src/tui/index.tsx`](./src/tui/index.tsx)
+- an OpenTUI application rooted at [`src/apps/tui/index.tsx`](./src/apps/tui/index.tsx)
 
-The central domain object is `SqlVisor` in [`src/lib/SqlVisor.ts`](./src/lib/SqlVisor.ts). It owns:
+The central engine type is `SqlVisor` in [`src/engine/SqlVisor.ts`](./src/engine/SqlVisor.ts), re-exported publicly from [`src/api/SqlVisor.ts`](./src/api/SqlVisor.ts). It owns:
 
 - connection state
 - selected connection
@@ -26,7 +26,8 @@ The engine is intended to be the public API boundary. The TUI should consume eng
 
 ### Engine
 
-- `SqlVisor.create()` constructs the engine, adapter registry, persistence, and query client.
+- `SqlVisor.create()` is the platform-neutral engine factory. It expects explicit storage plus an adapter registry.
+- `createBunSqlVisor()` in [`src/platforms/bun/createBunSqlVisor.ts`](./src/platforms/bun/createBunSqlVisor.ts) is the Bun/local composition root.
 - The engine uses `@tanstack/query-core` internally for async loading and query-state transitions.
 - Public state is intentionally domain-shaped but follows the TanStack query state model (`status`, `fetchStatus`, `data`, `error`, timestamps/counters).
 
@@ -34,20 +35,21 @@ The engine is intended to be the public API boundary. The TUI should consume eng
 
 - Database access is adapter-driven.
 - Built-in adapters currently include:
-  - `bunsqlite` via [`src/lib/adapters/BunSqlAdapter.ts`](./src/lib/adapters/BunSqlAdapter.ts)
-  - `turso` via [`src/lib/adapters/TursoAdapter.ts`](./src/lib/adapters/TursoAdapter.ts)
+  - `bunsqlite` via [`src/adapters/sqlite/bun/BunSqliteAdapter.ts`](./src/adapters/sqlite/bun/BunSqliteAdapter.ts)
+  - `turso` via [`src/adapters/sqlite/turso/TursoAdapter.ts`](./src/adapters/sqlite/turso/TursoAdapter.ts)
 - Adapters can provide `ConnectionSpec` for UI-driven connection creation. The library should stay UI-agnostic; UI hosts render those specs.
 
-### Persistence
+### Storage
 
-- Local persistence bootstrap lives in [`src/lib/createLocalPersistence.ts`](./src/lib/createLocalPersistence.ts).
-- The default persistence connection is a local Turso-backed encrypted SQLite file.
-- Persistent row storage is implemented through `Persist` plus the sqlite row-store helpers, not through ad hoc tables scattered through the codebase.
+- Local Bun storage bootstrap lives in [`src/platforms/bun/storage/createLocalStorage.ts`](./src/platforms/bun/storage/createLocalStorage.ts).
+- The default Bun storage connection is a local Turso-backed encrypted SQLite file.
+- App-specific host preferences belong in app state, not core settings.
+- Core row storage is implemented through [`src/platforms/bun/storage/Storage.ts`](./src/platforms/bun/storage/Storage.ts) plus the sqlite row-store helpers, not through ad hoc tables scattered through the codebase.
 
 ### TUI
 
 - The TUI is a host for `SqlVisor`, not a second state model.
-- Prefer pushing domain behavior into `src/lib` and keeping `src/tui` focused on rendering, input binding, and presentation-specific concerns.
+- Prefer pushing domain behavior into `src/engine`, `src/model`, and `src/spi`, and keep `src/apps/tui` focused on rendering, input binding, and presentation-specific concerns.
 
 ## Repo Conventions
 
@@ -69,7 +71,7 @@ Do not add compatibility layers unless the user explicitly asks for one.
 The intended direction is an easy public engine interface around the existing complexity. Keep that in mind when making changes:
 
 - prefer domain concepts over transport/mechanism concepts
-- avoid leaking React/OpenTUI details into `src/lib`
+- avoid leaking React/OpenTUI details into `src/engine`, `src/model`, or `src/spi`
 - avoid leaking low-level TanStack mechanisms such as observers into the public engine surface unless explicitly intended
 
 ### Cleanup Bias
@@ -102,13 +104,13 @@ Useful repo commands:
 
 The focus system is split intentionally:
 
-- universal focus model in [`src/lib/focus`](./src/lib/focus)
-- OpenTUI bindings in [`src/tui/focus`](./src/tui/focus)
+- universal focus model in [`src/apps/framework/focus`](./src/apps/framework/focus)
+- OpenTUI bindings in [`src/apps/tui/focus`](./src/apps/tui/focus)
 
 Read these before making substantial focus changes:
 
-- [`src/lib/focus/README.md`](./src/lib/focus/README.md)
-- [`src/tui/focus/README.md`](./src/tui/focus/README.md)
+- [`src/apps/framework/focus/README.md`](./src/apps/framework/focus/README.md)
+- [`src/apps/tui/focus/README.md`](./src/apps/tui/focus/README.md)
 
 ### Core Principles
 
@@ -141,8 +143,8 @@ Read these before making substantial focus changes:
 
 If you change the focus model or the TUI bindings:
 
-- keep `src/lib/focus` platform-agnostic
-- keep OpenTUI-specific behavior in `src/tui/focus`
+- keep `src/apps/framework/focus` platform-agnostic
+- keep OpenTUI-specific behavior in `src/apps/tui/focus`
 - update or add tests in `test/lib/focus.test.ts` and relevant TUI integration tests
 - update the focus READMEs if the design meaningfully changes
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { act, useState } from "react"
-import { SelectField } from "../../src/tui/form/SelectField"
-import { Text } from "../../src/tui/ui/Text"
+import { SelectField } from "../../src/apps/tui/form/SelectField"
+import { Text } from "../../src/apps/tui/ui/Text"
 import { createTuiRenderHarness } from "./testUtils"
 
 const { render, settleDeferredRender } = createTuiRenderHarness()
