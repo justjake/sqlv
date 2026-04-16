@@ -20,19 +20,11 @@ export type NavKeyHandler = (key: KeyEvent) => void
 export type NavHandlers = Partial<Record<NavKey, NavKeyHandler>>
 
 export type UseNavKeysOptions = {
-  detect?: (key: KeyEvent) => boolean
   enabled?: boolean
   global?: boolean
   handlers: NavHandlers
   preventAliases?: readonly AliasedByNavKey[]
 }
-
-const navKeyNames = Object.keys(NavKeyAlias) as NavKeyName[]
-const navKeyModifierPrefixes = buildNavKeyModifierPrefixes()
-
-export const allNavKeys = navKeyModifierPrefixes.flatMap((prefix) =>
-  navKeyNames.map((name) => `${prefix}${name}` as NavKey),
-)
 
 export function translateNavKey(navKey: NavKey): ShortcutKeyInput {
   const { modifiers, name } = splitNavKey(navKey)
@@ -44,8 +36,9 @@ export function resolveNavKeyInput(
   navKey: NavKey,
   preventedAliases: ReadonlySet<string>,
 ): ShortcutKeyInput | undefined {
-  const translatedKeys = NavKeyAlias[splitNavKey(navKey).name]
-    .map((key) => `${splitNavKey(navKey).modifiers}${key}` as ShortcutModifiedKey)
+  const { modifiers, name } = splitNavKey(navKey)
+  const translatedKeys = NavKeyAlias[name]
+    .map((key) => `${modifiers}${key}` as ShortcutModifiedKey)
     .filter((key) => !preventedAliases.has(key))
 
   if (translatedKeys.length === 0) {
@@ -55,32 +48,16 @@ export function resolveNavKeyInput(
   return alternativesToShortcutKeyInput(translatedKeys)
 }
 
+export function navHandlerEntries(handlers: NavHandlers): ReadonlyArray<readonly [NavKey, NavKeyHandler]> {
+  return Object.entries(handlers).filter((entry): entry is [NavKey, NavKeyHandler] => entry[1] !== undefined)
+}
+
 function alternativesToShortcutKeyInput(keys: readonly ShortcutModifiedKey[]): ShortcutKeyInput {
   if (keys.length === 1) {
     return keys[0]!
   }
 
   return { or: keys }
-}
-
-function buildNavKeyModifierPrefixes(): readonly ShortcutModifiers[] {
-  const ctrlPrefixes = ["", "ctrl+"] as const
-  const optionPrefixes = ["", "option+"] as const
-  const shiftPrefixes = ["", "shift+"] as const
-  const commandPrefixes = ["", "command+", "super+"] as const
-  const prefixes: ShortcutModifiers[] = []
-
-  for (const ctrl of ctrlPrefixes) {
-    for (const option of optionPrefixes) {
-      for (const shift of shiftPrefixes) {
-        for (const command of commandPrefixes) {
-          prefixes.push(`${ctrl}${option}${shift}${command}` as ShortcutModifiers)
-        }
-      }
-    }
-  }
-
-  return prefixes
 }
 
 function splitNavKey(navKey: NavKey): { modifiers: ShortcutModifiers; name: NavKeyName } {

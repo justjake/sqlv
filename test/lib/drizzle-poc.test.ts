@@ -39,14 +39,21 @@ function createUserSchemaWithRequiredAge() {
   return { users }
 }
 
-function openLibsqlDb<TSchema extends Record<string, unknown>>(dbPath: string, schema?: TSchema) {
+function openLibsqlDb<TSchema extends Record<string, unknown>>(
+  dbPath: string,
+  options: {
+    encryptionKey?: string
+    schema?: TSchema
+  } = {},
+) {
   const client = createClient({
+    encryptionKey: options.encryptionKey,
     url: pathToFileURL(dbPath).href,
   })
 
   return {
     client,
-    db: schema ? drizzle(client, { schema }) : drizzle(client),
+    db: options.schema ? drizzle(client, { schema: options.schema }) : drizzle(client),
   }
 }
 
@@ -67,7 +74,7 @@ describe("drizzle runtime migration POC", () => {
     const dir = await createTempDir()
     const dbPath = join(dir, "empty.db")
     const schema = createUserSchemaV1()
-    const { client, db } = openLibsqlDb(dbPath, schema)
+    const { client, db } = openLibsqlDb(dbPath, { schema })
 
     try {
       expect(await getColumnNames(db, "users")).toEqual([])
@@ -92,7 +99,7 @@ describe("drizzle runtime migration POC", () => {
     const dir = await createTempDir()
     const dbPath = join(dir, "additive.db")
     const schemaV1 = createUserSchemaV1()
-    const initial = openLibsqlDb(dbPath, schemaV1)
+    const initial = openLibsqlDb(dbPath, { schema: schemaV1 })
     let initialClient: Client | undefined = initial.client
     let reopenedClient: Client | undefined
 
@@ -106,7 +113,7 @@ describe("drizzle runtime migration POC", () => {
       initialClient = undefined
 
       const schemaV2 = createUserSchemaV2()
-      const reopened = openLibsqlDb(dbPath, schemaV2)
+      const reopened = openLibsqlDb(dbPath, { schema: schemaV2 })
       reopenedClient = reopened.client
 
       const push = await pushSQLiteSchema(schemaV2, reopened.db)
@@ -137,7 +144,7 @@ describe("drizzle runtime migration POC", () => {
     const dir = await createTempDir()
     const dbPath = join(dir, "destructive.db")
     const schemaV1 = createUserSchemaV1()
-    const initial = openLibsqlDb(dbPath, schemaV1)
+    const initial = openLibsqlDb(dbPath, { schema: schemaV1 })
     let initialClient: Client | undefined = initial.client
     let reopenedClient: Client | undefined
 
@@ -151,7 +158,7 @@ describe("drizzle runtime migration POC", () => {
       initialClient = undefined
 
       const schemaV2 = createUserSchemaWithRequiredAge()
-      const reopened = openLibsqlDb(dbPath, schemaV2)
+      const reopened = openLibsqlDb(dbPath, { schema: schemaV2 })
       reopenedClient = reopened.client
 
       const push = await pushSQLiteSchema(schemaV2, reopened.db)
@@ -185,6 +192,88 @@ describe("drizzle runtime migration POC", () => {
       ).rejects.toThrow("Can't find meta/_journal.json file")
     } finally {
       client.close()
+      await removePath(dir)
+    }
+  })
+
+  test("supports encrypted runtime schema push and reopen with the same key", async () => {
+    const dir = await createTempDir()
+    const dbPath = join(dir, "encrypted.db")
+    const encryptionKey = "a".repeat(64)
+    const schema = createUserSchemaV1()
+    const initial = openLibsqlDb(dbPath, {
+      encryptionKey,
+      schema,
+    })
+    let initialClient: Client | undefined = initial.client
+    let reopenedClient: Client | undefined
+
+    try {
+      const push = await pushSQLiteSchema(schema, initial.db)
+
+      expect(push.hasDataLoss).toBe(false)
+      await push.apply()
+      await initial.db.insert(schema.users).values({
+        id: "user-1",
+        name: "Ada",
+      })
+
+      initialClient.close()
+      initialClient = undefined
+
+      const reopened = openLibsqlDb(dbPath, {
+        encryptionKey,
+        schema,
+      })
+      reopenedClient = reopened.client
+
+      const rows = await reopened.db.select().from(schema.users)
+      expect(rows).toEqual([
+        {
+          id: "user-1",
+          name: "Ada",
+        },
+      ])
+    } finally {
+      reopenedClient?.close()
+      initialClient?.close()
+      await removePath(dir)
+    }
+  })
+
+  test("rejects querying an encrypted sqlite file with the wrong key", async () => {
+    const dir = await createTempDir()
+    const dbPath = join(dir, "encrypted-wrong-key.db")
+    const encryptionKey = "b".repeat(64)
+    const wrongKey = "c".repeat(64)
+    const schema = createUserSchemaV1()
+    const initial = openLibsqlDb(dbPath, {
+      encryptionKey,
+      schema,
+    })
+    let initialClient: Client | undefined = initial.client
+    let wrongClient: Client | undefined
+
+    try {
+      await (await pushSQLiteSchema(schema, initial.db)).apply()
+      await initial.db.insert(schema.users).values({
+        id: "user-1",
+        name: "Ada",
+      })
+
+      initialClient.close()
+      initialClient = undefined
+
+      const wrong = openLibsqlDb(dbPath, {
+        encryptionKey: wrongKey,
+        schema,
+      })
+      wrongClient = wrong.client
+
+      await expect(wrong.db.select().from(schema.users).execute()).rejects.toThrow()
+    } finally {
+      wrongClient?.close()
+      initialClient?.close()
       await removePath(dir)
     }
   })

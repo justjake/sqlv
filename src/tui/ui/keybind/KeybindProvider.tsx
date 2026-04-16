@@ -139,9 +139,6 @@ export function KeybindProvider({ chordTimeout = 2000, children }: KeybindProvid
           if (!sequenceEquals(entry.sequence, candidate)) {
             return false
           }
-          if (entry.detect && !entry.detect(key)) {
-            return false
-          }
           return true
         })
 
@@ -180,9 +177,6 @@ export function KeybindProvider({ chordTimeout = 2000, children }: KeybindProvid
           return false
         }
         if (!stepMatches(entry.sequence[0]!, key)) {
-          return false
-        }
-        if (entry.detect && !entry.detect(key)) {
           return false
         }
         return true
@@ -238,7 +232,7 @@ function findNewestMatchingEntry(
 ): ShortcutEntry | undefined {
   for (let index = registry.length - 1; index >= 0; index -= 1) {
     const entry = registry[index]!
-    if (!entry.enabled()) {
+    if (entry.enabled === false) {
       continue
     }
     if (!entryMatchesScope(entry, scopeKey)) {
@@ -260,7 +254,7 @@ function hasChordPrefixForScopes(
   for (const scopeKey of scopeKeys) {
     for (let index = registry.length - 1; index >= 0; index -= 1) {
       const entry = registry[index]!
-      if (!entry.enabled()) {
+      if (entry.enabled === false) {
         continue
       }
       if (!entryMatchesScope(entry, scopeKey) || entry.sequence.length <= candidate.length) {

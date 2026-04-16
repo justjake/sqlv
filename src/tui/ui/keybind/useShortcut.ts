@@ -3,7 +3,6 @@ import type { ShortcutKeyInput } from "./shortcutSyntax"
 import { useRegisterShortcuts } from "./useRegisterShortcuts"
 
 export type UseShortcutOptions = {
-  detect?: (key: KeyEvent) => boolean
   enabled?: boolean
   global?: boolean
   keys: ShortcutKeyInput

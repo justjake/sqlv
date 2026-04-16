@@ -4,8 +4,7 @@ import type { FocusPath } from "../../../lib/focus"
 import type { KeyStep } from "./shortcutSyntax"
 
 export type ShortcutRegistration = {
-  detect?: (key: KeyEvent) => boolean
-  enabled: () => boolean
+  enabled?: boolean
   global?: boolean
   onKey?: (key: KeyEvent) => void
   scopePath: FocusPath | undefined
