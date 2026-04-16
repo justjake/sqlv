@@ -120,3 +120,19 @@ export function isCompositionRoot(file: string): boolean {
   const subpath = stripExt(info.subpath)
   return compiledCompositionRoots.some(({ layer, glob }) => layer === info.layer && glob.match(subpath))
 }
+
+const TEST_FILE_RE = /\.test\.(tsx?|jsx?)$/
+
+/** Test files may cross layer boundaries to build fixtures from any layer. */
+export function isTestFile(file: string): boolean {
+  return TEST_FILE_RE.test(file)
+}
+
+/**
+ * A file is exempt from layer dependency checks when it is either a
+ * composition root (architectural) or a test file (test-only). Both can
+ * legitimately wire concrete implementations across layers.
+ */
+export function isLayerBoundaryExempt(file: string): boolean {
+  return isTestFile(file) || isCompositionRoot(file)
+}

@@ -32,7 +32,7 @@ export async function createBunSqlVisor(options: CreateBunSqlVisorOptions = {}):
     }
   }
 
-  const storage = options.storage ?? (await createLocalStorage({ app, registry }))
+  const storage = options.storage ?? (await createLocalStorage({ app }))
   return SqlVisor.create({
     storage,
     queryClient: options.queryClient,

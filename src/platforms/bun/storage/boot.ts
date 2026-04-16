@@ -11,8 +11,10 @@ import { EpochMillis, type Session } from "#domain/Log"
 
 import { DEFAULT_SQLVISOR_APP, defaultStoragePath as resolveDefaultStoragePath } from "../paths"
 
+import { appState } from "./schema/appState"
 import { auditEvents } from "./schema/auditEvents"
 import { connections } from "./schema/connections"
+import { flows } from "./schema/flows"
 import { queryExecutions } from "./schema/queryExecutions"
 import { savedQueries } from "./schema/savedQueries"
 import { sessions } from "./schema/sessions"
@@ -20,7 +22,6 @@ import { settings } from "./schema/settings"
 
 const APP_NAME = DEFAULT_SQLVISOR_APP
 const BUNDLE_ID = `tl.jake.${APP_NAME}`
-const ENCRYPTION_SECRET_DEFAULT_NAME = `${APP_NAME}_storage_encryption_key`
 
 export type SecretRef = { service: string; name: string }
 
@@ -32,8 +33,10 @@ export type SecretStore = {
 }
 
 export const storageSchema = {
+  appState,
   auditEvents,
   connections,
+  flows,
   queryExecutions,
   savedQueries,
   sessions,
@@ -82,18 +85,23 @@ export function defaultSecretStore(): SecretStore {
   return (Bun as any).secrets
 }
 
-export function defaultStoragePath() {
-  return resolveDefaultStoragePath(APP_NAME)
+export function defaultStoragePath(app = APP_NAME) {
+  return resolveDefaultStoragePath(app)
+}
+
+function defaultSecretName(app = APP_NAME): string {
+  return `${APP_NAME}_${app}_encryption_key`
 }
 
 export async function getExistingLocalStorageEncryptionKey(
   secrets = defaultSecretStore(),
+  app = APP_NAME,
 ): Promise<string | undefined> {
   try {
     return (
       (await secrets.get({
         service: BUNDLE_ID,
-        name: ENCRYPTION_SECRET_DEFAULT_NAME,
+        name: defaultSecretName(app),
       })) ?? undefined
     )
   } catch {
@@ -101,13 +109,13 @@ export async function getExistingLocalStorageEncryptionKey(
   }
 }
 
-export async function getOrCreateLocalStorageEncryptionKey(secrets: SecretStore): Promise<string> {
-  let key = await getExistingLocalStorageEncryptionKey(secrets)
+export async function getOrCreateLocalStorageEncryptionKey(secrets: SecretStore, app = APP_NAME): Promise<string> {
+  let key = await getExistingLocalStorageEncryptionKey(secrets, app)
   if (!key) {
     key = crypto.getRandomValues(Buffer.alloc(32)).toString("hex")
     await secrets.set({
       service: BUNDLE_ID,
-      name: ENCRYPTION_SECRET_DEFAULT_NAME,
+      name: defaultSecretName(app),
       value: key,
     })
   }
@@ -130,11 +138,12 @@ export async function bootLocalStorage(
     session?: Session
   } = {},
 ): Promise<BootLocalStorageResult> {
-  const dbPath = args.dbPath ?? defaultStoragePath()
+  const app = args.app ?? APP_NAME
+  const dbPath = args.dbPath ?? defaultStoragePath(app)
   await mkdir(path.dirname(dbPath), { recursive: true })
 
   const encryptionKey =
-    args.encryptionKey ?? (await getOrCreateLocalStorageEncryptionKey(args.secrets ?? defaultSecretStore()))
+    args.encryptionKey ?? (await getOrCreateLocalStorageEncryptionKey(args.secrets ?? defaultSecretStore(), app))
   const client = createClient({
     encryptionKey,
     url: pathToFileURL(dbPath).href,
@@ -159,7 +168,7 @@ export async function bootLocalStorage(
       await push.apply()
     }
 
-    const session = args.session ?? createStorageSession(args.app ?? APP_NAME)
+    const session = args.session ?? createStorageSession(app)
     await db.insert(sessions).values({
       app: session.app,
       createdAt: session.createdAt,

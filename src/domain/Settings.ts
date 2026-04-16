@@ -1,5 +1,5 @@
 import type { EpochMillis } from "./EpochMillis"
-import type { RowStore } from "./RowStore"
+import type { MutableRowStore } from "./RowStore"
 
 export type SettingsSchema = {
   workspace: {
@@ -25,7 +25,7 @@ export type SettingsState = {
   [Id in SettingsId]: SettingsSchema[Id]
 }
 
-export type SettingsStore = RowStore<AnySettingsRow>
+export type SettingsStore = MutableRowStore<AnySettingsRow>
 
 export function defaultSettingsState(): SettingsState {
   return {

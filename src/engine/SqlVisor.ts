@@ -42,7 +42,7 @@ import { EpochMillis, type LogEntry, type QueryExecution, type QueryFlow, type S
 import type { ObjectInfo } from "#domain/objects"
 import { OrderString } from "#domain/Order"
 import { pendingQueryState, queryStateOrPending, type QueryState } from "#domain/QueryState"
-import type { RowStore } from "#domain/RowStore"
+import type { MutableRowStore } from "#domain/RowStore"
 import type { SavedQuery } from "#domain/SavedQuery"
 import {
   defaultSettingsState,
@@ -145,9 +145,9 @@ export type SqlVisorCreateOptions = {
 }
 
 export type StorageStore = {
-  connections: RowStore<Connection<any>>
-  log: RowStore<LogEntry>
-  savedQueries: RowStore<SavedQuery>
+  connections: MutableRowStore<Connection<any>>
+  log: MutableRowStore<LogEntry>
+  savedQueries: MutableRowStore<SavedQuery>
   settings: SettingsStore
   appState: AppStateStore
 }

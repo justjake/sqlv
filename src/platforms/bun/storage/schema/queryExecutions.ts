@@ -3,16 +3,10 @@ import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import type { Json } from "#domain/Json"
 import type { QueryExecutionStatus, QueryInitiator } from "#domain/Log"
 
-import type { Protocol } from "#spi/Adapter"
-
 import { epochMillis, jsonText } from "./shared"
 
 export type QueryExecutionSqlArgs = Json[]
 export type QueryExecutionRowData = Record<string, Json>
-export type QueryExecutionResultData = {
-  rows: QueryExecutionRowData[]
-  columns?: string[]
-}
 
 export const queryExecutions = sqliteTable(
   "query_executions",
@@ -21,16 +15,14 @@ export const queryExecutions = sqliteTable(
     sessionId: text("session_id").notNull(),
     connectionId: text("connection_id").notNull(),
     savedQueryId: text("saved_query_id"),
-    connectionName: text("connection_name").notNull(),
-    connectionProtocol: text("connection_protocol").$type<Protocol>().notNull(),
     initiator: text("initiator").$type<QueryInitiator>().notNull(),
     parentFlowId: text("parent_flow_id"),
     createdAt: epochMillis("created_at").notNull(),
     updatedAt: epochMillis("updated_at"),
     finishedAt: epochMillis("finished_at"),
-    databaseName: text("database_name"),
-    schemaName: text("schema_name"),
-    tableName: text("table_name"),
+    database: text("database"),
+    schema: text("schema"),
+    table: text("table"),
     sqlSource: text("sql_source").notNull(),
     sqlArgs: jsonText<QueryExecutionSqlArgs>("sql_args").notNull(),
     sensitive: integer("sensitive", { mode: "boolean" }).notNull().default(false),
@@ -39,7 +31,7 @@ export const queryExecutions = sqliteTable(
     insertCount: integer("insert_count", { mode: "number" }),
     error: text("error"),
     errorStack: text("error_stack"),
-    resultData: jsonText<QueryExecutionResultData>("result_data"),
+    rows: jsonText<QueryExecutionRowData[]>("rows").notNull(),
   },
   (table) => [
     index("query_executions_connection_id_idx").on(table.connectionId),

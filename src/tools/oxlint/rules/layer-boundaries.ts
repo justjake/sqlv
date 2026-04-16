@@ -22,7 +22,7 @@ import * as path from "node:path"
 
 import {
   ALLOWED,
-  isCompositionRoot,
+  isLayerBoundaryExempt,
   layerInfoFromFilePath,
   parseAliasSpecifier,
   type Layer,
@@ -107,7 +107,7 @@ function checkImportSource(
   context: LintContext,
   node: ImportLike,
   source: FileLayerInfo,
-  sourceIsCompositionRoot: boolean,
+  sourceIsExempt: boolean,
 ) {
   const src = node.source
   if (!src) return
@@ -128,7 +128,7 @@ function checkImportSource(
   // Check if the import target file itself is a composition root (e.g. createBunSqlVisor.ts).
   // Composition roots are publicly importable from anywhere — skip the allowed-layer check.
   const targetAbs = path.join(source.projectRoot, "src", target.layer, target.subpath)
-  const targetIsCompositionRoot = isCompositionRoot(targetAbs)
+  const targetIsExempt = isLayerBoundaryExempt(targetAbs)
 
   // --- Autofix dimension: prefer alias across layers, relative within a layer.
   if (sameLayer && target.kind === "alias" && target.relativeForm) {
@@ -145,7 +145,7 @@ function checkImportSource(
     // Even if forbidden, normalize to alias first so the violation is visible under a canonical form.
     const newSpec = target.aliasForm
     const forbidden =
-      !sourceIsCompositionRoot && !targetIsCompositionRoot && !ALLOWED[source.layer].includes(target.layer)
+      !sourceIsExempt && !targetIsExempt && !ALLOWED[source.layer].includes(target.layer)
     const message = forbidden
       ? `layer '${source.layer}' may not import from layer '${target.layer}' (fix rewrites to '${newSpec}' but the dependency is still forbidden)`
       : `cross-layer import should use an alias: '${newSpec}'`
@@ -159,7 +159,7 @@ function checkImportSource(
 
   // --- Dependency dimension: flag forbidden cross-layer imports that don't need a rewrite.
   if (!sameLayer) {
-    if (sourceIsCompositionRoot || targetIsCompositionRoot) return
+    if (sourceIsExempt || targetIsExempt) return
     if (ALLOWED[source.layer].includes(target.layer)) return
     context.report({
       node: src,
@@ -188,9 +188,9 @@ const rule = {
       projectRoot: info.projectRoot,
       dir: path.dirname(filename),
     }
-    const sourceIsCompositionRoot = isCompositionRoot(filename)
+    const sourceIsExempt = isLayerBoundaryExempt(filename)
 
-    const visit = (node: ImportLike) => checkImportSource(context, node, source, sourceIsCompositionRoot)
+    const visit = (node: ImportLike) => checkImportSource(context, node, source, sourceIsExempt)
     return {
       ImportDeclaration: visit,
       ExportNamedDeclaration: visit,

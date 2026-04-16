@@ -24,9 +24,18 @@ export type RowStore<Row extends BaseRow> = {
   delete<T extends Row>(row: RowRef<T>): Promise<void>
 }
 
+export type MutableRowStore<Row extends BaseRow> = {
+  list(): Promise<Row[]>
+  get(ref: RowRef<Row>): Promise<Row | undefined>
+  insert(row: Row): Promise<Row>
+  upsert(row: Row): Promise<Row>
+  update(row: RowRef<Row>, patch: Partial<Row>): Promise<void>
+  delete(row: RowRef<Row>): Promise<void>
+}
+
 export class RowHandle<T extends BaseRow> {
   constructor(
-    public readonly store: RowStore<T>,
+    public readonly store: MutableRowStore<T>,
     public readonly ref: RowRef<T>,
   ) {}
 

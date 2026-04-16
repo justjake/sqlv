@@ -1,7 +1,7 @@
 export { EpochMillis } from "./EpochMillis"
 import type { EpochMillis } from "./EpochMillis"
 import type { Json } from "./Json"
-import type { RowStore } from "./RowStore"
+import type { MutableRowStore } from "./RowStore"
 
 export type QueryExecutionStatus = "pending" | "success" | "error" | "cancelled"
 export type QueryInitiator = "user" | "system"
@@ -74,4 +74,4 @@ type ConnectLogEntry = {
   connectedAt: EpochMillis
 }
 
-export type LogStore = RowStore<LogEntry>
+export type LogStore = MutableRowStore<LogEntry>

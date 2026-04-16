@@ -8,6 +8,7 @@
   ],
   "rules": {
     "sqlv/layer-boundaries": "error",
+    "sqlv/no-raw-text-element": "error",
     "importx/order": [
       "error",
       {

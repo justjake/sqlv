@@ -8,7 +8,6 @@ export const sessions = sqliteTable(
     id: text("id").primaryKey(),
     app: text("app").notNull(),
     createdAt: epochMillis("created_at").notNull(),
-    endedAt: epochMillis("ended_at"),
   },
   (table) => [index("sessions_created_at_idx").on(table.createdAt)],
 )

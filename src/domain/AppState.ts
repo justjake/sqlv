@@ -1,6 +1,6 @@
 import type { EpochMillis } from "./EpochMillis"
 import type { Json } from "./Json"
-import type { RowStore } from "./RowStore"
+import type { MutableRowStore } from "./RowStore"
 
 export type AppStateId = string
 
@@ -14,7 +14,7 @@ export type AppStateRow<Value extends Json = Json> = {
 
 export type AnyAppStateRow = AppStateRow<Json>
 export type AppStateSnapshot = Record<AppStateId, Json>
-export type AppStateStore = RowStore<AnyAppStateRow>
+export type AppStateStore = MutableRowStore<AnyAppStateRow>
 
 export function defaultAppState(): AppStateSnapshot {
   return {}

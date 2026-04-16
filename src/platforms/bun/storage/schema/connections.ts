@@ -18,7 +18,6 @@ export const connections = sqliteTable(
     config: jsonText<ConnectionConfigData>("config").notNull(),
     order: text("sort_order").$type<OrderStringType>().notNull().default(OrderString("")),
     createdAt: epochMillis("created_at").notNull(),
-    updatedAt: epochMillis("updated_at"),
   },
   (table) => [
     index("connections_created_at_idx").on(table.createdAt),

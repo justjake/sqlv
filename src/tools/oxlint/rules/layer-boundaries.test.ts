@@ -107,13 +107,25 @@ describe("layer-boundaries", () => {
     })
 
     test("non-composition-root platform file still restricted", () => {
-      const reports = run(
-        `${ROOT}/src/platforms/bun/storage/sqliteRowStore.ts`,
-        "#adapters/sqlite/sqlite",
-      )
+      const reports = run(`${ROOT}/src/platforms/bun/storage/Storage.ts`, "#adapters/sqlite/sqlite")
       expect(reports).toHaveLength(1)
       expect(reports[0]?.message).toContain("'platforms' may not import from layer 'adapters'")
       expect(reports[0]?.fixText).toBeNull()
+    })
+
+    test("test files may import from any layer", () => {
+      // apps test legitimately needs domain types for fixtures
+      const reports = run(`${ROOT}/src/apps/tui/form/CheckboxField.test.tsx`, "#domain/Connection")
+      expect(reports).toEqual([])
+    })
+
+    test("test files still normalize alias/relative direction (mode 2 autofix)", () => {
+      // relative cross-layer still gets rewritten to alias; no error
+      const reports = run(`${ROOT}/src/apps/tui/form/CheckboxField.test.tsx`, "../../../domain/Connection")
+      expect(reports).toHaveLength(1)
+      expect(reports[0]?.message).toContain("cross-layer import should use an alias")
+      expect(reports[0]?.message).not.toContain("forbidden")
+      expect(reports[0]?.fixText).toBe('"#domain/Connection"')
     })
   })
 

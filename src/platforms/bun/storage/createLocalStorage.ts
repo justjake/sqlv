@@ -1,82 +1,40 @@
-import { createNoopLogStore } from "#engine/runtime/createNoopLogStore"
 import type { Connection } from "#domain/Connection"
-import { createId } from "#domain/Id"
 import { EpochMillis, type Session } from "#domain/Log"
 import { OrderString } from "#domain/Order"
-import type { AdapterRegistry, ProtocolConfig } from "#spi/Adapter"
-import { QueryRunnerImpl } from "#engine/runtime/QueryRunnerImpl"
+import type { ProtocolConfig } from "#spi/Adapter"
+
 import type { TursoConfig } from "#adapters/sqlite/turso/TursoAdapter"
+import { DEFAULT_SQLVISOR_APP } from "#platforms/bun/paths"
 
-import { DEFAULT_SQLVISOR_APP, defaultStoragePath } from "../paths"
-
+import {
+  bootLocalStorage,
+  createStorageSession,
+  defaultSecretStore,
+  defaultStoragePath,
+  getExistingLocalStorageEncryptionKey as getExistingStorageEncryptionKey,
+  getOrCreateLocalStorageEncryptionKey as getOrCreateStorageEncryptionKey,
+  type SecretStore,
+} from "./boot"
 import { Storage } from "./Storage"
 
+export { type SecretRef } from "./boot"
+export { defaultSecretStore }
+
 const APP_NAME = DEFAULT_SQLVISOR_APP
-const BUNDLE_ID = `tl.jake.${APP_NAME}`
-
-export type SecretRef = { service: string; name: string }
-
-/** https://bun.com/docs/runtime/secrets#api */
-export type SecretStore = {
-  get: (args: SecretRef) => Promise<string | null>
-  set: (args: SecretRef & { value: string }) => Promise<void>
-  delete: (args: SecretRef) => Promise<boolean>
-}
 
 export type StorageStore = Pick<Storage, "connections" | "log" | "savedQueries" | "settings" | "appState">
 export type LocalStorage = {
+  close?: () => void
   session: Session
   storage: StorageStore
 }
 
-export function createSession(app = APP_NAME): Session {
-  return {
-    id: createId(),
-    type: "session",
-    app,
-    createdAt: EpochMillis.now(),
-  }
-}
-
-export function defaultSecretStore(): SecretStore {
-  return (Bun as any).secrets
+export function createSession(app = APP_NAME) {
+  return createStorageSession(app)
 }
 
 export function defaultStorageLocation(app = APP_NAME) {
   return defaultStoragePath(app)
-}
-
-function defaultSecretName(app = APP_NAME): string {
-  return `${APP_NAME}_${app}_encryption_key`
-}
-
-async function getExistingLocalEncryptionKey(
-  secrets = defaultSecretStore(),
-  app = APP_NAME,
-): Promise<string | undefined> {
-  try {
-    return (
-      (await secrets.get({
-        service: BUNDLE_ID,
-        name: defaultSecretName(app),
-      })) ?? undefined
-    )
-  } catch {
-    return undefined
-  }
-}
-
-async function getOrCreateLocalEncryptionKey(secrets: SecretStore, app = APP_NAME): Promise<string> {
-  let key = await getExistingLocalEncryptionKey(secrets, app)
-  if (!key) {
-    key = crypto.getRandomValues(Buffer.alloc(32)).toString("hex")
-    await secrets.set({
-      service: BUNDLE_ID,
-      name: defaultSecretName(app),
-      value: key,
-    })
-  }
-  return key
 }
 
 export async function createLocalStorageConnection(
@@ -93,7 +51,7 @@ export async function createLocalStorageConnection(
     path: persistPath,
     encryption: {
       cipher: "aegis256",
-      hexkey: await getOrCreateLocalEncryptionKey(secrets, app),
+      hexkey: await getOrCreateStorageEncryptionKey(secrets, app),
     },
   }
 
@@ -109,29 +67,27 @@ export async function createLocalStorageConnection(
 }
 
 export async function createLocalStorage(args: {
+  allowDestructiveMigration?: boolean
   app?: string
   dbPath?: string
-  registry: AdapterRegistry
-  session?: Session
-  connection?: Connection<any>
+  encryptionKey?: string
   secrets?: SecretStore
-}): Promise<LocalStorage> {
+  session?: Session
+} = {}): Promise<LocalStorage> {
   const app = args.app ?? APP_NAME
-  const session = args.session ?? createSession(app)
-  const connection =
-    args.connection ??
-    (await createLocalStorageConnection({
-      app,
-      dbPath: args.dbPath,
-      secrets: args.secrets ?? defaultSecretStore(),
-    }))
-  const adapter = args.registry.get(connection.protocol)
-  const executor = await adapter.connect(connection.config)
-  const storageDB = new QueryRunnerImpl(session, connection, executor, createNoopLogStore())
-  const storage = new Storage(storageDB)
-  await storage.migrate()
+  const boot = await bootLocalStorage({
+    allowDestructiveMigration: args.allowDestructiveMigration,
+    app,
+    dbPath: args.dbPath,
+    encryptionKey: args.encryptionKey,
+    secrets: args.secrets ?? defaultSecretStore(),
+    session: args.session,
+  })
+  const storage = new Storage(boot.db)
+
   return {
-    session,
+    close: boot.close,
+    session: boot.session,
     storage,
   }
 }
@@ -140,9 +96,9 @@ export async function getExistingLocalStorageEncryptionKey(
   secrets = defaultSecretStore(),
   app = APP_NAME,
 ): Promise<string | undefined> {
-  return getExistingLocalEncryptionKey(secrets, app)
+  return getExistingStorageEncryptionKey(secrets, app)
 }
 
 export async function getOrCreateLocalStorageEncryptionKey(secrets: SecretStore, app = APP_NAME): Promise<string> {
-  return getOrCreateLocalEncryptionKey(secrets, app)
+  return getOrCreateStorageEncryptionKey(secrets, app)
 }
