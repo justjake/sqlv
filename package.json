@@ -29,6 +29,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/pg": "^8.20.0",
+    "eslint-plugin-import-x": "^4.16.2",
     "oxfmt": "0.44.0",
     "oxlint": "1.59.0"
   },

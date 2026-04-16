@@ -2,8 +2,30 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "ignorePatterns": [".agents/**"],
   "plugins": ["typescript", "unicorn", "oxc", "react"],
-  "jsPlugins": ["./src/tools/oxlint/plugin.ts"],
+  "jsPlugins": [
+    "./src/tools/oxlint/plugin.ts",
+    { "name": "importx", "specifier": "eslint-plugin-import-x" }
+  ],
   "rules": {
-    "sqlv/layer-boundaries": "error"
+    "sqlv/layer-boundaries": "error",
+    "importx/order": [
+      "error",
+      {
+        "groups": ["builtin", "external", "internal", "parent", "sibling", "index"],
+        "pathGroups": [
+          { "pattern": "#domain/**", "group": "internal", "position": "before" },
+          { "pattern": "#spi/**", "group": "internal", "position": "before" },
+          { "pattern": "#engine/**", "group": "internal", "position": "before" },
+          { "pattern": "#platforms/**", "group": "internal", "position": "before" },
+          { "pattern": "#adapters/**", "group": "internal", "position": "before" },
+          { "pattern": "#api/**", "group": "internal", "position": "before" },
+          { "pattern": "#apps/**", "group": "internal", "position": "before" }
+        ],
+        "pathGroupsExcludedImportTypes": [],
+        "newlines-between": "always",
+        "distinctGroup": true,
+        "alphabetize": { "order": "asc", "caseInsensitive": true }
+      }
+    ]
   }
 }
