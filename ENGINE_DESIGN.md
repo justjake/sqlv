@@ -17,9 +17,14 @@ Design priorities, in order:
 
 1. **Policy / mechanism separation.** Lower layers provide capabilities;
    upper layers make product decisions.
-2. **Platform neutrality of the engine.** The engine runs identically under
-   Bun with libsql, Node with better-sqlite3, or a browser with sqlite-wasm.
-   Only the driver, secret storage, and path resolution are platform-specific.
+2. **Platform neutrality of the engine.** Currently supported platforms:
+   Bun with libsql. The design accommodates additional drivers and
+   platforms as they are added — for example, a browser host with
+   sqlite-wasm over OPFS. Only the driver, secret storage, path resolution,
+   and migration runner are platform-specific; the engine, schema,
+   services, and API are platform-neutral. Sync drivers (like
+   better-sqlite3) are out of scope unless a parallel sync `StorageDb`
+   type is added later.
 3. **Type-safe, boring APIs.** Branded IDs, discriminated unions, explicit
    method signatures. No stringly-typed handles, no generic row envelopes,
    no runtime type dispatch where static types work.
@@ -78,15 +83,10 @@ src/domain/
     Session.ts
   query/
     QueryExecution.ts
-    QueryFlow.ts
-    QueryState.ts
     SQL.ts
     formatQuery.ts
-    restore.ts
   savedQuery/
     SavedQuery.ts
-  settings/
-    Settings.ts
   appState/
     AppState.ts
   audit/
@@ -142,8 +142,8 @@ config shape for a given protocol.
 ```ts
 // spi/Adapter.ts
 export interface ProtocolToConfig {}
-export type Protocol = Extract<keyof ProtocolToConfig, string>
-export type ConfigFor<P extends Protocol> = ProtocolToConfig[P]
+export type Protocol = Extract<keyof ProtocolToConfig, string>;
+export type ConfigFor<P extends Protocol> = ProtocolToConfig[P];
 ```
 
 ```ts
@@ -192,30 +192,30 @@ There is no `Connection<any>`, and there is no way to construct a
 locked together by the type system.
 
 ```ts
-export type ConnectionId = Id<"Connection">
+export type ConnectionId = Id<"Connection">;
 
 export type ConnectionOf<P extends Protocol> = {
-  id: ConnectionId
-  name: string
-  protocol: P
-  config: ConfigFor<P>
-  createdAt: EpochMillis
-  updatedAt?: EpochMillis
-}
+  id: ConnectionId;
+  name: string;
+  protocol: P;
+  config: ConfigFor<P>;
+  createdAt: EpochMillis;
+  updatedAt?: EpochMillis;
+};
 
-export type Connection = { [P in Protocol]: ConnectionOf<P> }[Protocol]
+export type Connection = { [P in Protocol]: ConnectionOf<P> }[Protocol];
 
 export type AddConnectionInput<P extends Protocol = Protocol> = {
-  id?: ConnectionId
-  name: string
-  protocol: P
-  config: ConfigFor<P>
-}
+  id?: ConnectionId;
+  name: string;
+  protocol: P;
+  config: ConfigFor<P>;
+};
 
 export type UpdateConnectionInput<P extends Protocol = Protocol> = {
-  name?: string
-  config?: ConfigFor<P>
-}
+  name?: string;
+  config?: ConfigFor<P>;
+};
 ```
 
 No `type` discriminator; no `order` field. Connections are identified by
@@ -242,8 +242,30 @@ Invariants:
 - `protocol` is immutable after creation; changing protocol is delete+add.
 - `config` is opaque to the engine except for its JSON-roundtrippability
   and the adapter's own validation.
-- `protocol` and `config` are *always* consistent — `ConnectionOf<P>` makes
+- `protocol` and `config` are _always_ consistent — `ConnectionOf<P>` makes
   any other combination a compile error.
+
+#### `ConnectionSnapshot`
+
+A JSON-safe flattened view of a connection used by audit event payloads
+(`connection.updated` before/after diffs) and by historical references that
+outlive the row itself (`query_executions.connection_name_snapshot`,
+`connection_protocol_snapshot`).
+
+```ts
+export type ConnectionSnapshot = {
+  id: ConnectionId
+  name: string
+  protocol: Protocol
+  config: Json
+  createdAt: EpochMillis
+  updatedAt?: EpochMillis
+}
+```
+
+`config` is `Json` here (not `ConfigFor<P>`) because the snapshot is a
+serialization artifact: its purpose is to round-trip through JSON in audit
+rows and compare before/after, not to dispatch on protocol.
 
 ### 3.5 `Session`
 
@@ -266,79 +288,95 @@ disposal. Every mutation records its originating session via foreign key.
 
 #### `QueryExecution`
 
-```ts
-export type QueryExecutionId = Id<"QueryExecution">;
-export type QueryExecutionStatus =
-  | "pending"
-  | "success"
-  | "error"
-  | "cancelled";
-export type QueryInitiator = "user" | "system";
-export type QueryRef = { queryId: QueryExecutionId };
+`QueryExecution` is a status-discriminated union. Each status arm carries
+exactly the fields that make sense for it — pending has no `finishedAt`,
+error has no rows, success has both `rowCount` and `rows`. The type system
+prevents code from checking `rows` on a failed execution or `error` on a
+successful one.
 
-export type QueryExecution<Row = object> = {
-  id: QueryExecutionId;
-  sessionId: SessionId;
-  connectionId: ConnectionId;
-  savedQueryId?: SavedQueryId;
-  parentAuditId?: AuditEventId; // null unless run inside a flow
-  initiator: QueryInitiator;
-  createdAt: EpochMillis;
-  updatedAt?: EpochMillis;
-  finishedAt?: EpochMillis;
-  database?: string;
-  schema?: string;
-  table?: string;
-  sql: { source: string; args: Json[] };
-  sensitive: boolean;
-  status: QueryExecutionStatus;
-  rowCount: number;
-  insertCount?: number;
-  error?: string;
-  errorStack?: string;
-  rows: Row[]; // carries result_data from storage
-};
+```ts
+export type QueryExecutionId = Id<"QueryExecution">
+export type QueryInitiator = "user" | "system"
+export type QueryRef = { queryId: QueryExecutionId }
+
+type QueryExecutionBase = {
+  id: QueryExecutionId
+  sessionId: SessionId
+  connectionId: ConnectionId
+  connectionNameSnapshot: string        // rendered from Connection at insert time
+  connectionProtocolSnapshot: Protocol
+  savedQueryId?: SavedQueryId
+  savedQueryNameSnapshot?: string       // rendered from SavedQuery at insert time
+  parentAuditId?: AuditEventId          // set when run inside a flow
+  initiator: QueryInitiator
+  createdAt: EpochMillis
+  updatedAt?: EpochMillis
+  sql: { source: string; args: Json[] }
+  sensitive: boolean
+  database?: string
+  schema?: string
+  table?: string
+}
+
+export type PendingQueryExecution = QueryExecutionBase & {
+  status: "pending"
+}
+
+export type SuccessQueryExecution<Row = object> = QueryExecutionBase & {
+  status: "success"
+  finishedAt: EpochMillis
+  rowCount: number
+  insertCount?: number
+  rows: Row[]                           // always populated; [] for empty result
+}
+
+export type FailedQueryExecution = QueryExecutionBase & {
+  status: "error"
+  finishedAt: EpochMillis
+  error: string
+  errorStack?: string
+}
+
+export type CancelledQueryExecution = QueryExecutionBase & {
+  status: "cancelled"
+  finishedAt: EpochMillis
+}
+
+export type QueryExecution<Row = object> =
+  | PendingQueryExecution
+  | SuccessQueryExecution<Row>
+  | FailedQueryExecution
+  | CancelledQueryExecution
 ```
 
-The object is the full record. History list views work with a
-`QueryExecutionSummary` (same fields, `rows: []`) to avoid loading
-`result_data` for hot paths.
+Every read of a `QueryExecution` loads `rows` if the status is `"success"`.
+There is no summary-vs-detail distinction at the type level: `rows: Row[]`
+on the success arm is always populated (possibly to `[]`). If result
+payloads become a memory concern later, introduce a distinct
+`QueryExecutionSummary` type at that point rather than carrying a
+sentinel-valued `rows` field today.
+
+Connection/saved-query snapshots are stored on every execution so that
+history stays readable after the source row is deleted (see §11.2).
 
 Lifecycle: inserted with `status: "pending"` before the executor runs,
-updated exactly once on completion. Never inserted again under the same id.
+updated exactly once into one of `success`, `error`, or `cancelled`.
+Status is monotonic (pending → terminal). No execution is inserted twice
+under the same id.
 
-#### `QueryFlow`
+#### Flows
+
+A flow is an `audit_events` row with `kind: "flow.<name>"`. No separate
+reified type:
 
 ```ts
-export type QueryFlow = {
-  id: AuditEventId; // identity is the audit event row
-  name: string;
-  initiator: QueryInitiator;
-  parentAuditId?: AuditEventId;
-};
-
-export type QueryFlowInput = {
-  id?: AuditEventId;
-  name: string;
-  initiator: QueryInitiator;
-  parentAuditId?: AuditEventId;
-};
+export type QueryFlowAuditEvent =
+  Extract<AuditEvent, { kind: `flow.${string}` }>
 ```
 
-A flow is an in-memory handle wrapping a durable `audit_events` row. It
-represents a span of work — typically one adapter call that itself runs
-multiple queries (e.g., `fetchObjects` issuing five introspection queries).
-Flows open via `runner.openFlow(input)` and close via
-`runner.closeFlow(flow, { cancelled })`.
-
-A `QueryFlow.id` _is_ an `AuditEventId`. Nested flows set `parentAuditId`
-to their parent's id. Queries run inside a flow set
-`QueryExecution.parentAuditId` to the flow id.
-
-#### `QueryState`
-
-Engine state wrapper around TanStack Query's `QueryState`. `QueryExecutionState`
-is `QueryState<QueryExecution>`. Exposed through the public `SqlVisorState`.
+Runner methods open and close flows; precise signatures live with the
+runner and are expected to evolve. Queries that run inside a flow carry
+`parentAuditId` pointing at the flow event's id.
 
 #### `SQL`
 
@@ -346,45 +384,12 @@ is `QueryState<QueryExecution>`. Exposed through the public `SqlVisorState`.
 to the engine core; adapters render them via `renderSQL(sql)`. `unsafeRawSQL<Row>(text)`
 wraps hand-written query text with the row phantom type.
 
-#### `restore.ts`
+#### `QueryState` is not a domain type
 
-Pure helpers used by hosts to compose restore workflows.
-
-```ts
-findLatestSavedQueryExecution(
-  savedQuery: SavedQuery,
-  history: QueryExecution[],
-  connections: Connection[],
-): QueryExecution | undefined
-
-resolveHistoryRestore(
-  execution: QueryExecution,
-  connections: Connection[],
-): {
-  connectionId?: ConnectionId
-  sql: string
-  savedQueryId?: SavedQueryId
-  cursorOffset: number
-}
-
-resolveSavedQueryRestore(
-  savedQuery: SavedQuery,
-  history: QueryExecution[],
-  connections: Connection[],
-  selectedConnectionId: ConnectionId | undefined,
-): {
-  savedQuery: SavedQuery
-  latestExecutionId?: QueryExecutionId
-  connectionId?: ConnectionId
-  sql: string
-  savedQueryId: SavedQueryId
-  cursorOffset: number
-}
-```
-
-These are domain functions, not engine methods. Hosts call them and feed
-the result into engine primitives (`sqlv.connections.select`,
-`sqlv.editor.setBuffer`, `sqlv.queries.select`).
+TanStack-shaped query state wrappers (`QueryState<T>`, `pendingQueryState`,
+`queryStateOrPending`) are not domain nouns. The public `QueryState<T>`
+type lives in `api/QueryState.ts`; construction helpers live in
+`engine/workspace/queryState.ts`. See §8.
 
 ### 3.7 `SavedQuery`
 
@@ -404,40 +409,15 @@ export type SavedQuery = {
 Saved queries are user-authored SQL snippets with a name and optional
 protocol hint (used to resolve a compatible connection on restore).
 
-### 3.8 `Settings`
+### 3.8 `AppState`
 
-Cross-host typed settings with a closed schema. Grows by adding keys to
-`SettingsSchema`.
-
-```ts
-export type SettingsSchema = {
-  workspace: {
-    lastSelectedConnectionId: ConnectionId | "";
-  };
-};
-
-export type SettingsId = keyof SettingsSchema;
-export type SettingsRow<Id extends SettingsId = SettingsId> = {
-  id: Id;
-  settings: SettingsSchema[Id];
-  createdAt: EpochMillis;
-  updatedAt?: EpochMillis;
-};
-
-export type SettingsState = { [Id in SettingsId]: SettingsSchema[Id] };
-export function defaultSettingsState(): SettingsState;
-```
-
-`SettingsId` is nominally-typed via `keyof SettingsSchema`; no brand needed.
-Each row stores a JSON-serialized slice of the schema.
-
-### 3.9 `AppState`
-
-App-scoped per-instance preferences. Freeform keyed JSON, unlike the typed
-settings.
+App-scoped keyed JSON, written by hosts and read back by hosts. The engine
+provides the store; it does not interpret the contents. Host-specific
+preferences like "last selected connection", pane sizes, or tree-expansion
+state live here.
 
 ```ts
-export type AppStateKey = string; // plain string; user-defined at runtime
+export type AppStateKey = string; // plain string; host-defined at runtime
 
 export type AppStateRow<Value extends Json = Json> = {
   app: string;
@@ -451,10 +431,14 @@ export type AppStateSnapshot = Record<AppStateKey, Json>;
 export function defaultAppState(): AppStateSnapshot;
 ```
 
-Primary key is composite `(app, id)`. Each app instance sees only its own
+Primary key is composite `(app, id)`. Each host sees only its own
 namespace; the engine scopes all reads/writes by the current session's `app`.
 
-### 3.10 `AuditEvent`
+The engine itself reads no app state. Anything that looks like "restore
+UI state across sessions" — last-selected connection, last-opened saved
+query, editor pane sizes — is host policy and belongs here.
+
+### 3.9 `AuditEvent`
 
 Discriminated union keyed by `kind`. Durable, mostly append-only, with
 mutable `endedAt` and `cancelled` for flow-like events.
@@ -484,8 +468,8 @@ export type AuditEvent =
       kind: "connection.updated";
       connectionId: ConnectionId;
       payload: {
-        before: Partial<Connection<Json>>;
-        after: Partial<Connection<Json>>;
+        before: Partial<ConnectionSnapshot>;
+        after: Partial<ConnectionSnapshot>;
       };
     })
   | (AuditEventBase & {
@@ -514,10 +498,6 @@ export type AuditEvent =
       payload: { name: string };
     })
   | (AuditEventBase & {
-      kind: "settings.changed";
-      payload: { id: SettingsId; before?: Json; after: Json };
-    })
-  | (AuditEventBase & {
       kind: "app_state.changed";
       payload: { id: AppStateKey; before?: Json; after: Json };
     })
@@ -541,7 +521,7 @@ Rules:
   `queryExecutionId` for events that reference a specific query.
 - Payloads are typed per-kind and JSON-serializable.
 
-### 3.11 `Catalog`
+### 3.10 `Catalog`
 
 **`ObjectInfo`** — discoverable database objects (tables, views, indexes).
 Structure is adapter-dependent but always includes identity plus display
@@ -550,7 +530,7 @@ metadata. Cached per-connection in the engine, never persisted.
 **`Explain`** — `ExplainInput`, `ExplainResult` — adapter-provided analysis
 output for editor feedback.
 
-### 3.12 `Editor`
+### 3.11 `Editor`
 
 Existing editor domain types (buffer, completion, analysis, text ranges,
 state) unchanged in structure. The `editor/index.ts` barrel is removed;
@@ -575,7 +555,6 @@ import { connections } from "./schema/connections";
 import { queryExecutions } from "./schema/queryExecutions";
 import { savedQueries } from "./schema/savedQueries";
 import { sessions } from "./schema/sessions";
-import { settings } from "./schema/settings";
 
 export const storageSchema = {
   appState,
@@ -584,12 +563,15 @@ export const storageSchema = {
   queryExecutions,
   savedQueries,
   sessions,
-  settings,
 } as const;
 
 export type StorageSchema = typeof storageSchema;
 export type StorageDb = BaseSQLiteDatabase<"async", unknown, StorageSchema>;
 ```
+
+`StorageDb` is fixed to async (`"async"`) because every currently-planned
+driver (libsql, sqlite-wasm over OPFS) is async. A sync variant would be a
+separate type alias.
 
 ### 4.2 Column helpers (`schema/shared.ts`)
 
@@ -638,17 +620,6 @@ Indexes: `(created_at)`, `(protocol)`, `(name)`.
 
 Indexes: `(created_at)`, `(protocol)`.
 
-#### `settings`
-
-| Column       | Type                       | Notes                  |
-| ------------ | -------------------------- | ---------------------- |
-| `id`         | `text, PK, SettingsId`     | keyof `SettingsSchema` |
-| `settings`   | `text NOT NULL, json mode` | typed per `SettingsId` |
-| `created_at` | `integer NOT NULL`         |                        |
-| `updated_at` | `integer`                  |                        |
-
-No secondary indexes (singleton rows).
-
 #### `app_state`
 
 | Column       | Type                       | Notes         |
@@ -664,40 +635,48 @@ Indexes: `(app, created_at)`.
 
 #### `query_executions`
 
-| Column            | Type                             | Notes                      |
-| ----------------- | -------------------------------- | -------------------------- |
-| `id`              | `text, PK, QueryExecutionId`     |                            |
-| `session_id`      | `text NOT NULL, SessionId`       |                            |
-| `connection_id`   | `text NOT NULL, ConnectionId`    |                            |
-| `saved_query_id`  | `text, SavedQueryId`             | null for ad-hoc queries    |
-| `parent_audit_id` | `text, AuditEventId`             | null for top-level queries |
-| `initiator`       | `text NOT NULL`                  | `"user" \| "system"`       |
-| `created_at`      | `integer NOT NULL`               |                            |
-| `updated_at`      | `integer`                        |                            |
-| `finished_at`     | `integer`                        | null while pending         |
-| `database`        | `text`                           |                            |
-| `schema`          | `text`                           |                            |
-| `table`           | `text`                           |                            |
-| `sql_source`      | `text NOT NULL`                  | rendered SQL text          |
-| `sql_args`        | `text NOT NULL, json mode`       | `Json[]`                   |
-| `sensitive`       | `integer NOT NULL, boolean mode` | default `false`            |
-| `status`          | `text NOT NULL`                  | `QueryExecutionStatus`     |
-| `row_count`       | `integer NOT NULL`               | default `0`                |
-| `insert_count`    | `integer`                        |                            |
-| `error`           | `text`                           |                            |
-| `error_stack`     | `text`                           |                            |
-| `result_data`     | `text NOT NULL, json mode`       | `QueryExecutionRowData[]`  |
+| Column                         | Type                             | Notes                                                                          |
+| ------------------------------ | -------------------------------- | ------------------------------------------------------------------------------ |
+| `id`                           | `text, PK, QueryExecutionId`     |                                                                                |
+| `session_id`                   | `text NOT NULL, SessionId`       | hard FK → `sessions.id`                                                        |
+| `connection_id`                | `text, ConnectionId`             | `ON DELETE SET NULL`; nullable after source row is deleted                     |
+| `connection_name_snapshot`     | `text NOT NULL`                  | captured at insert; survives connection deletion                               |
+| `connection_protocol_snapshot` | `text NOT NULL`                  | captured at insert                                                             |
+| `saved_query_id`               | `text, SavedQueryId`             | `ON DELETE SET NULL`; null for ad-hoc queries or when saved query was deleted  |
+| `saved_query_name_snapshot`    | `text`                           | captured at insert when `saved_query_id` was set                               |
+| `parent_audit_id`              | `text, AuditEventId`             | no FK (see §11.2); null for top-level queries                                  |
+| `initiator`                    | `text NOT NULL`                  | `"user" \| "system"`                                                           |
+| `created_at`                   | `integer NOT NULL`               |                                                                                |
+| `updated_at`                   | `integer`                        |                                                                                |
+| `finished_at`                  | `integer`                        | null while pending                                                             |
+| `database`                     | `text`                           |                                                                                |
+| `schema`                       | `text`                           |                                                                                |
+| `table`                        | `text`                           |                                                                                |
+| `sql_source`                   | `text NOT NULL`                  | rendered SQL text                                                              |
+| `sql_args`                     | `text NOT NULL, json mode`       | `Json[]`                                                                       |
+| `sensitive`                    | `integer NOT NULL, boolean mode` | default `false`                                                                |
+| `status`                       | `text NOT NULL`                  | `"pending" \| "success" \| "error" \| "cancelled"`                             |
+| `row_count`                    | `integer`                        | null while pending; set on success                                             |
+| `insert_count`                 | `integer`                        | set on success when applicable                                                 |
+| `error`                        | `text`                           | set on error                                                                   |
+| `error_stack`                  | `text`                           | set on error                                                                   |
+| `result_data`                  | `text, json mode`                | JSON-encoded rows on success; null otherwise                                   |
 
 Indexes: `(session_id)`, `(connection_id)`, `(saved_query_id)`, `(parent_audit_id)`, `(created_at)`, `(status)`.
 
-List queries exclude `result_data`. Detail queries include it.
+Every read loads `result_data`. No summary-vs-detail split at the storage
+or service level.
+
+The snapshot columns (`connection_*_snapshot`, `saved_query_name_snapshot`)
+are written at execution insert. They are the source of truth for history
+UIs once the live FK is nulled by a delete.
 
 #### `audit_events`
 
 | Column               | Type                       | Notes                              |
 | -------------------- | -------------------------- | ---------------------------------- |
 | `id`                 | `text, PK, AuditEventId`   |                                    |
-| `session_id`         | `text NOT NULL, SessionId` |                                    |
+| `session_id`         | `text NOT NULL, SessionId` | indexed, not a DB-level FK         |
 | `created_at`         | `integer NOT NULL`         | event start                        |
 | `ended_at`           | `integer`                  | flow events only                   |
 | `cancelled`          | `integer, boolean mode`    | flow events only                   |
@@ -706,17 +685,20 @@ List queries exclude `result_data`. Detail queries include it.
 | `parent_audit_id`    | `text, AuditEventId`       | nested flows / events under a flow |
 | `subject_type`       | `text`                     | free-form subject tag              |
 | `subject_id`         | `text`                     | id of the subject                  |
-| `connection_id`      | `text, ConnectionId`       | denormalized FK                    |
-| `saved_query_id`     | `text, SavedQueryId`       | denormalized FK                    |
-| `query_execution_id` | `text, QueryExecutionId`   | denormalized FK                    |
+| `connection_id`      | `text, ConnectionId`       | reference-by-id only               |
+| `saved_query_id`     | `text, SavedQueryId`       | reference-by-id only               |
+| `query_execution_id` | `text, QueryExecutionId`   | reference-by-id only               |
 | `payload`            | `text NOT NULL, json mode` | kind-specific tail                 |
 
 Indexes: `(session_id)`, `(kind)`, `(created_at)`, `(parent_audit_id)`,
 `(connection_id)`, `(saved_query_id)`, `(query_execution_id)`.
 
-Denormalized FK columns exist for efficient filtering. Their values also
-appear in the discriminated-union `AuditEvent`; the service layer keeps
-them in sync.
+No column on `audit_events` is a DB-level FK. These are branded-id reference
+columns, kept indexed for filter queries but unconstrained by the database
+so that audit writes never fail because a subject row was deleted
+concurrently. Dangling references are allowed; the audit log is the
+historical record of what happened, not a live consistency check. Read-side
+code treats any referenced id as "may or may not still exist."
 
 ### 4.4 Transaction rules
 
@@ -734,7 +716,7 @@ them in sync.
 
 ### 4.5 JSON usage
 
-JSON-typed columns: `connections.config`, `settings.settings`, `app_state.value`,
+JSON-typed columns: `connections.config`, `app_state.value`,
 `query_executions.sql_args`, `query_executions.result_data`, `audit_events.payload`.
 
 All other columns are first-class typed. There is no generic `json` bag on
@@ -754,14 +736,18 @@ export type SqlVisorState = {
   selectedConnectionId?: ConnectionId;
   selectedQueryExecutionId: QueryExecutionId | null;
   editor: EditorState;
-  history: QueryExecution[]; // summaries — rows:[] for non-current
+  history: QueryExecution[]; // fully loaded; success arms always carry rows
   savedQueries: SavedQuery[];
-  settings: SettingsState;
   appState: AppStateSnapshot;
-  queryExecution: QueryExecutionState; // currently-selected execution
+  queryExecution: QueryState<QueryExecution>; // currently-selected execution
   objectsByConnectionId: Record<ConnectionId, QueryState<ObjectInfo[]>>;
 };
 ```
+
+`selectedConnectionId` is pure in-memory state — it is not persisted by
+the engine. Hosts that want "remember the last connection across runs"
+store it in `app_state` and call `sqlv.connections.select(id)` after the
+engine is up.
 
 This is the single public state snapshot delivered to hosts via
 `sqlv.getState()` and `sqlv.subscribe(listener)`.
@@ -810,7 +796,6 @@ through the store but never write them.
 | `objectsByConnectionId`                                        | `CatalogService`                       |
 | `history`, `selectedQueryExecutionId`, `queryExecution`        | `QueriesService`                       |
 | `savedQueries`                                                 | `SavedQueriesService`                  |
-| `settings`                                                     | `SettingsService`                      |
 | `appState`                                                     | `AppStateService`                      |
 | `editor.*`                                                     | `EditorService`                        |
 
@@ -902,13 +887,18 @@ Public api `ConnectionsApi`:
 
 ```ts
 export type ConnectionsApi = {
-  list(): Promise<Connection[]>
-  add<P extends Protocol>(input: AddConnectionInput<P>): Promise<ConnectionOf<P>>
-  update<P extends Protocol>(id: ConnectionId, patch: UpdateConnectionInput<P>): Promise<Connection>
-  delete(id: ConnectionId): Promise<void>
-  select(id: ConnectionId | undefined): void
-  refreshSuggestions(): Promise<DiscoveredConnectionSuggestion[]>
-}
+  list(): Promise<Connection[]>;
+  add<P extends Protocol>(
+    input: AddConnectionInput<P>,
+  ): Promise<ConnectionOf<P>>;
+  update<P extends Protocol>(
+    id: ConnectionId,
+    patch: UpdateConnectionInput<P>,
+  ): Promise<Connection>;
+  delete(id: ConnectionId): Promise<void>;
+  select(id: ConnectionId | undefined): void;
+  refreshSuggestions(): Promise<DiscoveredConnectionSuggestion[]>;
+};
 ```
 
 The `add<P>` generic lets TypeScript infer the protocol literal from the
@@ -947,11 +937,15 @@ Side effects of `delete`:
 4. Patch `state.connections`; if the deleted connection was selected,
    resolve a new selection via `#resolveSelectedConnectionId`.
 
-Selection resolution priority when the current id is invalid:
+Selection resolution when the current id is invalid (e.g., after a delete):
 
-1. `settings.workspace.lastSelectedConnectionId` if it exists in the list.
-2. First connection by `createdAt` descending.
-3. `undefined`.
+1. First connection by `createdAt` descending.
+2. `undefined`.
+
+The engine does not persist selection and has no "last used" fallback.
+If a host wants to restore the last-selected connection across restarts,
+it writes the id into `app_state` and calls `sqlv.connections.select(id)`
+after boot. That is host policy and the engine does not participate.
 
 ### 6.5 `CatalogService`
 
@@ -986,7 +980,7 @@ Public api `QueriesApi`:
 export type QueriesApi = {
   run(input?: RunQueryInput): QueryRef;
   getById(id: QueryExecutionId): Promise<QueryExecution | undefined>;
-  listHistory(): QueryExecution[]; // summaries from state
+  listHistory(): QueryExecution[]; // full executions; success arms include rows
   select(id: QueryExecutionId | null): void;
   cancel(ref: QueryRef): void;
   cancelAll(): void;
@@ -1000,10 +994,11 @@ export type RunQueryInput = {
 
 Module-public (called by `QueryRunnerImpl`):
 
-- `recordPending(execution: QueryExecution): Promise<QueryExecution>` — insert row
-- `recordFinished(id: QueryExecutionId, patch: QueryExecutionFinishPatch): Promise<QueryExecution>` — update row
-- `recordFailed(id: QueryExecutionId, patch: QueryExecutionFailPatch): Promise<QueryExecution>` — update row
-- `loadInitial(): Promise<void>` — hydrate history (summaries only; no `result_data`) at boot
+- `recordPending(execution: PendingQueryExecution): Promise<PendingQueryExecution>` — insert row
+- `recordFinished<Row>(id: QueryExecutionId, patch: QueryExecutionFinishPatch<Row>): Promise<SuccessQueryExecution<Row>>` — transition pending → success
+- `recordFailed(id: QueryExecutionId, patch: QueryExecutionFailPatch): Promise<FailedQueryExecution>` — transition pending → error
+- `recordCancelled(id: QueryExecutionId): Promise<CancelledQueryExecution>` — transition pending → cancelled
+- `loadInitial(): Promise<void>` — hydrate full history at boot (all rows, including `result_data`)
 
 `run` semantics:
 
@@ -1018,8 +1013,10 @@ Module-public (called by `QueryRunnerImpl`):
    `QueryExecutionError`), persist via `recordFailed` if not already
    persisted, update state.
 
-`getById` returns the full execution including `result_data`. Callers that
-only need summaries use `listHistory()` on state directly.
+`getById` and `listHistory` both return fully-loaded executions. There is
+no summary variant today. If hot-path memory pressure from large
+`result_data` becomes an issue, introduce a `QueryExecutionSummary` type
+plus a summary-read path at that point — not before.
 
 ### 6.7 `SavedQueriesService`
 
@@ -1043,30 +1040,7 @@ Module-public: `loadInitial()`.
 Saved-query mutations emit `saved_query.created/updated/deleted` audit
 events in the same transaction as the row write.
 
-### 6.8 `SettingsService`
-
-Public api `SettingsApi`:
-
-```ts
-export type SettingsApi = {
-  get<Id extends SettingsId>(id: Id): SettingsSchema[Id];
-  update<Id extends SettingsId>(
-    id: Id,
-    patch: Partial<SettingsSchema[Id]>,
-  ): Promise<SettingsSchema[Id]>;
-  replace<Id extends SettingsId>(
-    id: Id,
-    value: SettingsSchema[Id],
-  ): Promise<SettingsSchema[Id]>;
-};
-```
-
-Module-public: `loadInitial()`.
-
-`update` merges the patch onto the current row and delegates to `replace`.
-Each write emits a `settings.changed` audit event inside the same transaction.
-
-### 6.9 `AppStateService`
+### 6.8 `AppStateService`
 
 Public api `AppStateApi`:
 
@@ -1090,7 +1064,7 @@ never sees rows from other apps.
 
 Each write emits `app_state.changed` audit event in the same transaction.
 
-### 6.10 `EditorService`
+### 6.9 `EditorService`
 
 Owns all editor state (`editor.buffer`, `editor.completion`, `editor.analysis`,
 `editor.completionScopeMode`, `editor.savedQueryId`, `editor.treeSitterGrammar`).
@@ -1134,49 +1108,44 @@ Neither controller is exposed on the aggregate or any api type.
 database. It wraps an `Executor` with the engine's auditing and cancellation
 discipline.
 
-```ts
-class QueryRunnerImpl<Config> implements QueryRunner<Config> {
-  constructor(
-    session: Session,
-    connection: Connection<Config>,
-    executor: Executor,
-    deps: {
-      queries: QueriesService           // module-public methods only
-      audit: AuditService               // module-public only
-      db: StorageDb
-    },
-    options?: { abortControllers?: Set<AbortController>; flow?: QueryFlow }
-  )
+`QueryRunnerImpl<P extends Protocol>` implements the SPI's
+`QueryRunner<ConfigFor<P>>`. It takes a `Session`, a `ConnectionOf<P>`,
+an `Executor`, and module-public handles on `QueriesService`,
+`AuditService`, and `StorageDb`. Exact method signatures live with the
+runner source and are expected to evolve; the stable parts are:
 
-  withFlow(flow: QueryFlow): QueryRunnerImpl<Config>
-  openFlow(input: QueryFlowInput): Promise<QueryFlow>
-  closeFlow(flow: QueryFlow, patch?: { cancelled?: boolean }): Promise<void>
-  query<Row>(sql: SQL<Row>, options?: QueryRunOptions): Promise<Row[]>
-  execute<Row>(sql: SQL<Row>, options?: QueryRunOptions): Promise<QueryExecution<Row>>
-  iterate<P, Row>(...): AsyncGenerator<Row[], P>
-  cancelAll(): void
-}
-```
+- `execute(sql, options)` runs a user- or system-initiated query through
+  the executor and records it via `QueriesService`.
+- `query(sql, options)` is a thin wrapper that returns rows only.
+- `iterate(paginated, params, options)` paginates inside a flow.
+- Flow management (open, close, `withFlow`) creates or references a
+  `QueryFlowAuditEvent` — the durable audit row is the handle.
+
+The cache in `ConnectionsService` stores runners as the protocol-erased
+`QueryRunnerImpl<Protocol>`. Adapter dispatch sites narrow via the
+connection's `protocol` discriminant and cast once (see §11.6).
 
 Responsibilities:
 
 - **Persistence.** Every call to `execute` writes a pending
-  `query_executions` row before the executor runs and updates it on success
-  or failure. The runner is the _only_ writer of this table.
-- **Flows.** `openFlow` inserts an `audit_events` row with
-  `kind: "flow.<name>"`, `created_at: now`, `ended_at: null`. `closeFlow`
-  updates `ended_at` and `cancelled`. `withFlow(flow)` returns a sibling
-  runner whose subsequent `execute` calls set
-  `query_executions.parent_audit_id = flow.id`.
+  `query_executions` row before the executor runs and updates it on
+  terminal status. The runner is the _only_ writer of this table.
+- **Flows.** Opening a flow inserts an `audit_events` row with
+  `kind: "flow.<name>"`, `created_at: now`, `ended_at: null`. Closing the
+  flow updates `ended_at` and `cancelled`. Sibling runners bound to a
+  flow set `query_executions.parent_audit_id` on every subsequent execute.
 - **Cancellation.** A shared `Set<AbortController>` across the runner and
-  its `withFlow` siblings. `cancelAll()` aborts every outstanding controller.
+  its flow-bound siblings. `cancelAll()` aborts every outstanding
+  controller.
 - **Isolation from adapters.** Adapter code receives the runner (never the
   raw executor, never `StorageDb`). Any SQL the adapter runs goes through
-  the runner's `execute`/`query`/`iterate` methods, so every adapter-driven
-  query is auto-logged without requiring adapter cooperation.
+  the runner's methods, so every adapter-driven query is auto-logged
+  without requiring adapter cooperation.
 
-Failure modes return a `QueryExecutionError` carrying the final
-`QueryExecution` snapshot. Callers use the snapshot for UI even on failure.
+Failure modes throw `QueryExecutionError` carrying the final
+`FailedQueryExecution` or `CancelledQueryExecution` snapshot. Callers use
+the snapshot for UI even on failure. Success calls return a
+`SuccessQueryExecution<Row>` with `rows` populated.
 
 ---
 
@@ -1195,7 +1164,6 @@ export type SqlVisor = {
   readonly catalog: CatalogApi;
   readonly queries: QueriesApi;
   readonly savedQueries: SavedQueriesApi;
-  readonly settings: SettingsApi;
   readonly appState: AppStateApi;
   readonly editor: EditorApi;
 
@@ -1225,13 +1193,19 @@ src/api/
   CatalogApi.ts
   QueriesApi.ts
   SavedQueriesApi.ts
-  SettingsApi.ts
   AppStateApi.ts
   EditorApi.ts
+  QueryState.ts
   init.ts
 ```
 
 No `api/services/` subfolder. The files are peers.
+
+`QueryState.ts` exports the public `QueryState<T>` type — an alias for
+TanStack Query's `QueryState<T, Error>`, with the `SqlVisorState` shape
+depending on it. The engine's construction helpers
+(`pendingQueryState<T>()`, `queryStateOrPending<T>(state)`) live in
+`engine/workspace/queryState.ts` and are not part of the public surface.
 
 ### 8.3 Visibility enforcement
 
@@ -1407,7 +1381,6 @@ connection.selected              point-in-time
 saved_query.created              point-in-time
 saved_query.updated              point-in-time
 saved_query.deleted              point-in-time
-settings.changed                 point-in-time
 app_state.changed                point-in-time
 flow.<name>                      span (opens + later closes)
 ```
@@ -1450,36 +1423,71 @@ streaming pagination use `since` on the next call.
 
 - All branded IDs are UUIDv4 strings.
 - An id is assigned at row creation and never changes.
-- `QueryFlow.id` equals the `audit_events.id` of its opening event.
+- A flow's identity is the `AuditEventId` of its opening
+  `kind: "flow.<name>"` row. There is no separate flow id.
 
 ### 11.2 Referential integrity
 
-- `query_executions.session_id` → `sessions.id`
-- `query_executions.connection_id` → `connections.id`
-- `query_executions.saved_query_id` → `saved_queries.id` (nullable)
-- `query_executions.parent_audit_id` → `audit_events.id` (nullable)
-- `audit_events.session_id` → `sessions.id`
-- `audit_events.parent_audit_id` → `audit_events.id` (nullable, self-FK)
-- `audit_events.connection_id` → `connections.id` (nullable)
-- `audit_events.saved_query_id` → `saved_queries.id` (nullable)
-- `audit_events.query_execution_id` → `query_executions.id` (nullable)
+Two kinds of reference columns exist:
 
-FKs are SQLite-enforced when `PRAGMA foreign_keys = ON`; the platform boot
-enables this.
+- **Hard DB-level FKs** — enforced by SQLite when
+  `PRAGMA foreign_keys = ON`. Deletions of the target fail, or cascade,
+  per the column's declared action.
+- **Soft reference columns** — branded-id text columns with no FK
+  constraint, indexed for filtering. Dangling references are allowed and
+  expected; the application treats them as "may or may not still exist."
 
-Connection deletion does not cascade into `query_executions` or
-`audit_events`. Historical records retain the connection id even after the
-connection row is gone. Read-side code must handle "orphan" references
-gracefully (UI shows the id or a snapshot stored in the payload).
+`query_executions`:
+
+| Column            | Relationship                                    | On delete of target   |
+| ----------------- | ----------------------------------------------- | --------------------- |
+| `session_id`      | hard FK → `sessions.id`                         | RESTRICT (not deleted) |
+| `connection_id`   | hard FK → `connections.id`, nullable            | `SET NULL`            |
+| `saved_query_id`  | hard FK → `saved_queries.id`, nullable          | `SET NULL`            |
+| `parent_audit_id` | soft reference → `audit_events.id`              | n/a (audit not deleted) |
+
+When a connection is deleted, existing `query_executions.connection_id`
+rows become `NULL`. The snapshot columns
+(`connection_name_snapshot`, `connection_protocol_snapshot`) remain
+populated so history UIs read cleanly after deletion. The same is true
+for `saved_query_id` and its `saved_query_name_snapshot`.
+
+`audit_events`:
+
+| Column               | Relationship                           |
+| -------------------- | -------------------------------------- |
+| `session_id`         | soft reference — indexed, no FK        |
+| `parent_audit_id`    | soft reference — self                  |
+| `connection_id`      | soft reference                         |
+| `saved_query_id`     | soft reference                         |
+| `query_execution_id` | soft reference                         |
+
+Audit events never carry a DB-level foreign key. This is intentional:
+
+1. Audit writes must never fail because a subject row was deleted in a
+   concurrent transaction.
+2. The audit log is a historical record of what happened. A `connection.deleted`
+   event carries the `connection_id` of the row that was just deleted —
+   an FK would make that row impossible to insert.
+3. Dangling references preserve history: a `connection.created` event
+   from months ago still points at its (now-deleted) `connection_id`.
+
+Indexes on those columns support efficient filter queries without
+committing to referential enforcement.
+
+Other tables (`connections`, `saved_queries`, `app_state`, `sessions`)
+have no outgoing FKs.
 
 ### 11.3 Mutability
 
 - `sessions`: `ended_at` set-once.
-- `connections`, `saved_queries`, `settings`, `app_state`: `updated_at` set
-  on mutation; all fields other than `id`/`created_at` are mutable.
-- `query_executions`: `status`, `finished_at`, `updated_at`, `rows`,
-  `rowCount`, `insertCount`, `error`, `errorStack` are mutated exactly once
-  after the pending insert.
+- `connections`, `saved_queries`, `app_state`: `updated_at` set on mutation;
+  all fields other than `id`/`created_at` are mutable.
+- `query_executions`: `status`, `finished_at`, `updated_at`, `result_data`,
+  `row_count`, `insert_count`, `error`, `error_stack` transition from
+  null/pending to their terminal values exactly once. The
+  `connection_id` and `saved_query_id` columns are also mutated by
+  `SET NULL` from external deletes; their snapshot columns are immutable.
 - `audit_events`: only `ended_at` and `cancelled` are mutated, and only on
   flow-kind rows exactly once at `closeFlow`.
 
@@ -1524,21 +1532,23 @@ gracefully (UI shows the id or a snapshot stored in the payload).
 
 #### Runner-to-adapter dispatch
 
-The engine's runner cache returns `QueryRunnerImpl<unknown>` because the
-cache key is only `ConnectionId`. When an engine service needs to pass a
-runner into a specific adapter (`CatalogService.load`, editor analysis,
-sample), it narrows the connection's protocol and casts the runner at
-that call site:
+The engine's runner cache stores runners as the protocol-erased
+`QueryRunnerImpl<Protocol>` because the cache key is only `ConnectionId`.
+When an engine service needs to pass a runner into a specific adapter
+(`CatalogService.load`, editor analysis, sample), it narrows the
+connection's protocol and casts the runner at that call site:
 
 ```ts
-const connection = this.connections.requireConnection(id)          // Connection
-const adapter    = this.adapters.get(connection.protocol)          // RegisteredAdapter<P>
-const runner     = await this.connections.getRunner(id)            // QueryRunner<unknown>
-await adapter.fetchObjects(runner as QueryRunner<ConfigFor<typeof connection.protocol>>)
+const connection = this.connections.requireConnection(id); // Connection
+const adapter = this.adapters.get(connection.protocol); // RegisteredAdapter<P>
+const runner = await this.connections.getRunner(id); // QueryRunnerImpl<Protocol>
+await adapter.fetchObjects(
+  runner as QueryRunner<ConfigFor<typeof connection.protocol>>,
+);
 ```
 
 The cast is sound because `ConnectionsService.add` validates the
-connection's config against its protocol on creation, so runtime the
+connection's config against its protocol on creation, so at runtime the
 adapter and runner always share the same `Config`. The cast is the only
 `as` in engine dispatch; it exists because TypeScript cannot express the
 cross-row "adapter protocol === connection protocol" invariant without
@@ -1546,11 +1556,15 @@ dependent types.
 
 ### 11.7 Result payloads
 
-- `query_executions.result_data` is never loaded in list queries.
-- `getById` loads the full row including `result_data`.
+- `query_executions.result_data` is always loaded on read. `getById` and
+  `listHistory` both hydrate `rows` on `SuccessQueryExecution`.
 - The engine never truncates, samples, or summarizes `result_data` on
   write. Payloads of several MB are acceptable.
-- `result_data` for `status` other than `"success"` is `[]`.
+- `result_data` for non-`success` statuses is `NULL` in storage and omitted
+  from the domain type (the `rows` field is only present on
+  `SuccessQueryExecution<Row>`).
+- If memory pressure from large `result_data` becomes a real problem, add
+  a distinct `QueryExecutionSummary` type and a summary-read path then.
 
 ---
 
@@ -1566,8 +1580,8 @@ src/
     ConnectionsApi.ts
     EditorApi.ts
     QueriesApi.ts
+    QueryState.ts
     SavedQueriesApi.ts
-    SettingsApi.ts
     SqlVisor.ts
     init.ts
 
@@ -1588,15 +1602,10 @@ src/
       Session.ts
     query/
       QueryExecution.ts
-      QueryFlow.ts
-      QueryState.ts
       SQL.ts
       formatQuery.ts
-      restore.ts
     savedQuery/
       SavedQuery.ts
-    settings/
-      Settings.ts
     appState/
       AppState.ts
     audit/
@@ -1629,11 +1638,11 @@ src/
         queryExecutions.ts
         savedQueries.ts
         sessions.ts
-        settings.ts
         shared.ts
     workspace/
       WorkspaceSnapshot.ts
       WorkspaceStore.ts
+      queryState.ts
     services/
       AdaptersService.ts
       AppStateService.ts
