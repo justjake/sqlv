@@ -740,18 +740,26 @@ describe("SqlVisor provider and app", () => {
       },
       protocol: "bunsqlite",
     })
+    const queryExecution = makeQueryExecution({
+      connectionId: connection.id,
+      id: "history-1",
+      rows: [{ id: 1, name: "Ada" }],
+      sql: "select * from users",
+    })
     const stub = createEngineStub({
       connections: createQueryState({
         data: [connection],
         dataUpdateCount: 1,
         status: "success",
       }),
-      detailView: {
-        kind: "rows",
-        rows: [{ id: 1, name: "Ada" }],
-        title: "Rows",
-      },
+      history: [queryExecution],
+      queryExecution: createQueryState({
+        data: queryExecution,
+        dataUpdateCount: 1,
+        status: "success",
+      }),
       selectedConnectionId: connection.id,
+      selectedQueryExecutionId: queryExecution.id,
     })
 
     const ui = await render(
@@ -783,25 +791,27 @@ describe("SqlVisor provider and app", () => {
       rows: [{ total: 99 }],
       sql: "select 99 as total from audit_log",
     })
+    const pendingEntry = makeQueryExecution({
+      connectionId: connection.id,
+      id: "query-1",
+      sql: "select 1",
+      status: "pending",
+    })
     const fetchingStub = createEngineStub({
       connections: createQueryState({
         data: [connection],
         dataUpdateCount: 1,
         status: "success",
       }),
+      history: [pendingEntry],
       queryExecution: createQueryState({
+        data: pendingEntry,
+        dataUpdateCount: 1,
         fetchStatus: "fetching",
         status: "pending",
       }),
-      activeQueries: [
-        {
-          queryId: "query-1",
-          text: "select 1",
-          connectionId: connection.id,
-          startedAt: Date.now(),
-        },
-      ],
       selectedConnectionId: connection.id,
+      selectedQueryExecutionId: pendingEntry.id,
     })
     let ui = await render(
       <SqlVisorProvider engine={fetchingStub.engine}>
@@ -822,18 +832,22 @@ describe("SqlVisor provider and app", () => {
           dataUpdateCount: 1,
           status: "success",
         }),
-        detailView: {
-          kind: "error",
-          message: "query failed",
-          title: "Query Error",
-        },
         history: [failedEntry, restorableEntry],
         editor: {
           buffer: {
             text: "select 1",
           },
         },
+        queryExecution: createQueryState({
+          data: failedEntry,
+          dataUpdateCount: 1,
+          error: new Error("query failed"),
+          errorUpdateCount: 1,
+          fetchStatus: "idle",
+          status: "error",
+        }),
         selectedConnectionId: connection.id,
+        selectedQueryExecutionId: failedEntry.id,
       },
       {
         restoreQueryExecution(entryId) {
@@ -843,25 +857,22 @@ describe("SqlVisor provider and app", () => {
           }
 
           stub.setState({
-            detailView:
-              entry.status === "success"
-                ? {
-                    kind: "rows",
-                    rows: entry.rows,
-                    title: `Results (${entry.rows.length})`,
-                  }
-                : {
-                    kind: "error",
-                    message: entry.error ?? "query failed",
-                    title: "Query Error",
-                  },
             editor: {
               buffer: {
                 cursorOffset: entry.sql.source.length,
                 text: entry.sql.source,
               },
             },
+            queryExecution: createQueryState({
+              data: entry,
+              dataUpdateCount: 1,
+              error: entry.status === "success" ? null : new Error(entry.error ?? "query failed"),
+              errorUpdateCount: entry.status === "success" ? 0 : 1,
+              fetchStatus: entry.status === "pending" ? "fetching" : "idle",
+              status: entry.status === "pending" ? "pending" : entry.status === "success" ? "success" : "error",
+            }),
             selectedConnectionId: entry.connectionId,
+            selectedQueryExecutionId: entry.id,
           })
         },
       },
@@ -1115,46 +1126,28 @@ describe("SqlVisor provider and app", () => {
       initiator: "system",
       sql: "pragma table_info(posts)",
     })
-    const activeQueryId = "query-4"
-    const stub = createEngineStub(
-      {
-        connections: createQueryState({
-          data: [connection],
-          dataUpdateCount: 1,
-          status: "success",
-        }),
-        history: [systemFinished, newestFinished, failedFinished, oldestFinished],
-        activeQueries: [
-          {
-            queryId: activeQueryId,
-            text: "select 4",
-            connectionId: connection.id,
-            startedAt: Date.now(),
-          },
-        ],
-        selectedConnectionId: connection.id,
-      },
-      {
-        getQueryState(query) {
-          if (query.queryId === activeQueryId) {
-            return createQueryState({
-              fetchStatus: "fetching",
-              status: "pending",
-            })
-          }
-          return createQueryState({
-            data:
-              query.queryId === newestFinished.id
-                ? newestFinished
-                : query.queryId === failedFinished.id
-                  ? failedFinished
-                  : oldestFinished,
-            dataUpdateCount: 1,
-            status: query.queryId === failedFinished.id ? "error" : "success",
-          })
-        },
-      },
-    )
+    const activeEntry = makeQueryExecution({
+      connectionId: connection.id,
+      id: "query-4",
+      sql: "select 4",
+      status: "pending",
+    })
+    const stub = createEngineStub({
+      connections: createQueryState({
+        data: [connection],
+        dataUpdateCount: 1,
+        status: "success",
+      }),
+      history: [systemFinished, newestFinished, failedFinished, oldestFinished, activeEntry],
+      queryExecution: createQueryState({
+        data: activeEntry,
+        dataUpdateCount: 1,
+        fetchStatus: "fetching",
+        status: "pending",
+      }),
+      selectedConnectionId: connection.id,
+      selectedQueryExecutionId: activeEntry.id,
+    })
 
     const ui = await render(
       <SqlVisorProvider engine={stub.engine}>

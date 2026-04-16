@@ -3,7 +3,11 @@ import { useRenderer } from "@opentui/react"
 import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactNode } from "react"
 import { focusPathKey } from "../../../lib/focus/paths"
 import type { FocusDirection, FocusPath } from "../../../lib/focus/types"
-import { useFocusNavigationRestoreController, useFocusTree } from "../../focus/context"
+import {
+  useFocusHaloAnimationController,
+  useFocusNavigationRestoreController,
+  useFocusTree,
+} from "../../focus/context"
 import { normalizeShortcutKeyName } from "../shortcutKeys"
 import { KeybindContext, type ShortcutRegistration } from "./KeybindContext"
 import { eventToStep, sequenceEquals, stepMatches, type KeyStep } from "./shortcutSyntax"
@@ -20,6 +24,7 @@ export type KeybindProviderProps = {
 export function KeybindProvider({ chordTimeout = 2000, children }: KeybindProviderProps) {
   const tree = useFocusTree()
   const setSkipFocusRestoreOnExit = useFocusNavigationRestoreController()
+  const { cycleEasing } = useFocusHaloAnimationController()
   const renderer = useRenderer()
   const shortcutRegistry = useRef<ShortcutEntry[]>([])
   const prefix = useRef<KeyStep[]>([])
@@ -104,6 +109,13 @@ export function KeybindProvider({ chordTimeout = 2000, children }: KeybindProvid
       if (state.active) {
         if (inChordRef.current) {
           resetChordWithOptions({ restoreFocus: false })
+        }
+
+        if (isFocusNavigationEasingKey(key)) {
+          key.preventDefault()
+          key.stopPropagation()
+          cycleEasing()
+          return
         }
 
         key.preventDefault()
@@ -202,7 +214,7 @@ export function KeybindProvider({ chordTimeout = 2000, children }: KeybindProvid
     return () => {
       renderer.keyInput.off("keypress", handleKeyPress)
     }
-  }, [chordTimeout, renderer, setSkipFocusRestoreOnExit, tree])
+  }, [chordTimeout, cycleEasing, renderer, setSkipFocusRestoreOnExit, tree])
 
   return <KeybindContext.Provider value={{ registerShortcut, inChordRef, inChord }}>{children}</KeybindContext.Provider>
 }
@@ -317,4 +329,8 @@ function focusNavigationDirectionForKey(event: KeyEvent): FocusDirection | undef
 function isFocusNavigationActivationKey(event: KeyEvent): boolean {
   const name = normalizeShortcutKeyName(event.name)
   return name === "return" || name === "space"
+}
+
+function isFocusNavigationEasingKey(event: KeyEvent): boolean {
+  return isPlainNavigationLetterKey(event) && normalizeShortcutKeyName(event.name) === "e"
 }

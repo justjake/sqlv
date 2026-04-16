@@ -1,6 +1,7 @@
 import type { InputRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { focusPath, sameFocusPath } from "../../lib/focus/paths"
+import { findLatestSavedQueryExecution } from "../../lib/queryExecution"
 import type { QueryExecution } from "../../lib/types/Log"
 import type { Connection } from "../../lib/types/Connection"
 import type { SavedQuery } from "../../lib/types/SavedQuery"
@@ -431,23 +432,6 @@ function filterQueryFinderEntries(args: {
 
 function finderItemId(kind: QueryFinderMatch["kind"], id: string): string {
   return `${kind}:${id}`
-}
-
-function findLatestSavedQueryExecution(
-  savedQuery: SavedQuery,
-  entries: QueryExecution[],
-  connections: Connection<any>[],
-): QueryExecution | undefined {
-  const protocolByConnectionId = new Map(connections.map((connection) => [connection.id, connection.protocol]))
-
-  return (
-    entries.find((entry) => entry.savedQueryId === savedQuery.id) ??
-    entries.find(
-      (entry) =>
-        entry.sql.source === savedQuery.text &&
-        (savedQuery.protocol === undefined || protocolByConnectionId.get(entry.connectionId) === savedQuery.protocol),
-    )
-  )
 }
 
 function tokenizeFilter(value: string): string[] {

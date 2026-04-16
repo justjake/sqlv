@@ -32,6 +32,7 @@ import { createEmptyEditorState, type EditorState } from "./editor/state"
 import { replaceTextRange, type EditorRange } from "./editor/text"
 import { formatQueryText } from "./formatQuery"
 import { AdapterRegistry, type AnyAdapter, type Protocol, type ProtocolConfig } from "./interface/Adapter"
+import { findLatestSavedQueryExecution } from "./queryExecution"
 import { QueryExecutionError, QueryRunnerImpl } from "./QueryRunnerImpl"
 import { KnownObjectsSuggestionProvider } from "./suggestions/KnownObjectsSuggestionProvider"
 import type { SuggestionProvider, SuggestionRequest } from "./suggestions/types"
@@ -69,23 +70,6 @@ export type {
   SuggestionItem,
 }
 
-export type DetailView =
-  | {
-      kind: "empty"
-      title?: string
-      message?: string
-    }
-  | {
-      kind: "rows"
-      title?: string
-      rows: object[]
-    }
-  | {
-      kind: "error"
-      title?: string
-      message: string
-    }
-
 export type ConnectionsState = QueryState<Connection<any>[]>
 export type ConnectionSuggestionsState = QueryState<DiscoveredConnectionSuggestion[]>
 export type ConnectionObjectsState = QueryState<ObjectInfo[]>
@@ -102,25 +86,17 @@ export type QueryRef = {
   queryId: string
 }
 
-export type ActiveQuery = {
-  queryId: string
-  text: string
-  connectionId: string
-  startedAt: number
-}
-
 export type SqlVisorState = {
   sessionId: string
   connections: ConnectionsState
   connectionSuggestions: ConnectionSuggestionsState
   selectedConnectionId?: string
+  selectedQueryExecutionId: string | null
   editor: EditorState
   history: QueryExecution[]
   savedQueries: SavedQuery[]
   settings: SettingsState
-  detailView: DetailView
   queryExecution: QueryExecutionState
-  activeQueries: ActiveQuery[]
   objectsByConnectionId: Record<string, ConnectionObjectsState>
 }
 
@@ -204,7 +180,6 @@ export class SqlVisor {
 
   #listeners = new Set<Listener>()
   #queryRunners = new Map<string, QueryRunnerImpl<any>>()
-  #currentQueryId: string | undefined
   #suggestionAbortController: AbortController | undefined
   #suggestionRequestSerial = 0
   #editorAnalysisAbortController: AbortController | undefined
@@ -230,17 +205,12 @@ export class SqlVisor {
       connections: pendingQueryState<Connection<any>[]>(),
       connectionSuggestions: pendingQueryState<DiscoveredConnectionSuggestion[]>(),
       selectedConnectionId: undefined,
+      selectedQueryExecutionId: null,
       editor: createEmptyEditorState(),
       history: [],
       savedQueries: [],
       settings: defaultSettingsState(),
-      detailView: {
-        kind: "empty",
-        title: "Results",
-        message: "Run a query to inspect results.",
-      },
       queryExecution: pendingQueryState<QueryExecution>(),
-      activeQueries: [],
       objectsByConnectionId: {},
     })
 
@@ -301,7 +271,12 @@ export class SqlVisor {
       `,
     )
     const history = logEntries.filter(isQueryExecution).sort((a, b) => historySortTime(b) - historySortTime(a))
-    this.#setState({ history })
+    const selectedQueryExecutionId = resolveSelectedQueryExecutionId(this.#state.selectedQueryExecutionId, history)
+    this.#setState({
+      history,
+      queryExecution: selectedQueryExecutionId ? queryExecutionStateFromExecution(history.find((entry) => entry.id === selectedQueryExecutionId)!) : pendingQueryState(),
+      selectedQueryExecutionId,
+    })
   }
 
   async #loadPersistedSavedQueries(): Promise<void> {
@@ -374,6 +349,17 @@ export class SqlVisor {
 
   selectConnection(connectionId: string | undefined) {
     this.#applySelectedConnection(connectionId)
+  }
+
+  selectQueryExecution(queryExecutionId: string | null) {
+    if (queryExecutionId !== null && !this.#state.history.some((entry) => entry.id === queryExecutionId)) {
+      return
+    }
+
+    this.#setState({
+      selectedQueryExecutionId: queryExecutionId,
+      queryExecution: queryExecutionId ? this.getQueryState({ queryId: queryExecutionId }) : pendingQueryState(),
+    })
   }
 
   setEditorBuffer(
@@ -555,10 +541,6 @@ export class SqlVisor {
     return persistedRow.settings
   }
 
-  setDetailView(detailView: DetailView) {
-    this.#setState({ detailView })
-  }
-
   requestEditorAnalysis(parentFlowId?: string) {
     const buffer = this.#state.editor.buffer
     const connectionId = this.#state.selectedConnectionId
@@ -638,7 +620,7 @@ export class SqlVisor {
       return
     }
 
-    this.#currentQueryId = executionId
+    this.selectQueryExecution(executionId)
     const restoredConnectionId = this.#findConnection(execution.connectionId)?.id
     this.#applySelectedConnection(restoredConnectionId, {
       persistSidebarSelection: restoredConnectionId !== undefined,
@@ -650,7 +632,6 @@ export class SqlVisor {
       savedQueryId: execution.savedQueryId ?? null,
       text: execution.sql.source,
     })
-    this.setDetailView(detailViewFromExecution(execution))
   }
 
   restoreSavedQuery(savedQueryId: string): RestoreSavedQueryResult | undefined {
@@ -660,13 +641,11 @@ export class SqlVisor {
     }
 
     const execution = findLatestSavedQueryExecution(savedQuery, this.#state.history, this.#state.connections.data ?? [])
-    this.#currentQueryId = execution?.id
+    this.selectQueryExecution(execution?.id ?? null)
 
     const connectionId = this.#resolveSavedQueryConnectionId(savedQuery, execution)
     if (connectionId) {
       this.selectConnection(connectionId)
-    } else {
-      this.#syncQueryState()
     }
 
     this.closeEditorCompletion()
@@ -676,7 +655,6 @@ export class SqlVisor {
       savedQueryId: savedQuery.id,
       text: savedQuery.text,
     })
-    this.setDetailView(execution ? detailViewFromExecution(execution) : emptyDetailView())
 
     return {
       savedQuery,
@@ -692,20 +670,27 @@ export class SqlVisor {
       return historyEntry ? queryExecutionStateFromExecution(historyEntry) : pendingQueryState<QueryExecution>()
     }
 
-    if (state.status !== "error" || state.data) {
+    if (state.data) {
       return state
     }
 
-    const execution = state.error instanceof QueryExecutionError ? state.error.execution : historyEntry
+    const execution =
+      historyEntry ?? (state.error instanceof QueryExecutionError ? state.error.execution : undefined)
     if (!execution) {
       return state
     }
 
+    const derived = queryExecutionStateFromExecution(execution)
     return {
       ...state,
       data: execution,
-      dataUpdateCount: Math.max(state.dataUpdateCount, 1),
-      dataUpdatedAt: state.dataUpdatedAt || execution.finishedAt || execution.createdAt,
+      dataUpdateCount: Math.max(state.dataUpdateCount, derived.dataUpdateCount),
+      dataUpdatedAt: state.dataUpdatedAt || derived.dataUpdatedAt,
+      error: derived.error ?? state.error,
+      errorUpdateCount: Math.max(state.errorUpdateCount, derived.errorUpdateCount),
+      errorUpdatedAt: state.errorUpdatedAt || derived.errorUpdatedAt,
+      fetchFailureCount: Math.max(state.fetchFailureCount, derived.fetchFailureCount),
+      fetchFailureReason: state.fetchFailureReason ?? derived.fetchFailureReason,
     }
   }
 
@@ -761,9 +746,22 @@ export class SqlVisor {
     const queryRef = {
       queryId,
     } satisfies QueryRef
-    const startedAt = Date.now()
+    const createdAt = EpochMillis.now()
+    const pendingExecution = createPendingQueryExecution({
+      connectionId,
+      createdAt,
+      id: queryId,
+      initiator: "user",
+      savedQueryId,
+      sessionId: this.session.id,
+      sql: text,
+    })
 
-    this.#currentQueryId = queryId
+    this.#setState({
+      history: prependHistoryExecution(this.#state.history, pendingExecution),
+      queryExecution: queryExecutionStateFromExecution(pendingExecution),
+      selectedQueryExecutionId: queryId,
+    })
 
     const executionKey = this.#queryExecutionQueryKey(queryId)
     const queryPromise = this.#queryClient.fetchQuery({
@@ -780,28 +778,19 @@ export class SqlVisor {
           savedQueryId,
         })
       },
-      meta: { queryId, text, connectionId, startedAt },
       retry: false,
       staleTime: Infinity,
     })
 
-    this.#syncQueryState()
-
     void queryPromise
       .then((execution) => {
-        const patch: Partial<SqlVisorState> = {
-          history: [execution, ...this.#state.history],
-        }
-
-        if (this.#currentQueryId === queryId) {
-          patch.detailView = {
-            kind: "rows",
-            title: `Results (${execution.rowCount})`,
-            rows: execution.rows,
-          }
-        }
-
-        this.#setState(patch)
+        this.#setState({
+          history: replaceHistoryExecution(this.#state.history, execution),
+          queryExecution:
+            this.#state.selectedQueryExecutionId === queryId
+              ? queryExecutionStateFromExecution(execution)
+              : this.#state.queryExecution,
+        })
       })
       .catch(async (_error) => {
         const error = _error instanceof Error ? _error : new Error(String(_error))
@@ -810,6 +799,7 @@ export class SqlVisor {
           error instanceof QueryExecutionError
             ? error.execution
             : createSyntheticQueryExecution({
+                createdAt: pendingExecution.createdAt,
                 id: queryId,
                 initiator: "user",
                 connectionId,
@@ -829,19 +819,13 @@ export class SqlVisor {
           }
         }
 
-        const patch: Partial<SqlVisorState> = {
-          history: [execution, ...this.#state.history],
-        }
-
-        if (this.#currentQueryId === queryId) {
-          patch.detailView = {
-            kind: "error",
-            title: execution.status === "cancelled" ? "Query Cancelled" : "Query Error",
-            message: execution.error ?? error.message,
-          }
-        }
-
-        this.#setState(patch)
+        this.#setState({
+          history: replaceHistoryExecution(this.#state.history, execution),
+          queryExecution:
+            this.#state.selectedQueryExecutionId === queryId
+              ? queryExecutionStateFromExecution(execution)
+              : this.#state.queryExecution,
+        })
       })
       .finally(() => {
         this.#syncQueryState()
@@ -1256,30 +1240,14 @@ export class SqlVisor {
       )
     }
 
-    const queryExecution = this.#currentQueryId
-      ? this.getQueryState({ queryId: this.#currentQueryId })
+    const queryExecution = this.#state.selectedQueryExecutionId
+      ? this.getQueryState({ queryId: this.#state.selectedQueryExecutionId })
       : pendingQueryState<QueryExecution>()
-
-    const queryExecutionKeyPrefix = [this.#queryKeyPrefix[0], this.#queryKeyPrefix[1], "query-execution"] as const
-    const fetchingQueries = this.#queryClient.getQueryCache().findAll({
-      queryKey: queryExecutionKeyPrefix,
-      fetchStatus: "fetching",
-    })
-    const activeQueries: ActiveQuery[] = fetchingQueries.map((q) => {
-      const meta = q.meta as { queryId?: string; text?: string; connectionId?: string; startedAt?: number } | undefined
-      return {
-        queryId: meta?.queryId ?? String(q.queryKey[3] ?? ""),
-        text: meta?.text ?? "",
-        connectionId: meta?.connectionId ?? "",
-        startedAt: meta?.startedAt ?? 0,
-      }
-    })
 
     this.#replaceState({
       connections,
       connectionSuggestions,
       queryExecution,
-      activeQueries,
       objectsByConnectionId,
     })
   }
@@ -1297,7 +1265,7 @@ export class SqlVisor {
   #replaceState(
     patch: Pick<
       SqlVisorState,
-      "connections" | "connectionSuggestions" | "queryExecution" | "activeQueries" | "objectsByConnectionId"
+      "connections" | "connectionSuggestions" | "queryExecution" | "objectsByConnectionId"
     >,
   ) {
     this.#state = this.#normalizeState({
@@ -1456,7 +1424,36 @@ function createQueryClient(): QueryClient {
   })
 }
 
+function createPendingQueryExecution(args: {
+  id: string
+  initiator: "user" | "system"
+  connectionId: string
+  createdAt: number
+  savedQueryId?: string
+  sessionId: string
+  sql: string
+}): QueryExecution {
+  return {
+    type: "queryExecution",
+    id: args.id,
+    connectionId: args.connectionId,
+    sessionId: args.sessionId,
+    savedQueryId: args.savedQueryId,
+    initiator: args.initiator,
+    createdAt: EpochMillis(args.createdAt),
+    sql: {
+      source: args.sql,
+      args: [],
+    },
+    sensitive: false,
+    status: "pending",
+    rows: [],
+    rowCount: 0,
+  }
+}
+
 function createSyntheticQueryExecution(args: {
+  createdAt?: number
   id: string
   initiator: "user" | "system"
   connectionId: string
@@ -1475,7 +1472,7 @@ function createSyntheticQueryExecution(args: {
     sessionId: args.sessionId,
     savedQueryId: args.savedQueryId,
     initiator: args.initiator,
-    createdAt: now,
+    createdAt: args.createdAt === undefined ? now : EpochMillis(args.createdAt),
     finishedAt: now,
     sql: {
       source: args.sql,
@@ -1506,47 +1503,6 @@ function sortSavedQueries(savedQueries: SavedQuery[]): SavedQuery[] {
   return savedQueries.toSorted((a, b) => savedQuerySortTime(b) - savedQuerySortTime(a))
 }
 
-function findLatestSavedQueryExecution(
-  savedQuery: SavedQuery,
-  history: QueryExecution[],
-  connections: Connection<any>[],
-): QueryExecution | undefined {
-  const protocolByConnectionId = new Map(connections.map((connection) => [connection.id, connection.protocol]))
-
-  return (
-    history.find((entry) => entry.savedQueryId === savedQuery.id) ??
-    history.find(
-      (entry) =>
-        entry.sql.source === savedQuery.text &&
-        (savedQuery.protocol === undefined || protocolByConnectionId.get(entry.connectionId) === savedQuery.protocol),
-    )
-  )
-}
-
-function detailViewFromExecution(execution: QueryExecution): DetailView {
-  if (execution.status !== "success") {
-    return {
-      kind: "error",
-      title: execution.status === "cancelled" ? "Query Cancelled" : "Query Error",
-      message: execution.error ?? "Query failed.",
-    }
-  }
-
-  return {
-    kind: "rows",
-    title: `Results (${execution.rowCount})`,
-    rows: execution.rows,
-  }
-}
-
-function emptyDetailView(): DetailView {
-  return {
-    kind: "empty",
-    title: "Results",
-    message: "No query run selected",
-  }
-}
-
 function queryExecutionStateFromExecution(execution: QueryExecution): QueryExecutionState {
   const error = execution.status === "success" ? null : new QueryExecutionError(execution)
 
@@ -1572,6 +1528,27 @@ function isQueryCancellationError(error: Error): boolean {
 
 function isAbortError(error: Error): boolean {
   return error.name === "AbortError"
+}
+
+function prependHistoryExecution(history: QueryExecution[], execution: QueryExecution): QueryExecution[] {
+  const withoutExisting = history.filter((entry) => entry.id !== execution.id)
+  return [execution, ...withoutExisting]
+}
+
+function replaceHistoryExecution(history: QueryExecution[], execution: QueryExecution): QueryExecution[] {
+  const nextHistory = history.map((entry) => (entry.id === execution.id ? execution : entry))
+  return nextHistory.some((entry) => entry.id === execution.id) ? nextHistory : prependHistoryExecution(history, execution)
+}
+
+function resolveSelectedQueryExecutionId(
+  selectedQueryExecutionId: string | null,
+  history: QueryExecution[],
+): string | null {
+  if (selectedQueryExecutionId && history.some((entry) => entry.id === selectedQueryExecutionId)) {
+    return selectedQueryExecutionId
+  }
+
+  return history[0]?.id ?? null
 }
 
 function discoveredConnectionSuggestionId(

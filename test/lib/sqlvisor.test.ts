@@ -560,11 +560,6 @@ describe("SqlVisor", () => {
       cursorOffset: "select 1".length,
       text: "select 1",
     })
-    engine.setDetailView({
-      kind: "empty",
-      message: "waiting",
-      title: "Details",
-    })
 
     const created = await engine.addConnection({
       config: {
@@ -789,12 +784,9 @@ where
     expect(fakeAdapter.connectCalls).toBe(1)
     expect(fakeAdapter.queryCalls).toEqual(["select 1", "select 1"])
     expect(engine.getState().history[0]?.sql.source).toBe("select 1")
+    expect(engine.getState().selectedQueryExecutionId).toBe(first.queryId)
     expect(engine.getState().queryExecution.data?.id).toBe(first.queryId)
-    expect(engine.getState().detailView).toEqual({
-      kind: "rows",
-      rows: [{ value: 1 }],
-      title: "Results (1)",
-    })
+    expect(engine.getState().queryExecution.data?.rows).toEqual([{ value: 1 }])
     expect(engine.getState().queryExecution.data?.sql.source).toBe("select 1")
     expect(engine.getState().queryExecution.status).toBe("success")
     expect(engine.getState().editor.buffer.text).toBe("select 1")
@@ -832,12 +824,9 @@ where
     engine.restoreQueryExecution(older.id)
 
     expect(engine.getState().editor.buffer.text).toBe("select 1")
+    expect(engine.getState().selectedQueryExecutionId).toBe(older.id)
     expect(engine.getState().queryExecution.data?.id).toBe(older.id)
-    expect(engine.getState().detailView).toEqual({
-      kind: "rows",
-      rows: [{ value: 1 }],
-      title: "Results (1)",
-    })
+    expect(engine.getState().queryExecution.data?.rows).toEqual([{ value: 1 }])
   })
 
   test("restores a history entry from a deleted connection without selecting a stale connection", async () => {
@@ -886,13 +875,10 @@ where
       },
       treeSitterGrammar: undefined,
     })
+    expect(engine.getState().selectedQueryExecutionId).toBe(query.queryId)
     expect(engine.getState().queryExecution.data?.connectionId).toBe(first.id)
     expect(engine.getState().queryExecution.data?.id).toBe(query.queryId)
-    expect(engine.getState().detailView).toEqual({
-      kind: "rows",
-      rows: [{ value: 1 }],
-      title: "Results (1)",
-    })
+    expect(engine.getState().queryExecution.data?.rows).toEqual([{ value: 1 }])
   })
 
   test("loads persisted saved queries from previous sessions on create", async () => {
@@ -1053,12 +1039,9 @@ where
       },
       savedQueryId: savedQuery.id,
     })
+    expect(engine.getState().selectedQueryExecutionId).toBe("exec-newer")
     expect(engine.getState().queryExecution.data?.id).toBe("exec-newer")
-    expect(engine.getState().detailView).toEqual({
-      kind: "rows",
-      rows: [{ id: 2 }],
-      title: "Results (1)",
-    })
+    expect(engine.getState().queryExecution.data?.rows).toEqual([{ id: 2 }])
   })
 
   test("restores a saved query onto an available connection when its latest execution connection was deleted", async () => {
@@ -1111,13 +1094,10 @@ where
       savedQueryId: savedQuery.id,
       treeSitterGrammar: "sql",
     })
+    expect(engine.getState().selectedQueryExecutionId).toBe(staleExecution.id)
     expect(engine.getState().queryExecution.data?.connectionId).toBe("conn-deleted")
     expect(engine.getState().queryExecution.data?.id).toBe(staleExecution.id)
-    expect(engine.getState().detailView).toEqual({
-      kind: "rows",
-      rows: [{ id: 7 }],
-      title: "Results (1)",
-    })
+    expect(engine.getState().queryExecution.data?.rows).toEqual([{ id: 7 }])
   })
 
   test("restores a saved query by matching previous executions on text and protocol, and clears detail when none exist", async () => {
@@ -1158,12 +1138,9 @@ where
       queryExecutionId: "exec-fallback",
       savedQuery: fallbackSavedQuery,
     })
+    expect(engine.getState().selectedQueryExecutionId).toBe("exec-fallback")
     expect(engine.getState().queryExecution.data?.id).toBe("exec-fallback")
-    expect(engine.getState().detailView).toEqual({
-      kind: "rows",
-      rows: [{ id: 3 }],
-      title: "Results (1)",
-    })
+    expect(engine.getState().queryExecution.data?.rows).toEqual([{ id: 3 }])
 
     const restoredWithoutExecution = engine.restoreSavedQuery(noResultSavedQuery.id)
 
@@ -1178,12 +1155,9 @@ where
       },
       savedQueryId: noResultSavedQuery.id,
     })
+    expect(engine.getState().selectedQueryExecutionId).toBeNull()
     expect(engine.getState().queryExecution.status).toBe("pending")
-    expect(engine.getState().detailView).toEqual({
-      kind: "empty",
-      message: "No query run selected",
-      title: "Results",
-    })
+    expect(engine.getState().queryExecution.data).toBeUndefined()
   })
 
   test("rejects invalid queries and records failed executions", async () => {
@@ -1223,11 +1197,8 @@ where
       },
       status: "error",
     })
-    expect(engine.getState().detailView).toEqual({
-      kind: "error",
-      message: "query failed",
-      title: "Query Error",
-    })
+    expect(engine.getState().selectedQueryExecutionId).toBe(failedQuery.queryId)
+    expect(engine.getState().queryExecution.data?.error).toBe("query failed")
     expect(engine.getState().queryExecution.status).toBe("error")
   })
 
@@ -1245,8 +1216,8 @@ where
     const first = engine.runQuery({ text: "wait 1" })
     const second = engine.runQuery({ text: "wait 2" })
 
-    await waitFor(() => engine.getState().activeQueries.length === 2)
-    expect(engine.getState().activeQueries.map((query) => query.queryId)).toEqual(
+    await waitFor(() => engine.getState().history.filter((entry) => entry.status === "pending").length === 2)
+    expect(engine.getState().history.filter((entry) => entry.status === "pending").map((entry) => entry.id)).toEqual(
       expect.arrayContaining([first.queryId, second.queryId]),
     )
 
@@ -1264,7 +1235,7 @@ where
       status: "cancelled",
     })
 
-    await waitFor(() => engine.getState().activeQueries.length === 0)
+    await waitFor(() => engine.getState().history.every((entry) => entry.status !== "pending"))
   })
 
   test("opens and applies editor suggestion menu items, switches connections, and preserves the menu while queries run", async () => {

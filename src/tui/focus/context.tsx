@@ -1,4 +1,4 @@
-import { LayoutEvents, type Renderable, Timeline, engine } from "@opentui/core"
+import { LayoutEvents, type EasingFunctions, type Renderable, Timeline, engine } from "@opentui/core"
 import { useRenderer } from "@opentui/react"
 import {
   useCallback,
@@ -26,7 +26,17 @@ import type { FocusPath, FocusPathSuffix, FocusNavigationState } from "../../lib
 import { renderableViewportRect } from "./utils"
 
 const FOCUS_HALO_ANIMATION_MS = 110
-const FOCUS_HALO_ANIMATION_EASE = "outCirc"
+const FOCUS_HALO_ANIMATION_EASES = [
+  "outCirc",
+  "outQuad",
+  "inOutCirc",
+  "inOutQuad",
+  "inOutSine",
+  "outExpo",
+  "linear",
+] as const satisfies readonly EasingFunctions[]
+
+type FocusHaloAnimationEase = (typeof FOCUS_HALO_ANIMATION_EASES)[number]
 
 type FocusHaloOverlayTarget = {
   backgroundColor: string
@@ -49,6 +59,7 @@ const FocusTreeContext = createContext<FocusTree | undefined>(undefined)
 const FocusPathContext = createContext<FocusPath>(ROOT_FOCUS_PATH)
 const CurrentFocusablePathContext = createContext<FocusPath | undefined>(undefined)
 const FocusHaloOverlayContext = createContext<ReturnType<typeof createFocusHaloOverlayStore> | undefined>(undefined)
+const FocusHaloAnimationContext = createContext<ReturnType<typeof createFocusHaloAnimationStore> | undefined>(undefined)
 const FocusNavigationRestoreContext = createContext<
   ((skipRestoreOnExit: boolean) => void) | undefined
 >(undefined)
@@ -56,6 +67,7 @@ const FocusNavigationRestoreContext = createContext<
 export function FocusProvider(props: { children: ReactNode }) {
   const tree = useMemo(() => new FocusTree(), [])
   const haloOverlayStore = useMemo(() => createFocusHaloOverlayStore(), [])
+  const haloAnimationStore = useMemo(() => createFocusHaloAnimationStore(), [])
   const renderer = useRenderer()
   const wasNavigationActiveRef = useRef(false)
   const savedRenderableRef = useRef<Renderable | null>(null)
@@ -104,9 +116,11 @@ export function FocusProvider(props: { children: ReactNode }) {
 
   return (
     <FocusTreeContext.Provider value={tree}>
-      <FocusHaloOverlayContext.Provider value={haloOverlayStore}>
-        <FocusNavigationRestoreContext.Provider value={setSkipRestoreOnExit}>{props.children}</FocusNavigationRestoreContext.Provider>
-      </FocusHaloOverlayContext.Provider>
+      <FocusHaloAnimationContext.Provider value={haloAnimationStore}>
+        <FocusHaloOverlayContext.Provider value={haloOverlayStore}>
+          <FocusNavigationRestoreContext.Provider value={setSkipRestoreOnExit}>{props.children}</FocusNavigationRestoreContext.Provider>
+        </FocusHaloOverlayContext.Provider>
+      </FocusHaloAnimationContext.Provider>
     </FocusTreeContext.Provider>
   )
 }
@@ -135,6 +149,27 @@ export function useFocusHaloOverlayController(): Pick<
   if (!controller) {
     throw new Error("FocusProvider not found")
   }
+  return controller
+}
+
+export function useFocusHaloAnimationEase(): FocusHaloAnimationEase {
+  const store = useContext(FocusHaloAnimationContext)
+  if (!store) {
+    throw new Error("FocusProvider not found")
+  }
+
+  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
+}
+
+export function useFocusHaloAnimationController(): Pick<
+  ReturnType<typeof createFocusHaloAnimationStore>,
+  "cycleEasing"
+> {
+  const controller = useContext(FocusHaloAnimationContext)
+  if (!controller) {
+    throw new Error("FocusProvider not found")
+  }
+
   return controller
 }
 
@@ -264,6 +299,7 @@ export function FocusHaloOverlay() {
   }
 
   const target = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
+  const easing = useFocusHaloAnimationEase()
   const [presentation, setPresentation] = useState<FocusHaloOverlayPresentation | null>(null)
   const animationRef = useRef<Timeline | null>(null)
   const presentationRef = useRef<FocusHaloOverlayPresentation | null>(null)
@@ -351,7 +387,7 @@ export function FocusHaloOverlay() {
       setPresentationState(withFocusHaloRect(nextPresentation, animatedRect))
       timeline.add(animatedRect, {
         duration: FOCUS_HALO_ANIMATION_MS,
-        ease: FOCUS_HALO_ANIMATION_EASE,
+        ease: easing,
         height: nextPresentation.height,
         onComplete: finishAnimation,
         onUpdate: () => {
@@ -368,7 +404,7 @@ export function FocusHaloOverlay() {
       target.renderable.off(LayoutEvents.LAYOUT_CHANGED, syncCurrentRect)
       target.renderable.off(LayoutEvents.RESIZED, syncCurrentRect)
     }
-  }, [setPresentationState, stopAnimation, target])
+  }, [easing, setPresentationState, stopAnimation, target])
 
   if (!presentation) {
     return null
@@ -417,6 +453,35 @@ function createFocusHaloOverlayStore() {
 
       target = nextTarget
       notify()
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+  }
+}
+
+function createFocusHaloAnimationStore() {
+  let easing: FocusHaloAnimationEase = FOCUS_HALO_ANIMATION_EASES[0]
+  const listeners = new Set<() => void>()
+
+  function notify() {
+    for (const listener of listeners) {
+      listener()
+    }
+  }
+
+  return {
+    cycleEasing() {
+      const currentIndex = FOCUS_HALO_ANIMATION_EASES.indexOf(easing)
+      const nextIndex = (currentIndex + 1) % FOCUS_HALO_ANIMATION_EASES.length
+      easing = FOCUS_HALO_ANIMATION_EASES[nextIndex]!
+      notify()
+    },
+    getSnapshot() {
+      return easing
     },
     subscribe(listener: () => void) {
       listeners.add(listener)

@@ -27,6 +27,7 @@ import {
 import { createEmptyEditorState, type EditorState } from "../src/lib/editor/state"
 import { replaceTextRange } from "../src/lib/editor/text"
 import { AdapterRegistry, type Protocol } from "../src/lib/interface/Adapter"
+import { findLatestSavedQueryExecution } from "../src/lib/queryExecution"
 import { QueryRunnerImpl } from "../src/lib/QueryRunnerImpl"
 import {
   type AddConnectionInput,
@@ -206,17 +207,12 @@ export function createSqlVisorState(patch: SqlVisorStatePatch = {}): SqlVisorSta
       ...patch.editor?.completion,
     },
   }
-  const emptyDetailView: SqlVisorState["detailView"] = {
-    kind: "empty",
-    title: "Results",
-    message: "Run a query to inspect results.",
-  }
-
   return {
     sessionId: patch.sessionId ?? "session-1",
     connections: patch.connections ?? pendingQueryState<Connection<any>[]>([]),
     connectionSuggestions: patch.connectionSuggestions ?? pendingQueryState(),
     selectedConnectionId: patch.selectedConnectionId,
+    selectedQueryExecutionId: patch.selectedQueryExecutionId ?? null,
     editor,
     history: patch.history ?? [],
     savedQueries: patch.savedQueries ?? [],
@@ -224,9 +220,7 @@ export function createSqlVisorState(patch: SqlVisorStatePatch = {}): SqlVisorSta
       ...defaultSettingsState(),
       ...patch.settings,
     },
-    detailView: patch.detailView ?? emptyDetailView,
     queryExecution: patch.queryExecution ?? pendingQueryState<QueryExecution>(),
-    activeQueries: patch.activeQueries ?? [],
     objectsByConnectionId: patch.objectsByConnectionId ?? {},
   }
 }
@@ -251,6 +245,7 @@ type EngineMethodOverrides = {
   runQuery?: (input?: RunQueryInput) => QueryRef
   restoreHistoryEntry?: (entryId: string) => void
   restoreQueryExecution?: (entryId: string) => void
+  selectQueryExecution?: (queryExecutionId: string | null) => void
   selectConnection?: (connectionId: string | undefined) => void
   saveQueryAsNew?: (input: SaveQueryAsNewInput) => Promise<SavedQuery>
   saveSavedQueryChanges?: (input?: SaveSavedQueryChangesInput) => Promise<SavedQuery>
@@ -294,6 +289,7 @@ export function createEngineStub(
     saveQueryAsNew: SaveQueryAsNewInput[]
     saveSavedQueryChanges: Array<SaveSavedQueryChangesInput | undefined>
     replaceSettings: Array<{ id: SettingsId; settings: object }>
+    selectQueryExecution: Array<string | null>
     selectConnection: Array<string | undefined>
     setEditorBuffer: Array<EditorBufferPatch & { savedQueryId?: string | null }>
     updateSettings: Array<{ id: SettingsId; patch: object }>
@@ -319,6 +315,7 @@ export function createEngineStub(
     saveQueryAsNew: [],
     saveSavedQueryChanges: [],
     replaceSettings: [],
+    selectQueryExecution: [],
     selectConnection: [],
     setEditorBuffer: [],
     updateSettings: [],
@@ -440,6 +437,7 @@ export function createEngineStub(
       state = {
         ...state,
         history: [entry, ...state.history],
+        selectedQueryExecutionId: entry.id,
         queryExecution: queryState,
       }
       notify()
@@ -465,18 +463,17 @@ export function createEngineStub(
 
       state = {
         ...state,
-        detailView:
-          entry.status === "success"
-            ? {
-                kind: "rows",
-                rows: entry.rows,
-                title: `Results (${entry.rows.length})`,
-              }
-            : {
-                kind: "error",
-                message: entry.error ?? "Query failed.",
-                title: entry.status === "cancelled" ? "Query Cancelled" : "Query Error",
-              },
+        queryExecution: createQueryState({
+          data: entry,
+          dataUpdateCount: 1,
+          dataUpdatedAt: Date.now(),
+          error: entry.status === "success" ? null : new Error(entry.error ?? "Query failed."),
+          errorUpdateCount: entry.status === "success" ? 0 : 1,
+          errorUpdatedAt: entry.status === "success" ? 0 : Date.now(),
+          fetchStatus: entry.status === "pending" ? "fetching" : "idle",
+          status: entry.status === "pending" ? "pending" : entry.status === "success" ? "success" : "error",
+        }),
+        selectedQueryExecutionId: entry.id,
       }
       setEditorState({
         analysis: idleEditorAnalysisState(),
@@ -500,29 +497,22 @@ export function createEngineStub(
         return undefined
       }
 
-      const execution = state.history.find(
-        (entry) => entry.savedQueryId === savedQuery.id || entry.sql.source === savedQuery.text,
-      )
+      const execution = findLatestSavedQueryExecution(savedQuery, state.history, state.connections.data ?? [])
       state = {
         ...state,
-        detailView:
-          execution?.status === "success"
-            ? {
-                kind: "rows",
-                rows: execution.rows,
-                title: `Results (${execution.rows.length})`,
-              }
-            : execution
-              ? {
-                  kind: "error",
-                  message: execution.error ?? "Query failed.",
-                  title: execution.status === "cancelled" ? "Query Cancelled" : "Query Error",
-                }
-              : {
-                  kind: "empty",
-                  message: "No query run selected",
-                  title: "Results",
-                },
+        queryExecution: execution
+          ? createQueryState({
+              data: execution,
+              dataUpdateCount: 1,
+              dataUpdatedAt: Date.now(),
+              error: execution.status === "success" ? null : new Error(execution.error ?? "Query failed."),
+              errorUpdateCount: execution.status === "success" ? 0 : 1,
+              errorUpdatedAt: execution.status === "success" ? 0 : Date.now(),
+              fetchStatus: execution.status === "pending" ? "fetching" : "idle",
+              status: execution.status === "pending" ? "pending" : execution.status === "success" ? "success" : "error",
+            })
+          : pendingQueryState(),
+        selectedQueryExecutionId: execution?.id ?? null,
       }
       setEditorState({
         analysis: idleEditorAnalysisState(),
@@ -538,6 +528,32 @@ export function createEngineStub(
         savedQuery,
         queryExecutionId: execution?.id,
       }
+    },
+    selectQueryExecution(queryExecutionId: string | null) {
+      calls.selectQueryExecution.push(queryExecutionId)
+      if (overrides.selectQueryExecution) {
+        overrides.selectQueryExecution(queryExecutionId)
+        return
+      }
+
+      const execution = queryExecutionId === null ? undefined : state.history.find((entry) => entry.id === queryExecutionId)
+      state = {
+        ...state,
+        queryExecution: execution
+          ? createQueryState({
+              data: execution,
+              dataUpdateCount: 1,
+              dataUpdatedAt: Date.now(),
+              error: execution.status === "success" ? null : new Error(execution.error ?? "Query failed."),
+              errorUpdateCount: execution.status === "success" ? 0 : 1,
+              errorUpdatedAt: execution.status === "success" ? 0 : Date.now(),
+              fetchStatus: execution.status === "pending" ? "fetching" : "idle",
+              status: execution.status === "pending" ? "pending" : execution.status === "success" ? "success" : "error",
+            })
+          : pendingQueryState(),
+        selectedQueryExecutionId: execution?.id ?? null,
+      }
+      notify()
     },
     getQueryState(query: QueryRef) {
       if (overrides.getQueryState) {
@@ -968,6 +984,7 @@ export function createEngineStub(
     | "restoreSavedQuery"
     | "runQuery"
     | "replaceSettings"
+    | "selectQueryExecution"
     | "selectConnection"
     | "saveQueryAsNew"
     | "saveSavedQueryChanges"

@@ -35,7 +35,7 @@ function FocusHaloHarness() {
 
 describe("FocusHalo", () => {
   test("renders the shared halo from the root overlay and moves it between highlight targets", async () => {
-    const ui = await render(<FocusHaloHarness />, { height: 6, width: 40 })
+    const ui = await render(<FocusHaloHarness />, { height: 10, width: 40 })
 
     await settleDeferredRender(ui)
     expect(backgroundRegions(findHaloLine(ui.captureSpans()))).toHaveLength(0)

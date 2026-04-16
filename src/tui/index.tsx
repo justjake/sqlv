@@ -2,7 +2,7 @@ import { createCliRenderer, type MouseEvent } from "@opentui/core"
 import { createRoot, flushSync, useTerminalDimensions } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { focusPath, sameFocusPath } from "../lib/focus/paths"
-import { SqlVisor, type ActiveQuery, type DetailView, type DiscoveredConnectionSuggestion } from "../lib/SqlVisor"
+import { SqlVisor, type DiscoveredConnectionSuggestion } from "../lib/SqlVisor"
 import type { Connection } from "../lib/types/Connection"
 import type { QueryExecution } from "../lib/types/Log"
 import { AddConnectionPane } from "./connection/AddConnectionPane"
@@ -39,21 +39,10 @@ type SaveQueryDialogState = {
   saving: boolean
 }
 
-type RecentQuery = {
-  queryId: string
-  text: string
-  connectionId: string
-  startedAt: number
-  initiator: QueryExecution["initiator"]
-  status: QueryExecution["status"]
-  isActive: boolean
-  execution?: QueryExecution
-}
-
 type RecentQueryTableRowData =
   | {
       kind: "query"
-      query: RecentQuery
+      query: QueryExecution
       connectionName: string
       dimmed: boolean
       now: number
@@ -95,7 +84,6 @@ function AppBody() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(30)
   const [editorHeight, setEditorHeight] = useState(12)
-  const [selectedRecentQueryId, setSelectedRecentQueryId] = useState<string | null | undefined>()
   const [showSystemQueries, setShowSystemQueries] = useState(false)
   const [saveDialog, setSaveDialog] = useState<SaveQueryDialogState | undefined>()
   const { width: termWidth, height: termHeight } = useTerminalDimensions()
@@ -110,33 +98,10 @@ function AppBody() {
     : undefined
   const detailPaneWidth = Math.max(1, termWidth - sidebarWidth - 1)
   const recentQueries = useMemo(
-    () =>
-      buildRecentQueries(
-        engine,
-        state.activeQueries,
-        state.history,
-        selectedRecentQueryId ?? undefined,
-        showSystemQueries,
-      ),
-    [engine, selectedRecentQueryId, showSystemQueries, state.activeQueries, state.history],
+    () => buildRecentQueries(state.history, state.selectedQueryExecutionId, showSystemQueries),
+    [showSystemQueries, state.history, state.selectedQueryExecutionId],
   )
-  const selectedRecentQuery =
-    selectedRecentQueryId === null
-      ? undefined
-      : (recentQueries.find((query) => query.queryId === selectedRecentQueryId) ??
-        (selectedRecentQueryId === undefined ? recentQueries[0] : undefined))
-
-  useEffect(() => {
-    setSelectedRecentQueryId((current) => {
-      if (current === null || current === undefined) {
-        return current
-      }
-      if (recentQueries.some((query) => query.queryId === current)) {
-        return current
-      }
-      return undefined
-    })
-  }, [recentQueries])
+  const selectedQueryExecution = state.queryExecution.data
 
   useEffect(() => {
     if (pane !== "editor" || !pendingEditorFocusRef.current) {
@@ -149,14 +114,13 @@ function AppBody() {
 
   useShortcut({
     keys: "ctrl+c",
-    enabled: state.activeQueries.length > 0,
+    enabled: state.history.some((query) => query.status === "pending"),
     onKey: () => engine.cancelRunningQueries(),
   })
 
   const handleExecute = async (sql: string) => {
     try {
-      const query = engine.runQuery({ text: sql })
-      setSelectedRecentQueryId(query.queryId)
+      engine.runQuery({ text: sql })
     } catch {
       // the engine already records error state and history
     }
@@ -175,7 +139,6 @@ function AppBody() {
 
   const handleRestoreQuery = useCallback(
     (entry: QueryExecution) => {
-      setSelectedRecentQueryId(entry.id)
       engine.restoreQueryExecution(entry.id)
       setPane("editor")
     },
@@ -189,8 +152,7 @@ function AppBody() {
         return
       }
 
-      const restored = engine.restoreSavedQuery(entry.savedQuery.id)
-      setSelectedRecentQueryId(restored?.queryExecutionId ?? null)
+      engine.restoreSavedQuery(entry.savedQuery.id)
       setPane("editor")
     },
     [engine, handleRestoreQuery],
@@ -332,16 +294,16 @@ function AppBody() {
   }, [currentSavedQuery?.name, engine])
 
   const handleActivateRecentQuery = useCallback(
-    (query: RecentQuery) => {
-      const hasRows = query.status === "success" && (query.execution?.rows.length ?? 0) > 0
+    (query: QueryExecution) => {
+      const hasRows = query.status === "success" && query.rows.length > 0
       flushSync(() => {
-        setSelectedRecentQueryId(query.queryId)
+        engine.selectQueryExecution(query.id)
       })
       if (hasRows) {
         tree.focusPath([RESULTS_TABLE_FOCUS_ID])
       }
     },
-    [tree],
+    [engine, tree],
   )
 
   const handleRootDrag = useCallback(
@@ -448,10 +410,10 @@ function AppBody() {
             connections={connections}
             onActivate={handleActivateRecentQuery}
             queries={recentQueries}
-            selectedQueryId={selectedRecentQuery?.queryId}
+            selectedQueryId={state.selectedQueryExecutionId}
             width={detailPaneWidth}
           />
-          <QueryDetailPanel detailView={state.detailView} selectedQuery={selectedRecentQuery} width={detailPaneWidth} />
+          <QueryDetailPanel queryExecution={selectedQueryExecution} width={detailPaneWidth} />
         </box>
       </box>
       {saveDialog && (
@@ -549,10 +511,10 @@ function SettingsModal(props: {
 }
 
 function RecentQueryView(props: {
-  queries: RecentQuery[]
+  queries: QueryExecution[]
   connections: Connection<any>[]
-  selectedQueryId?: string
-  onActivate: (query: RecentQuery) => void
+  selectedQueryId: string | null
+  onActivate: (query: QueryExecution) => void
   width?: number
 }) {
   return (
@@ -571,10 +533,10 @@ function RecentQueryView(props: {
 }
 
 function RecentQueryViewBody(props: {
-  queries: RecentQuery[]
+  queries: QueryExecution[]
   connections: Connection<any>[]
-  selectedQueryId?: string
-  onActivate: (query: RecentQuery) => void
+  selectedQueryId: string | null
+  onActivate: (query: QueryExecution) => void
   width?: number
 }) {
   const { queries, connections, onActivate, selectedQueryId, width } = props
@@ -584,7 +546,7 @@ function RecentQueryViewBody(props: {
   const navigationActive = useIsFocusNavigationActive()
   const focusedDescendantPath = useFocusedDescendantPath()
   const [now, setNow] = useState(Date.now)
-  const queryIds = useMemo(() => queries.map((query) => query.queryId), [queries])
+  const queryIds = useMemo(() => queries.map((query) => query.id), [queries])
   const queryFocusIds = useOpaqueIdMap(queryIds, "query")
   const queryPaths = useMemo(() => {
     const next = new Map<string, readonly string[]>()
@@ -598,7 +560,7 @@ function RecentQueryViewBody(props: {
   }, [queryFocusIds, queryIds])
 
   useEffect(() => {
-    if (!queries.some((query) => query.isActive)) {
+    if (!queries.some((query) => query.status === "pending")) {
       return
     }
     const interval = setInterval(() => setNow(Date.now()), 100)
@@ -606,8 +568,8 @@ function RecentQueryViewBody(props: {
   }, [queries])
 
   const focusedQueryId = resolveFocusedRecentQueryId(focusedDescendantPath, queryPaths)
-  const currentQueryId = focusedQueryId ?? selectedQueryId ?? queries[0]?.queryId
-  const selectedIndex = queries.findIndex((query) => query.queryId === currentQueryId)
+  const currentQueryId = focusedQueryId ?? selectedQueryId ?? queries[0]?.id
+  const selectedIndex = queries.findIndex((query) => query.id === currentQueryId)
   const currentIndex = selectedIndex >= 0 ? selectedIndex : 0
   const currentQuery = queries[currentIndex]
   const displayRows = useMemo<RecentQueryTableRowData[]>(
@@ -646,7 +608,7 @@ function RecentQueryViewBody(props: {
         width: { absolute: 12 },
         Cell: ({ row }) => (
           <Text fg={row.kind === "query" && row.dimmed ? theme.mutedFg : undefined} wrapMode="none" truncate>
-            {row.kind === "query" ? formatTime(row.query.startedAt) : ""}
+            {row.kind === "query" ? formatTime(row.query.createdAt) : ""}
           </Text>
         ),
       },
@@ -654,7 +616,7 @@ function RecentQueryViewBody(props: {
         width: { grow: 4 },
         Cell: ({ row }) => (
           <Text fg={row.kind === "query" && row.dimmed ? theme.mutedFg : undefined} wrapMode="none" truncate>
-            {row.kind === "query" ? truncateSql(row.query.text, 120) : ""}
+            {row.kind === "query" ? truncateSql(row.query.sql.source, 120) : ""}
           </Text>
         ),
       },
@@ -684,12 +646,12 @@ function RecentQueryViewBody(props: {
     }
 
     const query =
-      queries.find((candidate) => candidate.queryId === (selectedQueryId ?? currentQuery?.queryId)) ?? currentQuery
+      queries.find((candidate) => candidate.id === (selectedQueryId ?? currentQuery?.id)) ?? currentQuery
     if (!query) {
       return
     }
     queueMicrotask(() => {
-      const queryPath = queryPaths.get(query.queryId)
+      const queryPath = queryPaths.get(query.id)
       if (queryPath) {
         tree.focusPath(queryPath)
       }
@@ -698,7 +660,7 @@ function RecentQueryViewBody(props: {
 
   function focusRow(nextIndex: number) {
     const query = queries[nextIndex]
-    const queryPath = query ? queryPaths.get(query.queryId) : undefined
+    const queryPath = query ? queryPaths.get(query.id) : undefined
     if (!queryPath) {
       return
     }
@@ -740,71 +702,50 @@ function RecentQueryViewBody(props: {
           rows={displayRows}
           columns={columns}
           width={width}
-          getRowKey={(row) => (row.kind === "query" ? row.query.queryId : row.id)}
-          getRowFocusableId={(row) => (row.kind === "query" ? queryFocusIds.get(row.query.queryId) : undefined)}
+          getRowKey={(row) => (row.kind === "query" ? row.query.id : row.id)}
+          getRowFocusableId={(row) => (row.kind === "query" ? queryFocusIds.get(row.query.id) : undefined)}
           isRowDimmed={(row) => (row.kind === "query" ? row.dimmed : false)}
-          isRowFocused={(row) =>
-            row.kind === "query" ? sameFocusPath(queryPaths.get(row.query.queryId), focusedDescendantPath) : false
-          }
-          isRowSelected={(row) => (row.kind === "query" ? row.query.queryId === selectedQueryId : false)}
+          isRowFocused={(row) => (row.kind === "query" ? sameFocusPath(queryPaths.get(row.query.id), focusedDescendantPath) : false)}
+          isRowSelected={(row) => (row.kind === "query" ? row.query.id === selectedQueryId : false)}
         />
       </Focusable>
     </box>
   )
 }
 
-function QueryDetailPanel(props: { detailView: DetailView; selectedQuery: RecentQuery | undefined; width?: number }) {
-  return <QueryDetailSurface detailView={props.detailView} selectedQuery={props.selectedQuery} width={props.width} />
+function QueryDetailPanel(props: { queryExecution: QueryExecution | undefined; width?: number }) {
+  return <QueryDetailSurface queryExecution={props.queryExecution} width={props.width} />
 }
 
-function QueryDetailSurface(props: { detailView: DetailView; selectedQuery: RecentQuery | undefined; width?: number }) {
-  const { detailView, selectedQuery, width } = props
+function QueryDetailSurface(props: { queryExecution: QueryExecution | undefined; width?: number }) {
+  const { queryExecution, width } = props
   const theme = useTheme()
 
-  if (selectedQuery) {
-    return renderSelectedQueryDetail(selectedQuery, theme, width)
+  if (queryExecution) {
+    return renderSelectedQueryDetail(queryExecution, theme, width)
   }
 
-  return renderFallbackDetailView(detailView, theme, width)
+  return renderCenteredState(theme, "No query run selected")
 }
 
-function renderSelectedQueryDetail(query: RecentQuery, theme: ReturnType<typeof useTheme>, width?: number) {
+function renderSelectedQueryDetail(query: QueryExecution, theme: ReturnType<typeof useTheme>, width?: number) {
   switch (query.status) {
     case "success":
-      if ((query.execution?.rows.length ?? 0) === 0) {
+      if (query.rows.length === 0) {
         return renderCenteredState(theme, "No rows returned")
       }
       return (
         <box flexDirection="column" flexGrow={1}>
-          <QueryDetailLabelRow label={formatResultDividerLabel(query.execution?.rows.length ?? 0)} />
-          <ResultsTable rows={query.execution?.rows ?? []} width={width} />
+          <QueryDetailLabelRow label={formatResultDividerLabel(query.rows.length)} />
+          <ResultsTable rows={query.rows} width={width} />
         </box>
       )
     case "pending":
       return renderCenteredState(theme, "Query running", "Results will appear here when it completes.")
     case "cancelled":
-      return renderCenteredState(theme, "Query cancelled", query.execution?.error ?? "Execution was cancelled.")
+      return renderCenteredState(theme, "Query cancelled", query.error ?? "Execution was cancelled.")
     case "error":
-      return renderCenteredState(theme, "Query failed", query.execution?.error ?? "Query failed.")
-  }
-}
-
-function renderFallbackDetailView(detailView: DetailView, theme: ReturnType<typeof useTheme>, width?: number) {
-  switch (detailView.kind) {
-    case "rows":
-      if (detailView.rows.length === 0) {
-        return renderCenteredState(theme, "No rows returned")
-      }
-      return (
-        <box flexDirection="column" flexGrow={1}>
-          <QueryDetailLabelRow label={formatResultDividerLabel(detailView.rows.length)} />
-          <ResultsTable rows={detailView.rows} width={width} />
-        </box>
-      )
-    case "error":
-      return renderCenteredState(theme, detailView.title ?? "Error", detailView.message)
-    case "empty":
-      return renderCenteredState(theme, "No query run selected")
+      return renderCenteredState(theme, "Query failed", query.error ?? "Query failed.")
   }
 }
 
@@ -841,52 +782,19 @@ function QueryDetailLabelRow(props: { label: string }) {
 }
 
 function buildRecentQueries(
-  engine: SqlVisor,
-  activeQueries: ActiveQuery[],
   history: QueryExecution[],
-  selectedQueryId?: string,
+  selectedQueryId: string | null,
   showSystemQueries = false,
-): RecentQuery[] {
-  const activeIds = new Set(activeQueries.map((query) => query.queryId))
-  const runningQueries = [...activeQueries]
-    .sort((a, b) => b.startedAt - a.startedAt)
-    .map((query) => {
-      const state = engine.getQueryState({ queryId: query.queryId })
-      return {
-        queryId: query.queryId,
-        text: state.data?.sql.source ?? query.text,
-        connectionId: state.data?.connectionId ?? query.connectionId,
-        initiator: state.data?.initiator ?? "user",
-        startedAt: state.data?.createdAt ?? query.startedAt,
-        status: state.data?.status ?? "pending",
-        isActive: true,
-        execution: state.data,
-      } satisfies RecentQuery
-    })
-    .filter((query) => showSystemQueries || query.initiator === "user")
-
-  const finishedQueries = history
-    .filter((execution) => showSystemQueries || execution.initiator === "user")
-    .filter((execution) => !activeIds.has(execution.id))
-    .map(
-      (execution) =>
-        ({
-          queryId: execution.id,
-          text: execution.sql.source,
-          connectionId: execution.connectionId,
-          initiator: execution.initiator,
-          startedAt: execution.createdAt,
-          status: execution.status,
-          isActive: false,
-          execution,
-        }) satisfies RecentQuery,
-    )
+): QueryExecution[] {
+  const visibleHistory = history.filter((execution) => showSystemQueries || execution.initiator === "user")
+  const runningQueries = visibleHistory.filter((execution) => execution.status === "pending")
+  const finishedQueries = visibleHistory.filter((execution) => execution.status !== "pending")
   const visibleFinishedQueries = finishedQueries.slice(0, 2)
   const selectedFinishedQuery = selectedQueryId
     ? finishedQueries.find(
         (query) =>
-          query.queryId === selectedQueryId &&
-          !visibleFinishedQueries.some((candidate) => candidate.queryId === selectedQueryId),
+          query.id === selectedQueryId &&
+          !visibleFinishedQueries.some((candidate) => candidate.id === selectedQueryId),
       )
     : undefined
   if (selectedFinishedQuery) {
@@ -900,7 +808,7 @@ function buildRecentQueries(
   return [...runningQueries, ...visibleFinishedQueries]
 }
 
-function recentQueryStatusGlyph(query: RecentQuery): string {
+function recentQueryStatusGlyph(query: QueryExecution): string {
   switch (query.status) {
     case "pending":
       return "…"
@@ -913,7 +821,7 @@ function recentQueryStatusGlyph(query: RecentQuery): string {
   }
 }
 
-function recentQueryStatusColor(query: RecentQuery, theme: ReturnType<typeof useTheme>): string {
+function recentQueryStatusColor(query: QueryExecution, theme: ReturnType<typeof useTheme>): string {
   switch (query.status) {
     case "pending":
       return theme.warningFg
@@ -942,9 +850,9 @@ function formatTime(epochMs: number): string {
   return new Date(epochMs).toLocaleTimeString()
 }
 
-function formatRecentQueryElapsed(query: RecentQuery, now: number): string {
-  const endTime = query.execution?.finishedAt ?? now
-  return formatElapsed(Math.max(0, endTime - query.startedAt))
+function formatRecentQueryElapsed(query: QueryExecution, now: number): string {
+  const endTime = query.finishedAt ?? now
+  return formatElapsed(Math.max(0, endTime - query.createdAt))
 }
 
 function formatElapsed(ms: number): string {

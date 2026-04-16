@@ -53,12 +53,10 @@ export {
 } from "./lib/interface/Adapter"
 export {
   SqlVisor,
-  type ActiveQuery,
   type AddConnectionInput,
   type ConnectionObjectsState,
   type ConnectionsState,
   type ConnectionSuggestionsState,
-  type DetailView,
   type DiscoveredConnectionSuggestion,
   type QueryRef,
   type QueryExecutionState,
